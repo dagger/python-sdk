@@ -1,0 +1,52 @@
+"""
+A Dagger module that uses the Python SDK.
+"""
+type Mod {
+  """
+  Workspace-relative path of this module root.
+  """
+  pub path: String!
+
+  """
+  The workspace this module belongs to.
+  """
+  let ws: Workspace!
+
+  """
+  Marker filename that skips generate when found at or above this module root.
+  """
+  let skipGenerateFilename: String!
+
+  """
+  Whether this module or an ancestor contains the configured generate skip marker.
+  """
+  pub skipGenerate: Boolean! {
+    ws.findUp(name: skipGenerateFilename, from: path) != null
+  }
+
+  """
+  Manage this module's Dagger dependencies.
+  """
+  pub deps: ModDeps! {
+    ModDeps(path: path, ws: ws)
+  }
+
+  """
+  Manage the Dagger engine version required by this module.
+  """
+  pub engine: ModEngine! {
+    ModEngine(path: path, ws: ws)
+  }
+
+  """
+  Generate this module.
+  If the generate skip marker is present, the changeset is empty.
+  """
+  pub generate: Changeset! {
+    if (skipGenerate) {
+      polyfill.workspace(ws).fork.changes
+    } else {
+      polyfill.workspace(ws).moduleSource(path).generate.changes
+    }
+  }
+}

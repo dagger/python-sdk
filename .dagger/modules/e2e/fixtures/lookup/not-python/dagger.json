@@ -1,0 +1,7 @@
+{
+  "name": "not-python",
+  "engineVersion": "latest",
+  "sdk": {
+    "source": "dang"
+  }
+}

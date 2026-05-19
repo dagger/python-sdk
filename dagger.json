@@ -1,0 +1,14 @@
+{
+  "name": "python-sdk",
+  "engineVersion": "v0.20.8",
+  "sdk": {
+    "source": "dang"
+  },
+  "dependencies": [
+    {
+      "name": "polyfill",
+      "source": "https://github.com/dagger/sdk-sdk/polyfill@main",
+      "pin": "d6ab6406586e6b3853b8936b2b3a96bba2554071"
+    }
+  ]
+}
