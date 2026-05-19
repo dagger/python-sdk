@@ -4,6 +4,12 @@
   "sdk": {
     "source": "dang"
   },
+  "toolchains": [
+    {
+      "name": "e2e",
+      "source": ".dagger/modules/e2e"
+    }
+  ],
   "dependencies": [
     {
       "name": "polyfill",

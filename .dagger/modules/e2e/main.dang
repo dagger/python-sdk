@@ -106,6 +106,10 @@ type E2e {
     assert(defaultChanges.modifiedPaths.length == 0, "init unexpectedly modified existing files")
     assert(defaultChanges.removedPaths.length == 0, "init unexpectedly removed files")
     assertContains(defaultChanges.layer.file(defaultPath + "/dagger.json").contents, "\"automaticGitignore\": false", "default init should check in generated files")
+    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "minimal template did not render the module type")
+    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "source: dagger.Directory", "minimal template did not declare a Directory source field")
+    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "def __init__(self, ws: dagger.Workspace)", "minimal template did not declare a Workspace constructor")
+    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "self.source = ws.directory(\"/\")", "minimal template constructor did not assign ws.directory to source")
 
     assertContains(ignoredChanges.layer.file(ignoredPath + "/dagger.json").contents, "\"automaticGitignore\": true", "ignoreGenerated init should configure automatic .gitignore output")
     assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")

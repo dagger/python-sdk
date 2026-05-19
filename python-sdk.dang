@@ -146,11 +146,7 @@ type PythonSdk {
       raise "unknown init template: " + template
     } else {
       let config = "{\n  \"name\": " + toJSON(name) + ",\n  \"engineVersion\": \"latest\",\n  \"sdk\": {\n    \"source\": \"python\"\n  },\n  \"codegen\": {\n    \"automaticGitignore\": " + toJSON(ignoreGenerated) + "\n  }\n}\n"
-      let templateSource = if (selectedTemplate == "legacy") {
-        renderedLegacyTemplate(name)
-      } else {
-        currentModule.source.directory("templates/" + selectedTemplate)
-      }
+      let templateSource = renderedTemplate(name, selectedTemplate)
 
       polyfill.workspace(ws).fork
         .withDirectory(modPath, templateSource)
@@ -160,16 +156,16 @@ type PythonSdk {
   }
 
   """
-  Render the legacy Python template with the requested module name.
+  Render a Python template with the requested module name.
   """
-  let renderedLegacyTemplate(name: String!): Directory! {
+  let renderedTemplate(name: String!, templateName: String!): Directory! {
     container
       .from("golang:1.25-alpine")
       .withoutEntrypoint
       .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
       .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
       .withDirectory("/helper", currentModule.source.directory("helpers/render-template"))
-      .withDirectory("/template", currentModule.source.directory("templates/legacy"))
+      .withDirectory("/template", currentModule.source.directory("templates/" + templateName))
       .withWorkdir("/helper")
       .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
       .withExec(["render-template", name, "/template", "/rendered"])
