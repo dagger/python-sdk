@@ -39,6 +39,13 @@ type Mod {
   }
 
   """
+  Manage this module's Python build configuration (pyproject.toml).
+  """
+  pub config: ModConfig! {
+    ModConfig(path: path, ws: ws)
+  }
+
+  """
   Generate this module.
   If the generate skip marker is present, the changeset is empty.
   """
