@@ -61,21 +61,29 @@ enabled, and no base image override is written.
 
 ## Configure an existing module
 
-Read current configuration:
+Read the current configuration. Settings that are not explicitly written to
+`pyproject.toml` are reported as `null` rather than guessed:
 
 ```sh
-dagger call python-sdk mod --path my-module config python-version
-dagger call python-sdk mod --path my-module config use-uv
-dagger call python-sdk mod --path my-module config base-image
+dagger call python-sdk mod --path my-module config get
 ```
 
-Change configuration (each prints a diff to confirm before writing):
+Select a single value:
 
 ```sh
-dagger call python-sdk mod --path my-module config set-python-version --version 3.13
-dagger call python-sdk mod --path my-module config set-use-uv --enabled=false
-dagger call python-sdk mod --path my-module config set-base-image --image python:3.13-slim
-dagger call python-sdk mod --path my-module config unset-base-image
+dagger call python-sdk mod --path my-module config get python-version
+dagger call python-sdk mod --path my-module config get use-uv
+dagger call python-sdk mod --path my-module config get base-image
+```
+
+Change one or more values at once (prints a diff to confirm before writing).
+Each flag is optional; omitting one leaves that setting untouched:
+
+```sh
+dagger call python-sdk mod --path my-module config set \
+    --python-version 3.13 \
+    --use-uv=false \
+    --base-image python:3.13-slim
 ```
 
 ## Generate SDK files
