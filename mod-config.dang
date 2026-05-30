@@ -1,4 +1,35 @@
 """
+A module's resolved Python SDK configuration.
+
+Each field is null when the corresponding setting is not explicitly written to
+pyproject.toml, so unset values are reported rather than guessed.
+"""
+type ModConfigValues {
+  """
+  The required Python version (e.g. "3.14"), or null when requires-python is unset.
+  """
+  pub pythonVersion: String
+
+  """
+  Whether the module builds with uv (true) instead of pip, or null when unset.
+  When null, the SDK default (uv) applies.
+  """
+  pub useUv: Boolean
+
+  """
+  The base container image override, or null when the SDK default is used.
+  """
+  pub baseImage: String
+
+  new(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null) {
+    self.pythonVersion = pythonVersion
+    self.useUv = useUv
+    self.baseImage = baseImage
+    self
+  }
+}
+
+"""
 Python SDK build configuration stored in a module's pyproject.toml.
 """
 type ModConfig {
@@ -13,52 +44,70 @@ type ModConfig {
   let ws: Workspace!
 
   """
-  The required Python version (e.g. "3.14"), read from requires-python.
+  Read the module's current Python SDK configuration.
+
+  Settings that are not explicitly written to pyproject.toml are reported as
+  null rather than guessed.
   """
-  pub pythonVersion: String! {
-    tool.withExec(["pyproject", "get-python-version", toolPath]).stdout
+  pub get: ModConfigValues! {
+    ModConfigValues(
+      pythonVersion: readPythonVersion,
+      useUv: readUseUv,
+      baseImage: readBaseImage,
+    )
   }
 
   """
-  Whether the module builds with uv (true) instead of pip. Defaults to true.
+  Set one or more configuration values in pyproject.toml at once.
+
+  Each flag is optional; omitting it leaves that setting untouched. Setting
+  useUv to true (the SDK default) writes nothing, keeping the file minimal.
   """
-  pub useUv: Boolean! {
-    tool.withExec(["pyproject", "get-use-uv", toolPath]).stdout == "true"
+  pub set(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null): Changeset! {
+    let withPython = if (pythonVersion != null) {
+      tool.withExec(["pyproject", "set-python-version", toolPath, pythonVersion])
+    } else {
+      tool
+    }
+
+    let withUv = if (useUv != null) {
+      withPython.withExec(["pyproject", "set-use-uv", toolPath, if (useUv) { "true" } else { "false" }])
+    } else {
+      withPython
+    }
+
+    let withImage = if (baseImage != null) {
+      withUv.withExec(["pyproject", "set-base-image", toolPath, baseImage])
+    } else {
+      withUv
+    }
+
+    let edited = withImage.file(toolPath).contents
+    polyfill.workspace(ws).fork.withNewFile(pyprojectPath, edited).changes
   }
 
   """
-  The base container image override, or "" when the SDK default is used.
+  The required Python version from requires-python, or null when unset.
   """
-  pub baseImage: String! {
-    tool.withExec(["pyproject", "get-base-image", toolPath]).stdout
+  let readPythonVersion: String {
+    let value = tool.withExec(["pyproject", "get-python-version", toolPath]).stdout
+    if (value == "") { null } else { value }
   }
 
   """
-  Set the required Python version (writes requires-python = ">=<version>").
+  Whether the module builds with uv, or null when unset.
   """
-  pub setPythonVersion(version: String!): Changeset! {
-    edit(["pyproject", "set-python-version", toolPath, version])
+  let readUseUv: Boolean {
+    let value = tool.withExec(["pyproject", "get-use-uv", toolPath]).stdout
+    if (value == "true") { true } else if (value == "false") { false } else { null }
   }
 
   """
-  Choose between uv (true) and pip (false). true is the default when unset.
+  The base container image override, or null when unset.
   """
-  pub setUseUv(enabled: Boolean!): Changeset! {
-    edit(["pyproject", "set-use-uv", toolPath, if (enabled) { "true" } else { "false" }])
-  }
-
-  """
-  Override the base container image.
-  """
-  pub setBaseImage(image: String!): Changeset! {
-    edit(["pyproject", "set-base-image", toolPath, image])
-  }
-
-  """
-  Remove the base image override and fall back to the SDK default.
-  """
-  pub unsetBaseImage: Changeset! {
-    edit(["pyproject", "unset-base-image", toolPath])
+  let readBaseImage: String {
+    let value = tool.withExec(["pyproject", "get-base-image", toolPath]).stdout
+    if (value == "") { null } else { value }
   }
 
   let pyprojectPath: String! {
@@ -81,13 +130,5 @@ type ModConfig {
       .withWorkdir("/helper")
       .withExec(["go", "build", "-o", "/usr/local/bin/pyproject", "."])
       .withFile(toolPath, ws.directory("/", include: [pyprojectPath]).file(pyprojectPath))
-  }
-
-  """
-  Run an edit command and return the resulting change to pyproject.toml.
-  """
-  let edit(args: [String!]!): Changeset! {
-    let edited = tool.withExec(args).file(toolPath).contents
-    polyfill.workspace(ws).fork.withNewFile(pyprojectPath, edited).changes
   }
 }
