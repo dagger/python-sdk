@@ -57,11 +57,12 @@ func getPythonVersion(doc map[string]any) string {
 	return rp
 }
 
-func getUseUv(doc map[string]any) bool {
-	if v, ok := table(table(doc, "tool"), "dagger")["use-uv"].(bool); ok {
-		return v
-	}
-	return true
+// getUseUv reports the [tool.dagger].use-uv setting and whether it was set at
+// all. Reporting unset (ok == false) lets callers distinguish "not configured"
+// from an explicit choice instead of guessing the uv default.
+func getUseUv(doc map[string]any) (value bool, ok bool) {
+	value, ok = table(table(doc, "tool"), "dagger")["use-uv"].(bool)
+	return value, ok
 }
 
 func getBaseImage(doc map[string]any) string {
@@ -84,10 +85,6 @@ func setUseUv(doc map[string]any, enabled bool) {
 
 func setBaseImage(doc map[string]any, img string) {
 	ensureTable(ensureTable(doc, "tool"), "dagger")["base-image"] = img
-}
-
-func unsetBaseImage(doc map[string]any) {
-	removeDaggerKey(doc, "base-image")
 }
 
 // removeDaggerKey deletes a key from [tool.dagger] and prunes now-empty tables.

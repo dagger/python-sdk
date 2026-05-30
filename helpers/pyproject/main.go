@@ -13,7 +13,7 @@ func main() {
 }
 
 // run dispatches a subcommand. get-* commands print to stdout (no trailing
-// newline). set-*/unset-* commands edit the file in place.
+// newline). set-* commands edit the file in place.
 //
 // usage: pyproject <command> <file> [value]
 func run(args []string) error {
@@ -36,7 +36,11 @@ func run(args []string) error {
 		fmt.Print(getPythonVersion(doc))
 		return nil
 	case "get-use-uv":
-		fmt.Print(boolStr(getUseUv(doc)))
+		// Print nothing when unset so callers can tell an absent setting from
+		// an explicit value, instead of guessing the true default.
+		if v, ok := getUseUv(doc); ok {
+			fmt.Print(boolStr(v))
+		}
 		return nil
 	case "get-base-image":
 		fmt.Print(getBaseImage(doc))
@@ -59,8 +63,6 @@ func run(args []string) error {
 			return err
 		}
 		setBaseImage(doc, v)
-	case "unset-base-image":
-		unsetBaseImage(doc)
 	default:
 		return fmt.Errorf("unknown command: %s", cmd)
 	}

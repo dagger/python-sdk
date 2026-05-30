@@ -49,11 +49,11 @@ func TestGetPythonVersion(t *testing.T) {
 }
 
 func TestGetUseUv(t *testing.T) {
-	if !getUseUv(mustLoad(t, sample)) {
-		t.Error("sample: use-uv should default to true when absent")
+	if _, ok := getUseUv(mustLoad(t, sample)); ok {
+		t.Error("sample: use-uv should report unset when absent")
 	}
-	if getUseUv(mustLoad(t, configured)) {
-		t.Error("configured: use-uv should be false")
+	if v, ok := getUseUv(mustLoad(t, configured)); !ok || v {
+		t.Errorf("configured: use-uv should report set and false, got value=%v ok=%v", v, ok)
 	}
 }
 
@@ -97,8 +97,8 @@ func TestSetUseUvFalseWritesKey(t *testing.T) {
 func TestSetUseUvTrueRemovesKey(t *testing.T) {
 	doc := mustLoad(t, configured)
 	setUseUv(doc, true)
-	if getUseUv(doc) != true {
-		t.Error("use-uv should read back as true after reset")
+	if _, ok := getUseUv(doc); ok {
+		t.Error("use-uv should report unset after reset to the default true")
 	}
 	// removing use-uv must not drop the sibling base-image key.
 	if got := getBaseImage(doc); got != "python:3.12-slim" {
@@ -113,31 +113,11 @@ func TestSetUseUvTrueRemovesKey(t *testing.T) {
 	}
 }
 
-func TestSetBaseImage(t *testing.T) {
-	doc := mustLoad(t, sample)
-	setBaseImage(doc, "python:3.13-slim")
-	if got := getBaseImage(doc); got != "python:3.13-slim" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestUnsetBaseImageRoundTrips(t *testing.T) {
-	doc := mustLoad(t, configured)
-	unsetBaseImage(doc)
-	if got := getBaseImage(doc); got != "" {
-		t.Errorf("base-image should be unset, got %q", got)
-	}
-	// unsetting base-image must not remove the other [tool.dagger] key.
-	if getUseUv(doc) != false {
-		t.Error("unsetBaseImage clobbered use-uv")
-	}
-}
-
-func TestUnsetLastDaggerKeyRemovesTable(t *testing.T) {
+func TestSetUseUvTruePrunesEmptyTable(t *testing.T) {
 	doc := mustLoad(t, `[tool.dagger]
-base-image = "x"
+use-uv = false
 `)
-	unsetBaseImage(doc)
+	setUseUv(doc, true)
 	out, err := dump(doc)
 	if err != nil {
 		t.Fatalf("dump: %v", err)
@@ -146,3 +126,12 @@ base-image = "x"
 		t.Errorf("empty tables should be pruned:\n%s", out)
 	}
 }
+
+func TestSetBaseImage(t *testing.T) {
+	doc := mustLoad(t, sample)
+	setBaseImage(doc, "python:3.13-slim")
+	if got := getBaseImage(doc); got != "python:3.13-slim" {
+		t.Errorf("got %q", got)
+	}
+}
+
