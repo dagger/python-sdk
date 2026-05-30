@@ -226,46 +226,44 @@ type E2e {
   }
 
   """
-  Config readers should reflect pyproject.toml, and mutators should edit only
-  pyproject.toml.
+  config.get should reflect pyproject.toml and report unset values as null
+  rather than guessing, and config.set should edit only pyproject.toml.
   """
   pub configCheck(ws: Workspace!): Void @check {
     let app = pythonSdk.mod(ws, path: configModulePath).config
     let configured = pythonSdk.mod(ws, path: configuredModulePath).config
 
-    assert(app.pythonVersion == "3.14", "default pythonVersion should read 3.14")
-    assert(app.useUv, "useUv should default to true")
-    assert(app.baseImage == "", "baseImage should default to empty")
+    let appValues = app.get
+    assert(appValues.pythonVersion == "3.14", "default pythonVersion should read 3.14")
+    assert(appValues.useUv == null, "useUv should be reported as unset, not guessed")
+    assert(appValues.baseImage == null, "baseImage should be reported as unset")
 
-    assert(configured.pythonVersion == "3.12", "configured pythonVersion should read 3.12")
-    assert(configured.useUv == false, "configured useUv should read false")
-    assert(configured.baseImage == "python:3.12-slim", "configured baseImage should read the override")
+    let configuredValues = configured.get
+    assert(configuredValues.pythonVersion == "3.12", "configured pythonVersion should read 3.12")
+    assert(configuredValues.useUv == false, "configured useUv should read false")
+    assert(configuredValues.baseImage == "python:3.12-slim", "configured baseImage should read the override")
 
     let pyproj = configModulePath + "/pyproject.toml"
 
-    let py = app.setPythonVersion("3.13")
-    assert(contains(py.modifiedPaths, pyproj), "setPythonVersion should modify pyproject.toml")
-    assert(py.modifiedPaths.length == 1, "setPythonVersion modified more than pyproject.toml")
-    assert(py.addedPaths.length == 0, "setPythonVersion should not add files")
-    assertContains(py.after.file(pyproj).contents, ">=3.13", "setPythonVersion did not write the new version")
-    assertContains(py.after.file(pyproj).contents, "dagger-io", "setPythonVersion dropped unrelated keys")
+    let py = app.set(pythonVersion: "3.13")
+    assert(contains(py.modifiedPaths, pyproj), "set should modify pyproject.toml")
+    assert(py.modifiedPaths.length == 1, "set modified more than pyproject.toml")
+    assert(py.addedPaths.length == 0, "set should not add files")
+    assertContains(py.after.file(pyproj).contents, ">=3.13", "set did not write the new python version")
+    assertContains(py.after.file(pyproj).contents, "dagger-io", "set dropped unrelated keys")
 
-    let uv = app.setUseUv(false)
-    assert(uv.modifiedPaths.length == 1, "setUseUv modified more than pyproject.toml")
-    assert(uv.addedPaths.length == 0, "setUseUv should not add files")
-    assertContains(uv.after.file(pyproj).contents, "use-uv = false", "setUseUv(false) did not write the key")
-
-    let img = app.setBaseImage("python:3.13-slim")
-    assert(img.modifiedPaths.length == 1, "setBaseImage modified more than pyproject.toml")
-    assert(img.addedPaths.length == 0, "setBaseImage should not add files")
-    assertContains(img.after.file(pyproj).contents, "python:3.13-slim", "setBaseImage did not write the image")
+    let multi = app.set(pythonVersion: "3.13", useUv: false, baseImage: "python:3.13-slim")
+    assert(multi.modifiedPaths.length == 1, "multi-value set modified more than pyproject.toml")
+    assert(multi.addedPaths.length == 0, "multi-value set should not add files")
+    assertContains(multi.after.file(pyproj).contents, ">=3.13", "multi-value set did not write python version")
+    assertContains(multi.after.file(pyproj).contents, "use-uv = false", "multi-value set did not write use-uv")
+    assertContains(multi.after.file(pyproj).contents, "python:3.13-slim", "multi-value set did not write base image")
 
     let configuredPyproj = configuredModulePath + "/pyproject.toml"
-    let unset = configured.unsetBaseImage
-    assert(unset.modifiedPaths.length == 1, "unsetBaseImage modified more than pyproject.toml")
-    assert(unset.addedPaths.length == 0, "unsetBaseImage should not add files")
-    assertNotContains(unset.after.file(configuredPyproj).contents, "base-image =", "unsetBaseImage left the override")
-    assertContains(unset.after.file(configuredPyproj).contents, "use-uv = false", "unsetBaseImage clobbered use-uv")
+    let partial = configured.set(pythonVersion: "3.13")
+    assertContains(partial.after.file(configuredPyproj).contents, ">=3.13", "partial set did not update python version")
+    assertContains(partial.after.file(configuredPyproj).contents, "use-uv = false", "omitting useUv should leave it untouched")
+    assertContains(partial.after.file(configuredPyproj).contents, "python:3.12-slim", "omitting baseImage should leave it untouched")
 
     null
   }
