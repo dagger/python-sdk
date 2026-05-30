@@ -1,0 +1,134 @@
+"""
+A module's resolved Python SDK configuration.
+
+Each field is null when the corresponding setting is not explicitly written to
+pyproject.toml, so unset values are reported rather than guessed.
+"""
+type ModConfigValues {
+  """
+  The required Python version (e.g. "3.14"), or null when requires-python is unset.
+  """
+  pub pythonVersion: String
+
+  """
+  Whether the module builds with uv (true) instead of pip, or null when unset.
+  When null, the SDK default (uv) applies.
+  """
+  pub useUv: Boolean
+
+  """
+  The base container image override, or null when the SDK default is used.
+  """
+  pub baseImage: String
+
+  new(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null) {
+    self.pythonVersion = pythonVersion
+    self.useUv = useUv
+    self.baseImage = baseImage
+    self
+  }
+}
+
+"""
+Python SDK build configuration stored in a module's pyproject.toml.
+"""
+type ModConfig {
+  """
+  Workspace-relative path of the module root.
+  """
+  let path: String!
+
+  """
+  The workspace this module belongs to.
+  """
+  let ws: Workspace!
+
+  """
+  Read the module's current Python SDK configuration.
+
+  Settings that are not explicitly written to pyproject.toml are reported as
+  null rather than guessed.
+  """
+  pub get: ModConfigValues! {
+    ModConfigValues(
+      pythonVersion: readPythonVersion,
+      useUv: readUseUv,
+      baseImage: readBaseImage,
+    )
+  }
+
+  """
+  Set one or more configuration values in pyproject.toml at once.
+
+  Each flag is optional; omitting it leaves that setting untouched. Setting
+  useUv to true (the SDK default) writes nothing, keeping the file minimal.
+  """
+  pub set(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null): Changeset! {
+    let withPython = if (pythonVersion != null) {
+      tool.withExec(["pyproject", "set-python-version", toolPath, pythonVersion])
+    } else {
+      tool
+    }
+
+    let withUv = if (useUv != null) {
+      withPython.withExec(["pyproject", "set-use-uv", toolPath, if (useUv) { "true" } else { "false" }])
+    } else {
+      withPython
+    }
+
+    let withImage = if (baseImage != null) {
+      withUv.withExec(["pyproject", "set-base-image", toolPath, baseImage])
+    } else {
+      withUv
+    }
+
+    let edited = withImage.file(toolPath).contents
+    polyfill.workspace(ws).fork.withNewFile(pyprojectPath, edited).changes
+  }
+
+  """
+  The required Python version from requires-python, or null when unset.
+  """
+  let readPythonVersion: String {
+    let value = tool.withExec(["pyproject", "get-python-version", toolPath]).stdout
+    if (value == "") { null } else { value }
+  }
+
+  """
+  Whether the module builds with uv, or null when unset.
+  """
+  let readUseUv: Boolean {
+    let value = tool.withExec(["pyproject", "get-use-uv", toolPath]).stdout
+    if (value == "true") { true } else if (value == "false") { false } else { null }
+  }
+
+  """
+  The base container image override, or null when unset.
+  """
+  let readBaseImage: String {
+    let value = tool.withExec(["pyproject", "get-base-image", toolPath]).stdout
+    if (value == "") { null } else { value }
+  }
+
+  let pyprojectPath: String! {
+    if (path == ".") { "pyproject.toml" } else { path + "/pyproject.toml" }
+  }
+
+  let toolPath: String! = "/work/pyproject.toml"
+
+  """
+  Container with the pyproject helper built and the module's pyproject.toml
+  mounted at toolPath.
+  """
+  let tool: Container! {
+    container
+      .from("golang:1.25-alpine")
+      .withoutEntrypoint
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withDirectory("/helper", currentModule.source.directory("helpers/pyproject"))
+      .withWorkdir("/helper")
+      .withExec(["go", "build", "-o", "/usr/local/bin/pyproject", "."])
+      .withFile(toolPath, ws.directory("/", include: [pyprojectPath]).file(pyprojectPath))
+  }
+}
