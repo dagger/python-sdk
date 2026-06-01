@@ -116,8 +116,12 @@ type PythonSdk {
   By default, future generated SDK files are checked into version control. Pass
   `ignoreGenerated` to configure generation to add generated SDK paths to
   .gitignore instead.
+
+  Pass `pythonVersion`, `useUv`, or `baseImage` to customize the generated
+  pyproject.toml. Defaults leave the template untouched: the template's Python
+  version is used, uv is enabled, and no base image override is written.
   """
-  pub init(ws: Workspace!, name: String!, path: String! = "", template: String! = "", ignoreGenerated: Boolean! = false): Changeset! {
+  pub init(ws: Workspace!, name: String!, path: String! = "", template: String! = "", ignoreGenerated: Boolean! = false, pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
     let rawPath = if (path == "") {
       let daggerDir = ws.findUp(".dagger", ".")
       if (daggerDir == null) {
@@ -146,7 +150,7 @@ type PythonSdk {
       raise "unknown init template: " + template
     } else {
       let config = "{\n  \"name\": " + toJSON(name) + ",\n  \"engineVersion\": \"latest\",\n  \"sdk\": {\n    \"source\": \"python\"\n  },\n  \"codegen\": {\n    \"automaticGitignore\": " + toJSON(ignoreGenerated) + "\n  }\n}\n"
-      let templateSource = renderedTemplate(name, selectedTemplate)
+      let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
 
       polyfill.workspace(ws).fork
         .withDirectory(modPath, templateSource)
@@ -170,6 +174,34 @@ type PythonSdk {
       .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
       .withExec(["render-template", name, "/template", "/rendered"])
       .directory("/rendered")
+  }
+
+  """
+  Apply non-default configuration flags to a rendered template's pyproject.toml.
+
+  When all flags are at their defaults, the source is returned unchanged (no
+  helper run, no reformatting). When any flag is non-default, the helper
+  re-marshals pyproject.toml, normalizing formatting while preserving all data.
+  """
+  let configuredTemplate(source: Directory!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
+    if (pythonVersion == "" and useUv and baseImage == "") {
+      source
+    } else {
+      let pyproj = "/rendered/pyproject.toml"
+      let built = container
+        .from("golang:1.25-alpine")
+        .withoutEntrypoint
+        .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+        .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+        .withDirectory("/helper", currentModule.source.directory("helpers/pyproject"))
+        .withWorkdir("/helper")
+        .withExec(["go", "build", "-o", "/usr/local/bin/pyproject", "."])
+        .withDirectory("/rendered", source)
+      let withPy = if (pythonVersion == "") { built } else { built.withExec(["pyproject", "set-python-version", pyproj, pythonVersion]) }
+      let withUv = if (useUv) { withPy } else { withPy.withExec(["pyproject", "set-use-uv", pyproj, "false"]) }
+      let withImg = if (baseImage == "") { withUv } else { withUv.withExec(["pyproject", "set-base-image", pyproj, baseImage]) }
+      withImg.directory("/rendered")
+    }
   }
 
   """

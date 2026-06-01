@@ -1,0 +1,7 @@
+{
+  "name": "config-configured",
+  "engineVersion": "latest",
+  "sdk": {
+    "source": "python"
+  }
+}

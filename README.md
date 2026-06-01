@@ -45,6 +45,47 @@ dagger call python-sdk init --name my-module --template legacy
 `init` only seeds template files. Run `mod ... generate` to produce the
 generated SDK.
 
+### Configure a module at creation
+
+`init` accepts configuration flags written into the module's `pyproject.toml`:
+
+```sh
+dagger call python-sdk init --name my-module \
+    --python-version 3.13 \
+    --use-uv=false \
+    --base-image python:3.13-slim
+```
+
+All three are optional. By default the template's Python version is used, uv is
+enabled, and no base image override is written.
+
+## Configure an existing module
+
+Read the current configuration. Settings that are not explicitly written to
+`pyproject.toml` are reported as `null` rather than guessed:
+
+```sh
+dagger call python-sdk mod --path my-module config get
+```
+
+Select a single value:
+
+```sh
+dagger call python-sdk mod --path my-module config get python-version
+dagger call python-sdk mod --path my-module config get use-uv
+dagger call python-sdk mod --path my-module config get base-image
+```
+
+Change one or more values at once (prints a diff to confirm before writing).
+Each flag is optional; omitting one leaves that setting untouched:
+
+```sh
+dagger call python-sdk mod --path my-module config set \
+    --python-version 3.13 \
+    --use-uv=false \
+    --base-image python:3.13-slim
+```
+
 ## Generate SDK files
 
 For a single module:
