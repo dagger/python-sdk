@@ -25,20 +25,6 @@ type Mod {
   }
 
   """
-  Manage this module's Dagger dependencies.
-  """
-  pub deps: ModDeps! {
-    ModDeps(path: path, ws: ws)
-  }
-
-  """
-  Manage the Dagger engine version required by this module.
-  """
-  pub engine: ModEngine! {
-    ModEngine(path: path, ws: ws)
-  }
-
-  """
   Manage this module's Python build configuration (pyproject.toml).
   """
   pub config: ModConfig! {

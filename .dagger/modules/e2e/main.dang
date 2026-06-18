@@ -58,16 +58,6 @@ type E2e {
   }
 
   """
-  Assert that a dependency edit modified only dagger.json.
-  """
-  let assertOnlyConfigChanged(changes: Changeset!, path: String!): Void {
-    assert(contains(changes.modifiedPaths, path), "dependency edit did not modify dagger.json")
-    assert(changes.modifiedPaths.length == 1, "dependency edit modified more than dagger.json")
-    assert(changes.addedPaths.length == 0, "dependency edit should not add generated files")
-    assert(changes.removedPaths.length == 0, "dependency edit should not remove generated files")
-  }
-
-  """
   The helper should expose the generate skip marker used by callers.
   """
   pub skipGenerateFilenameCheck: Void @check {
@@ -90,30 +80,27 @@ type E2e {
   }
 
   """
-  Init should seed template files without running codegen. Generated SDK files
-  appear later via mod.generate.
+  initModule should seed SDK-owned template files without running codegen and
+  without writing engine-owned files (dagger.json / dagger-module.toml).
+  Generated SDK files appear later via mod.generate.
   """
   pub initCheck(ws: Workspace!): Void @check {
     let defaultPath = outputRoot + "/init-default"
-    let ignoredPath = outputRoot + "/init-ignore-generated"
     let legacyPath = outputRoot + "/init-legacy"
 
-    let defaultChanges = pythonSdk.init(ws, name: "init-default", path: defaultPath)
-    let ignoredChanges = pythonSdk.init(ws, name: "init-ignore-generated", path: ignoredPath, ignoreGenerated: true)
-    let legacyChanges = pythonSdk.init(ws, name: "init-legacy", path: legacyPath, template: "legacy")
+    let defaultChanges = pythonSdk.initModule(ws, name: "init-default", path: defaultPath)
+    let legacyChanges = pythonSdk.initModule(ws, name: "init-legacy", path: legacyPath, template: "legacy")
 
-    assertAdded(defaultChanges, defaultPath + "/dagger.json")
     assertAdded(defaultChanges, defaultPath + "/pyproject.toml")
+    assert(contains(defaultChanges.addedPaths, defaultPath + "/dagger.json") == false, "initModule should not write the engine-owned dagger.json")
     assert(contains(defaultChanges.addedPaths, defaultPath + "/" + generatedMarkerPath) == false, "init should not produce SDK-generated files")
     assert(defaultChanges.modifiedPaths.length == 0, "init unexpectedly modified existing files")
     assert(defaultChanges.removedPaths.length == 0, "init unexpectedly removed files")
-    assertContains(defaultChanges.layer.file(defaultPath + "/dagger.json").contents, "\"automaticGitignore\": false", "default init should check in generated files")
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "minimal template did not render the module type")
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "source: dagger.Directory", "minimal template did not declare a Directory source field")
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "def __init__(self, ws: dagger.Workspace)", "minimal template did not declare a Workspace constructor")
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "self.source = ws.directory(\"/\")", "minimal template constructor did not assign ws.directory to source")
 
-    assertContains(ignoredChanges.layer.file(ignoredPath + "/dagger.json").contents, "\"automaticGitignore\": true", "ignoreGenerated init should configure automatic .gitignore output")
     assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")
 
     null
@@ -161,66 +148,10 @@ type E2e {
   }
 
   """
-  Engine version helpers should read dagger.json and write normalized versions.
+  The SDK should report the builtin runtime that modules it authors target.
   """
-  pub engineVersionCheck(ws: Workspace!): Void @check {
-    let engine = pythonSdk.mod(ws, path: lookupModulePath).engine
-    let fixed = engine.require(version: "0.21.0")
-    let latest = engine.requireLatest
-
-    assert(engine.required == "0.20.8", "engine.required should trim a leading v")
-    assertContains(fixed.layer.file(lookupModulePath + "/dagger.json").contents, "\"engineVersion\": \"v0.21.0\"", "engine.require should write a normalized version")
-    assertContains(latest.layer.file(lookupModulePath + "/dagger.json").contents, "\"engineVersion\": \"latest\"", "engine.requireLatest should write latest")
-
-    null
-  }
-
-  """
-  Dependency listing should preserve how users identify dependencies: string
-  entries return their source, named object entries return their name.
-  """
-  pub dependencyListCheck(ws: Workspace!): Void @check {
-    let deps = pythonSdk.mod(ws, path: depsModulePath).deps.list
-
-    assert(contains(deps, "../dep-string"), "string dependency source was not listed")
-    assert(contains(deps, "dep-named"), "named dependency was not listed")
-    assert(contains(deps, "../dep-source-only"), "source-only dependency was not listed by source")
-
-    null
-  }
-
-  """
-  Dependency edits should update only dagger.json. Users run generate
-  separately when they want generated SDK files refreshed.
-  """
-  pub dependencyEditCheck(ws: Workspace!): Void @check {
-    let deps = pythonSdk.mod(ws, path: depsModulePath).deps
-
-    let added = deps.add(source: "../dep-new")
-    assertOnlyConfigChanged(added, depsModulePath + "/dagger.json")
-    let addedConfig = added.after.file(depsModulePath + "/dagger.json").contents
-    assertContains(addedConfig, "\"../dep-new\"", "adding an unnamed dependency did not keep its source")
-    assertNotContains(addedConfig, "\"name\": \"dep-new\"", "adding an unnamed dependency should not load the module to discover its name")
-
-    let named = deps.add(source: "../dep-new", name: "dep-alias")
-    assertOnlyConfigChanged(named, depsModulePath + "/dagger.json")
-    let namedConfig = named.after.file(depsModulePath + "/dagger.json").contents
-    assertContains(namedConfig, "\"name\": \"dep-alias\"", "adding a named dependency did not keep the requested name")
-    assertContains(namedConfig, "\"source\": \"../dep-new\"", "adding a named dependency did not keep its relative source")
-
-    let removed = deps.remove(name: "dep-named")
-    assertOnlyConfigChanged(removed, depsModulePath + "/dagger.json")
-    let removedConfig = removed.after.file(depsModulePath + "/dagger.json").contents
-    assertNotContains(removedConfig, "\"name\": \"dep-named\"", "removing a named dependency left it in dagger.json")
-
-    let sourceRemoved = deps.remove(name: "../dep-source-only")
-    assertOnlyConfigChanged(sourceRemoved, depsModulePath + "/dagger.json")
-    let sourceRemovedConfig = sourceRemoved.after.file(depsModulePath + "/dagger.json").contents
-    assertNotContains(sourceRemovedConfig, "\"source\": \"../dep-source-only\"", "removing by source left the dependency in dagger.json")
-    assertContains(sourceRemovedConfig, "\"name\": \"dep-named\"", "removing by source removed a different dependency")
-
-    let updated = deps.update
-    assert(updated.isEmpty, "updating only local dependencies should not edit dagger.json")
+  pub targetRuntimeCheck: Void @check {
+    assert(pythonSdk.targetRuntime == "python", "targetRuntime should be the python builtin runtime")
 
     null
   }
@@ -276,7 +207,7 @@ type E2e {
     let configuredPath = outputRoot + "/init-configured"
     let defaultPath = outputRoot + "/init-config-default"
 
-    let configured = pythonSdk.init(ws, name: "init-configured", path: configuredPath, pythonVersion: "3.13", useUv: false, baseImage: "python:3.13-slim")
+    let configured = pythonSdk.initModule(ws, name: "init-configured", path: configuredPath, pythonVersion: "3.13", useUv: false, baseImage: "python:3.13-slim")
     let pyproj = configuredPath + "/pyproject.toml"
     assertAdded(configured, pyproj)
     assert(configured.modifiedPaths.length == 0, "configured init should not modify existing files")
@@ -286,7 +217,7 @@ type E2e {
     assertContains(configured.layer.file(pyproj).contents, "python:3.13-slim", "init --base-image not written")
     assertContains(configured.layer.file(pyproj).contents, "dagger-io", "init config dropped template data")
 
-    let default = pythonSdk.init(ws, name: "init-config-default", path: defaultPath)
+    let default = pythonSdk.initModule(ws, name: "init-config-default", path: defaultPath)
     let defaultPyproj = defaultPath + "/pyproject.toml"
     assertContains(default.layer.file(defaultPyproj).contents, ">=3.14", "default init should keep the template python version")
     assertNotContains(default.layer.file(defaultPyproj).contents, "use-uv", "default init should not write use-uv")
