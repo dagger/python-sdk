@@ -8,7 +8,7 @@
     {
       "name": "polyfill",
       "source": "https://github.com/dagger/sdk-sdk/polyfill@main",
-      "pin": "09da9576688ec4b495ae4a9443a4719da86ed25e"
+      "pin": "d1532df4f7d322a7bdab02487accde9d21bbb464"
     }
   ]
 }
