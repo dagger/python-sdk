@@ -225,4 +225,34 @@ type E2e {
 
     null
   }
+
+  """
+  Workspace-scoped SDK settings (the PythonSdk constructor args, surfaced by
+  `dagger settings python-sdk`) should act as init defaults: when an init flag
+  is omitted, initModule inherits the constructor value, and an explicit
+  per-init flag still wins.
+  """
+  pub initSettingsDefaultCheck(ws: Workspace!): Void @check {
+    let configuredSdk = pythonSdk(defaultPythonVersion: "3.13", defaultUseUv: false, defaultBaseImage: "python:3.13-slim")
+
+    # Flags omitted: the constructor (workspace) defaults flow into pyproject.toml.
+    let inheritedPath = outputRoot + "/init-settings-inherited"
+    let inherited = configuredSdk.initModule(ws, name: "init-settings-inherited", path: inheritedPath)
+    let inheritedPyproj = inheritedPath + "/pyproject.toml"
+    assertAdded(inherited, inheritedPyproj)
+    assertContains(inherited.layer.file(inheritedPyproj).contents, ">=3.13", "default-python-version setting not applied at init")
+    assertContains(inherited.layer.file(inheritedPyproj).contents, "use-uv = false", "default-use-uv setting not applied at init")
+    assertContains(inherited.layer.file(inheritedPyproj).contents, "python:3.13-slim", "default-base-image setting not applied at init")
+    assertContains(inherited.layer.file(inheritedPyproj).contents, "dagger-io", "settings-default init dropped template data")
+
+    # Explicit per-init flags override the workspace defaults.
+    let overridePath = outputRoot + "/init-settings-override"
+    let override = configuredSdk.initModule(ws, name: "init-settings-override", path: overridePath, pythonVersion: "3.12", useUv: true, baseImage: "python:3.12-slim")
+    let overridePyproj = overridePath + "/pyproject.toml"
+    assertContains(override.layer.file(overridePyproj).contents, ">=3.12", "per-init python version did not override default-python-version")
+    assertContains(override.layer.file(overridePyproj).contents, "python:3.12-slim", "per-init base image did not override default-base-image")
+    assertNotContains(override.layer.file(overridePyproj).contents, "use-uv = false", "per-init use-uv=true did not override default-use-uv=false")
+
+    null
+  }
 }

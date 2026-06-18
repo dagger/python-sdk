@@ -13,6 +13,48 @@ type PythonSdk {
   pub targetRuntime: String! = "python"
 
   """
+  Workspace default Python version applied to modules this SDK creates.
+
+  Surfaced as the `default-python-version` setting of
+  `dagger settings python-sdk`. Empty leaves the template's Python version
+  untouched. `initModule` falls back to this when `--python-version` is omitted.
+  """
+  pub defaultPythonVersion: String!
+
+  """
+  Workspace default for building modules with uv (true) instead of pip.
+
+  Surfaced as the `default-use-uv` setting of `dagger settings python-sdk`.
+  `initModule` falls back to this when `--use-uv` is omitted.
+  """
+  pub defaultUseUv: Boolean!
+
+  """
+  Workspace default base container image for modules this SDK creates.
+
+  Surfaced as the `default-base-image` setting of `dagger settings python-sdk`.
+  Empty writes no base image override. `initModule` falls back to this when
+  `--base-image` is omitted.
+  """
+  pub defaultBaseImage: String!
+
+  """
+  Construct the SDK with its workspace-scoped settings.
+
+  The engine populates these constructor arguments from
+  `[modules.python-sdk.settings]`, and `dagger settings python-sdk` surfaces
+  them as typed settings (camelCase maps to kebab-case on the CLI:
+  default-python-version, default-use-uv, default-base-image). They act as
+  defaults that `initModule` applies when the matching per-init flag is omitted.
+  """
+  new(defaultPythonVersion: String! = "", defaultUseUv: Boolean! = true, defaultBaseImage: String! = "") {
+    self.defaultPythonVersion = defaultPythonVersion
+    self.defaultUseUv = defaultUseUv
+    self.defaultBaseImage = defaultBaseImage
+    self
+  }
+
+  """
   Return every legacy dagger.json Dagger module whose sdk.source is "python".
 
   This discovery path is obsolete for workspace-managed modules; the engine
@@ -118,10 +160,12 @@ type PythonSdk {
   default uses this module's minimal template.
 
   Pass `pythonVersion`, `useUv`, or `baseImage` to customize the generated
-  pyproject.toml. Defaults leave the template untouched: the template's Python
+  pyproject.toml. When one is omitted, the matching workspace setting
+  (`default-python-version`, `default-use-uv`, `default-base-image`) applies. If
+  that is also unset the template is left untouched: the template's Python
   version is used, uv is enabled, and no base image override is written.
   """
-  pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "", pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
+  pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "", pythonVersion: String! = "", useUv: Boolean = null, baseImage: String! = ""): Changeset! {
     let rawPath = path.trimPrefix("./").trimPrefix("/")
 
     let modPath = if (rawPath == "" or rawPath == ".") {
@@ -137,7 +181,12 @@ type PythonSdk {
     if (currentModule.source.exists("templates/" + selectedTemplate) == false) {
       raise "unknown init template: " + template
     } else {
-      let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
+      # Per-init flags win; otherwise fall back to the workspace-scoped defaults.
+      let effectivePythonVersion = if (pythonVersion == "") { defaultPythonVersion } else { pythonVersion }
+      let effectiveUseUv = if (useUv != null) { useUv } else { defaultUseUv }
+      let effectiveBaseImage = if (baseImage == "") { defaultBaseImage } else { baseImage }
+
+      let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), effectivePythonVersion, effectiveUseUv, effectiveBaseImage)
 
       polyfill.workspace(ws).fork
         .withDirectory(modPath, templateSource)
