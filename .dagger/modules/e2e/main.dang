@@ -157,6 +157,18 @@ type E2e {
   }
 
   """
+  initClient should not materialize files itself. The engine records the client
+  and owns the generated context changeset.
+  """
+  pub initClientCheck(ws: Workspace!): Void @check {
+    let changes = pythonSdk.initClient(ws, path: outputRoot + "/client", module: generateModulePath, dev: true)
+
+    assert(changes.isEmpty, "initClient should return an empty SDK changeset")
+
+    null
+  }
+
+  """
   config.get should reflect pyproject.toml and report unset values as null
   rather than guessing, and config.set should edit only pyproject.toml.
   """
