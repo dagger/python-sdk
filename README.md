@@ -60,6 +60,36 @@ engine supplies it in the dispatched path):
 dagger call python-sdk init-module --name my-module --path .dagger/modules/my-module
 ```
 
+## Configure workspace defaults
+
+Set SDK defaults once per workspace and have them apply to the modules you
+create. List the settings this SDK exposes:
+
+```sh
+dagger settings python-sdk
+```
+
+Set a default (the SDK's constructor arguments are the settings; camelCase maps
+to kebab-case on the CLI):
+
+```sh
+dagger settings python-sdk default-python-version 3.13
+dagger settings python-sdk default-use-uv false
+dagger settings python-sdk default-base-image python:3.13-slim
+```
+
+These act as fallbacks for `initModule`: when you create a module without the
+matching `dagger module init python` flag (`--python-version`, `--use-uv`,
+`--base-image`), the workspace default is applied. An explicit per-init flag
+always wins.
+
+> [!NOTE]
+> Settings are stored under `[modules.python-sdk.settings]` in `dagger.toml`,
+> are discoverable and typed today, and populate the SDK constructor on the
+> `dagger call python-sdk …` path. Inheriting them through the privileged
+> `dagger module init python` dispatch additionally requires the engine to
+> thread `[modules.python-sdk.settings]` into the SDK at init time.
+
 ## Configure an existing module
 
 Read the current configuration. Settings that are not explicitly written to
