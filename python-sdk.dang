@@ -211,7 +211,9 @@ type PythonSdk {
   pub generateAll(ws: Workspace!): Changeset! @generate {
     let pws = polyfill.workspace(ws)
 
-    modules(ws)
+    currentModule.asSDK.modules
+      .{path}
+      .map { m => Mod(path: m.path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
       .filter { mod => mod.skipGenerate == false }
       .reduce(pws.fork) { fork, mod =>
         fork.merge(pws.moduleSource(mod.path).generate)
