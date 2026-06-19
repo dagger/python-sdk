@@ -8,7 +8,15 @@ type PythonSdk {
   pub skipGenerateFilename: String! = ".dagger-python-sdk-skip-generate"
 
   """
-  Return every Dagger module whose sdk.source is "python".
+  Runtime source to write into modules created by this SDK.
+  """
+  pub targetRuntime: String! { "python" }
+
+  """
+  Return every legacy dagger.json Dagger module whose sdk.source is "python".
+
+  This discovery path is obsolete for workspace-managed modules; the engine
+  owns the modules.<sdk>.as-sdk.modules source of truth.
   """
   pub modules(ws: Workspace!): [Mod!]! {
     ws
@@ -100,38 +108,21 @@ type PythonSdk {
   }
 
   """
-  Create a new Python SDK Dagger module and return the files to write.
+  Initialize Python-owned files for a new Dagger module.
 
-  By default, the new module is created under the nearest `.dagger` directory
-  visible from the current workspace path:
-
-    <nearest .dagger>/modules/<name>
-
-  Pass `path` to choose a different module location. The target path must not
-  already contain a Dagger module.
+  Returns a Changeset with only the SDK-owned template files layered onto the
+  new module's `path`. Engine-owned files (dagger-module.toml, workspace config
+  updates) are produced by the engine and merged with this changeset.
 
   Pass `template` to materialize files from templates/<template>. The empty
   default uses this module's minimal template.
-
-  By default, future generated SDK files are checked into version control. Pass
-  `ignoreGenerated` to configure generation to add generated SDK paths to
-  .gitignore instead.
 
   Pass `pythonVersion`, `useUv`, or `baseImage` to customize the generated
   pyproject.toml. Defaults leave the template untouched: the template's Python
   version is used, uv is enabled, and no base image override is written.
   """
-  pub init(ws: Workspace!, name: String!, path: String! = "", template: String! = "", ignoreGenerated: Boolean! = false, pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
-    let rawPath = if (path == "") {
-      let daggerDir = ws.findUp(".dagger", ".")
-      if (daggerDir == null) {
-        ".dagger/modules/" + name
-      } else {
-        daggerDir.trimPrefix("/") + "/modules/" + name
-      }
-    } else {
-      path.trimPrefix("./").trimPrefix("/")
-    }
+  pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "", pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
+    let rawPath = path.trimPrefix("./").trimPrefix("/")
 
     let modPath = if (rawPath == "" or rawPath == ".") {
       "."
@@ -141,22 +132,27 @@ type PythonSdk {
       rawPath.trimSuffix("/")
     }
 
-    let configPath = if (modPath == ".") { "dagger.json" } else { modPath + "/dagger.json" }
     let selectedTemplate = if (template == "") { "minimal" } else { template }
 
-    if (ws.directory("/", include: [configPath]).exists(configPath)) {
-      raise "module already exists: " + modPath
-    } else if (currentModule.source.exists("templates/" + selectedTemplate) == false) {
+    if (currentModule.source.exists("templates/" + selectedTemplate) == false) {
       raise "unknown init template: " + template
     } else {
-      let config = "{\n  \"name\": " + toJSON(name) + ",\n  \"engineVersion\": \"latest\",\n  \"sdk\": {\n    \"source\": \"python\"\n  },\n  \"codegen\": {\n    \"automaticGitignore\": " + toJSON(ignoreGenerated) + "\n  }\n}\n"
       let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
 
       polyfill.workspace(ws).fork
         .withDirectory(modPath, templateSource)
-        .withNewFile(configPath, config)
         .changes
     }
+  }
+
+  """
+  Generate a typed Python client for `module` at `path`.
+
+  The engine records the managed client in workspace config before calling
+  this function. The engine owns materializing the generated client files.
+  """
+  pub initClient(ws: Workspace!, path: String!, module: String!, dev: Boolean! = false): Changeset! {
+    polyfill.workspace(ws).fork.changes
   }
 
   """
@@ -205,7 +201,11 @@ type PythonSdk {
   }
 
   """
-  Generate all discovered Python SDK modules.
+  Generate all discovered legacy dagger.json Python SDK modules.
+
+  This discovery path is obsolete for workspace-managed modules; the engine
+  owns the modules.<sdk>.as-sdk.modules source of truth.
+
   Modules with the generate skip marker are skipped.
   """
   pub generateAll(ws: Workspace!): Changeset! @generate {

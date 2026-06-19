@@ -2,9 +2,13 @@
 
 A Dagger module for managing Dagger modules that use the Python SDK.
 
-The Dagger CLI ships without built-in module-management commands like
-`init` or `develop`. Those operations live in SDK-specific modules like this
-one, called through `dagger call`.
+SDK-specific module authoring (scaffolding new modules, language build config,
+codegen) lives in modules like this one. Under the CLI 1.0 init contract the
+engine drives the SDK: this module exposes `initModule` and `targetRuntime`,
+and the engine merges the SDK-owned files with its own workspace bookkeeping.
+Shared, language-agnostic operations — editing a module's dependencies or its
+required engine version — are owned by the core CLI (`dagger module deps`,
+`dagger module engine`) and are no longer part of this module's surface.
 
 Backed by [`github.com/dagger/sdk-sdk/polyfill`](https://github.com/dagger/sdk-sdk/tree/main/polyfill).
 
@@ -23,41 +27,38 @@ before writing anything to your workspace.
 
 ## Create a new module
 
-Create a Python SDK module under the nearest `.dagger/modules/<name>/`:
+With a CLI that supports the 1.0 init contract, the engine dispatches to this
+SDK's `initModule`:
 
 ```sh
-dagger call python-sdk init --name my-module
+dagger module init python my-module
 ```
 
-Pick a different location:
+`initModule` only seeds the SDK-owned template files; the engine writes the
+module config and workspace entries. Run `generate` afterwards to produce the
+generated SDK bindings.
+
+The SDK-specific args below become typed flags on `dagger module init python`:
 
 ```sh
-dagger call python-sdk init --name my-module --path some/dir/my-module
-```
-
-Pick a starter template (`minimal` is the default; `legacy` gives you a
-container-echo example):
-
-```sh
-dagger call python-sdk init --name my-module --template legacy
-```
-
-`init` only seeds template files. Run `mod ... generate` to produce the
-generated SDK.
-
-### Configure a module at creation
-
-`init` accepts configuration flags written into the module's `pyproject.toml`:
-
-```sh
-dagger call python-sdk init --name my-module \
+dagger module init python my-module --template legacy
+dagger module init python my-module \
     --python-version 3.13 \
     --use-uv=false \
     --base-image python:3.13-slim
 ```
 
-All three are optional. By default the template's Python version is used, uv is
-enabled, and no base image override is written.
+`--template` picks a starter template (`minimal` is the default; `legacy` gives
+you a container-echo example). The three `pyproject.toml` flags are optional; by
+default the template's Python version is used, uv is enabled, and no base image
+override is written.
+
+You can also call the function directly for testing. `path` is required (the
+engine supplies it in the dispatched path):
+
+```sh
+dagger call python-sdk init-module --name my-module --path .dagger/modules/my-module
+```
 
 ## Configure an existing module
 
@@ -101,55 +102,14 @@ For every Python SDK module in the workspace (skipping any with a
 dagger call python-sdk generate-all
 ```
 
-## Manage dependencies
+## Manage dependencies and the engine version
 
-List:
-
-```sh
-dagger call python-sdk mod --path my-module deps list
-```
-
-Add (run `mod ... generate` after to refresh generated SDK files):
+Editing a module's dependencies or its required engine version is identical
+across SDKs, so the core CLI owns it:
 
 ```sh
-dagger call python-sdk mod --path my-module \
-    deps add --source github.com/some/module
-```
-
-Add with a custom local name:
-
-```sh
-dagger call python-sdk mod --path my-module \
-    deps add --source github.com/some/module --name alias
-```
-
-Remove by name or source:
-
-```sh
-dagger call python-sdk mod --path my-module deps remove --name alias
-```
-
-Update one remote dependency, or all of them:
-
-```sh
-dagger call python-sdk mod --path my-module deps update
-dagger call python-sdk mod --path my-module deps update --name some-dep
-```
-
-## Manage the required engine version
-
-```sh
-# Read the version pinned in dagger.json
-dagger call python-sdk mod --path my-module engine required
-
-# Pin to a specific version
-dagger call python-sdk mod --path my-module engine require --version 0.20.8
-
-# Pin to the engine version you're currently running
-dagger call python-sdk mod --path my-module engine require-current
-
-# Pin to "latest"
-dagger call python-sdk mod --path my-module engine require-latest
+dagger module deps add github.com/some/module
+dagger module engine require-latest
 ```
 
 ## Discover modules in a workspace
@@ -158,6 +118,12 @@ dagger call python-sdk mod --path my-module engine require-latest
 # Every Python SDK module under the workspace
 dagger call python-sdk modules path
 ```
+
+> [!NOTE]
+> `modules` and `generate-all` discover modules by scanning legacy
+> `dagger.json` files for `sdk.source == "python"`. This is obsolete for
+> workspace-managed modules, where the engine owns the
+> `modules.<sdk>.as-sdk.modules` source of truth.
 
 See [`python-sdk.dang`](./python-sdk.dang) for the full type surface.
 
