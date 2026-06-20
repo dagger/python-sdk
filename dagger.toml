@@ -8,3 +8,22 @@
 
 [modules.e2e]
 source = ".dagger/modules/e2e"
+
+[modules.python-sdk]
+source = "."
+check.skip = ["*"]
+
+[modules.python-sdk.as-sdk]
+name = "python"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/generate/app"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/lookup/app"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/deps/app"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/skip/app"
