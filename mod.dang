@@ -39,7 +39,7 @@ type Mod {
     if (skipGenerate) {
       polyfill.workspace(ws).fork.changes
     } else {
-      polyfill.workspace(ws).moduleSource(path).generate.changes
+      polyfill.workspace(ws).moduleSource("/" + path).generate.changes
     }
   }
 }
