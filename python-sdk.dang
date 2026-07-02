@@ -146,16 +146,6 @@ type PythonSdk {
   }
 
   """
-  Generate a typed Python client for `module` at `path`.
-
-  The engine records the managed client in workspace config before calling
-  this function. The engine owns materializing the generated client files.
-  """
-  pub initClient(ws: Workspace!, path: String!, module: String!, dev: Boolean! = false): Changeset! {
-    polyfill.workspace(ws).fork.changes
-  }
-
-  """
   Render a Python template with the requested module name.
   """
   let renderedTemplate(name: String!, templateName: String!): Directory! {
