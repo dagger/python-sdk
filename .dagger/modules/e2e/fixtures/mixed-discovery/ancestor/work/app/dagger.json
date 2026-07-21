@@ -1,0 +1,7 @@
+{
+  "name": "mixed-discovery-app",
+  "engineVersion": "v1.0.0-0",
+  "sdk": {
+    "source": "python"
+  }
+}

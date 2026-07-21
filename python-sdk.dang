@@ -2,6 +2,10 @@
 Manage Dagger modules that use the Python SDK.
 """
 type PythonSdk {
+  let legacyConfigPattern = "\"sdk\"\\s*:\\s*\\{[^}]*\"source\"\\s*:\\s*\"python\""
+  let tomlConfigPattern = "\\[runtime\\][^\\[]*source\\s*=\\s*\"python\""
+  let moduleConfigFilenames: [String!]! = ["dagger-module.toml", "dagger.json"]
+
   """
   Marker filename that skips generate when found at or above a Python SDK module root.
   """
@@ -13,29 +17,47 @@ type PythonSdk {
   pub targetRuntime: String! { "python" }
 
   """
-  Return every legacy dagger.json Dagger module whose sdk.source is "python".
-
-  This discovery path is obsolete for workspace-managed modules; the engine
-  owns the modules.<sdk>.as-sdk.modules source of truth.
+  Return every managed Python SDK module visible from the client's cwd: the
+  nearest enclosing module plus modules at or below the cwd. Discovery uses the
+  shared polyfill and intersects its results with the SDK list on the passed
+  workspace.
   """
   pub modules(ws: Workspace!): [Mod!]! {
-    ws
-      .directory("/", include: ["**/dagger.json"])
-      .search(
-        pattern: "\"sdk\"\\s*:\\s*\\{[^}]*\"source\"\\s*:\\s*\"python\"",
-        globs: ["**/dagger.json"],
-        filesOnly: true,
-        multiline: true,
-        dotall: true,
-      )
-      .{{filePath}}
-      .map { configPath =>
-        mod(
-          ws,
-          if (configPath.filePath == "dagger.json") { "." } else { configPath.filePath.trimSuffix("/dagger.json") },
-          findUp: false,
-        )
+    let managed = ws.sdk(name: currentModule.name).modules.{{source}}
+    let cwd = normalizePath(ws.cwd)
+    polyfill.workspace(ws)
+      .findConfigDirs(moduleConfigFilenames, exclude: ["**/.venv/**", "**/site-packages/**"])
+      .map { dir => workspacePath(cwd, dir) }
+      .uniq
+      .filter { path => managed.filter { m => normalizePath(m.source) == path }.length > 0 }
+      .map { path => Mod(rootPath: path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
+  }
+
+  let workspacePath(cwd: String!, path: String!): String! {
+    let base = if (cwd == ".") { [] } else { cwd.split("/") }
+    let segments = path.split("/").reduce(base) { acc, segment =>
+      if (segment == "..") {
+        acc.dropLast(1)
+      } else if (segment == "." or segment == "") {
+        acc
+      } else {
+        acc + [segment]
       }
+    }
+    if (segments.length == 0) { "." } else { segments.join("/") }
+  }
+
+  let normalizePath(path: String!): String! {
+    let normalized = path.trimPrefix("./").trimPrefix("/").trimSuffix("/")
+    if (normalized == "") { "." } else { normalized }
+  }
+
+  let pathDepth(path: String): Int! {
+    if (path == null) { -1 } else if (path == ".") { 0 } else { path.split("/").length }
+  }
+
+  let configDir(path: String!, filename: String!): String! {
+    normalizePath(path.trimPrefix("/").trimSuffix(filename))
   }
 
   """
@@ -71,40 +93,40 @@ type PythonSdk {
   """
   pub mod(ws: Workspace!, path: String! = ".", findUp: Boolean! = true): Mod! {
     let modPath = if (findUp) {
-      let foundConfigPath = ws.findUp("dagger.json", path)
-      if (foundConfigPath == null) {
+      let foundToml = ws.findUp("dagger-module.toml", path)
+      let foundJson = ws.findUp("dagger.json", path)
+      let tomlBase = if (foundToml == null) { null } else { configDir(foundToml, "dagger-module.toml") }
+      let jsonBase = if (foundJson == null) { null } else { configDir(foundJson, "dagger.json") }
+
+      if (tomlBase == null and jsonBase == null) {
         raise "no Dagger module found containing path: " + path
+      } else if (tomlBase != null and pathDepth(tomlBase) > pathDepth(jsonBase)) {
+        validateConfig(ws, tomlBase, "dagger-module.toml", tomlConfigPattern, path)
+      } else if (jsonBase != null) {
+        validateConfig(ws, jsonBase, "dagger.json", legacyConfigPattern, path)
       } else {
-        let configPath = foundConfigPath.trimPrefix("/")
-        if (
-          ws
-            .directory("/", include: [configPath])
-            .file(configPath)
-            .search(
-              pattern: "\"sdk\"\\s*:\\s*\\{[^}]*\"source\"\\s*:\\s*\"python\"",
-              multiline: true,
-              dotall: true,
-              limit: 1,
-            )
-            .{{id}}
-            .length == 0
-        ) {
-          raise "Dagger module does not use the Python SDK: " + path
-        } else if (configPath == "dagger.json") {
-          "."
-        } else {
-          configPath.trimSuffix("/dagger.json")
-        }
+        raise "no Dagger module found containing path: " + path
       }
     } else {
-      path.trimPrefix("/")
+      normalizePath(path)
     }
 
     Mod(
-      path: modPath,
+      rootPath: modPath,
       ws: ws,
       skipGenerateFilename: skipGenerateFilename,
     )
+  }
+
+  let validateConfig(ws: Workspace!, base: String!, filename: String!, pattern: String!, requestedPath: String!): String! {
+    let configPath = if (base == ".") { filename } else { base + "/" + filename }
+    let matches = ws
+      .directory("/", include: [configPath])
+      .file(configPath)
+      .search(pattern: pattern, multiline: true, dotall: true, limit: 1)
+      .{{id}}
+      .length > 0
+    if (matches) { base } else { raise "Dagger module does not use the Python SDK: " + requestedPath }
   }
 
   """
@@ -191,22 +213,17 @@ type PythonSdk {
   }
 
   """
-  Generate all discovered legacy dagger.json Python SDK modules.
-
-  This discovery path is obsolete for workspace-managed modules; the engine
-  owns the modules.<sdk>.as-sdk.modules source of truth.
+  Generate every managed Python SDK module visible from the client's cwd.
 
   Modules with the generate skip marker are skipped.
   """
   pub generateAll(ws: Workspace!): Changeset! @generate {
     let pws = polyfill.workspace(ws)
 
-    currentModule.asSDK.modules
-      .{{path}}
-      .map { m => Mod(path: m.path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
+    modules(ws)
       .filter { mod => mod.skipGenerate == false }
       .reduce(pws.fork) { fork, mod =>
-        fork.merge(pws.moduleSource("/" + mod.path).generate)
+        fork.merge(pws.moduleSource("/" + mod.rootPath).generate)
       }
       .changes
   }

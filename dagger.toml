@@ -27,3 +27,9 @@ path = ".dagger/modules/e2e/fixtures/deps/app"
 
 [[modules.python-sdk.as-sdk.modules]]
 path = ".dagger/modules/e2e/fixtures/skip/app"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/toml/app"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/mixed-discovery/ancestor/work/app"
