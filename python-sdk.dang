@@ -19,16 +19,17 @@ type PythonSdk {
   """
   Return every managed Python SDK module visible from the client's cwd: the
   nearest enclosing module plus modules at or below the cwd. Discovery uses the
-  shared polyfill and intersects its results with the engine-owned as-SDK list.
+  shared polyfill and intersects its results with the SDK list on the passed
+  workspace.
   """
   pub modules(ws: Workspace!): [Mod!]! {
-    let managed = currentModule.asSDK.modules.{{path}}
+    let managed = ws.sdk(name: currentModule.name).modules.{{source}}
     let cwd = normalizePath(ws.cwd)
     polyfill.workspace(ws)
       .findConfigDirs(moduleConfigFilenames, exclude: ["**/.venv/**", "**/site-packages/**"])
       .map { dir => workspacePath(cwd, dir) }
       .uniq
-      .filter { path => managed.filter { m => normalizePath(m.path) == path }.length > 0 }
+      .filter { path => managed.filter { m => normalizePath(m.source) == path }.length > 0 }
       .map { path => Mod(rootPath: path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
   }
 
