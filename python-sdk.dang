@@ -136,14 +136,15 @@ type PythonSdk {
   new module's `path`. Engine-owned files (dagger-module.toml, workspace config
   updates) are produced by the engine and merged with this changeset.
 
-  Pass `template` to materialize files from templates/<template>. The empty
-  default uses this module's minimal template.
+  Pass `template` to pick a starter under templates/<template>. It defaults to
+  `default` (a small working module). Use `empty` for a bare object class. An
+  explicitly empty template also selects `default` for compatibility.
 
   Pass `pythonVersion`, `useUv`, or `baseImage` to customize the generated
   pyproject.toml. Defaults leave the template untouched: the template's Python
   version is used, uv is enabled, and no base image override is written.
   """
-  pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "", pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
+  pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "default", pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
     let rawPath = path.trimPrefix("./").trimPrefix("/")
 
     let modPath = if (rawPath == "" or rawPath == ".") {
@@ -154,7 +155,7 @@ type PythonSdk {
       rawPath.trimSuffix("/")
     }
 
-    let selectedTemplate = if (template == "") { "minimal" } else { template }
+    let selectedTemplate = if (template == "") { "default" } else { template }
 
     if (currentModule.source.exists("templates/" + selectedTemplate) == false) {
       raise "unknown init template: " + template

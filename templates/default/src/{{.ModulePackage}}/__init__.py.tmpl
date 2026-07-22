@@ -1,0 +1,39 @@
+import dagger
+from dagger import dag, function, object_type
+
+
+@object_type
+class {{ .ModuleType }}:
+    source: dagger.Directory
+    base_image_address: str
+
+    @classmethod
+    def create(
+        cls,
+        ws: dagger.Workspace,
+        base_image_address: str = "alpine:3.21",
+    ):
+        return cls(
+            source=ws.directory(
+                "/",
+                exclude=[
+                    "**/.dagger",
+                    "**/.git",
+                    "**/.venv",
+                    "**/__pycache__",
+                    "**/node_modules",
+                    "**/dist",
+                ],
+            ),
+            base_image_address=base_image_address,
+        )
+
+    @function
+    def container(self) -> dagger.Container:
+        """A container with the workspace source, ready to build."""
+        return (
+            dag.container()
+            .from_(self.base_image_address)
+            .with_directory("/src", self.source)
+            .with_workdir("/src")
+        )
