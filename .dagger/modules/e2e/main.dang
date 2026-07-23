@@ -186,7 +186,7 @@ type E2e {
       "class TemplateDefault:",
       "@classmethod\n    def create(",
       "ws: dagger.Workspace",
-      "base_image_address: str = \"alpine:3.21\"",
+      "base_image_address: str = \"alpine:3.24\"",
       "return cls(",
       "def container(self) -> dagger.Container:",
       ".with_directory(\"/src\", self.source)",

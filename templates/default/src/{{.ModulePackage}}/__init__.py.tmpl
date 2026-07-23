@@ -11,7 +11,7 @@ class {{ .ModuleType }}:
     def create(
         cls,
         ws: dagger.Workspace,
-        base_image_address: str = "alpine:3.21",
+        base_image_address: str = "alpine:3.24",
     ):
         return cls(
             source=ws.directory(
