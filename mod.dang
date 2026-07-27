@@ -58,7 +58,10 @@ type Mod {
     if (skipGenerate) {
       polyfill.workspace(ws).fork.changes
     } else {
-      polyfill.workspace(ws).moduleSource("/" + rootPath).generate.changes
+      # Stage the local dependency closure so this module's codegen sees
+      # up-to-date dependency bindings before generating it.
+      let stagedWs = ws.withChanges(polyfill.workspace(ws).moduleSource("/" + rootPath).core.generateLocalDependencies(ws))
+      polyfill.workspace(stagedWs).moduleSource("/" + rootPath).generate.changes
     }
   }
 }
