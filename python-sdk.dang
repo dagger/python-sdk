@@ -23,13 +23,13 @@ type PythonSdk {
   workspace.
   """
   pub modules(ws: Workspace!): [Mod!]! {
-    let managed = ws.sdk(name: currentModule.name).modules.{{source}}
+    let managed = currentModule.asSDK(workspace: ws).modules.{{path}}
     let cwd = normalizePath(ws.cwd)
     polyfill.workspace(ws)
       .findConfigDirs(moduleConfigFilenames, exclude: ["**/.venv/**", "**/site-packages/**"])
       .map { dir => workspacePath(cwd, dir) }
       .uniq
-      .filter { path => managed.filter { m => normalizePath(m.source) == path }.length > 0 }
+      .filter { path => managed.filter { m => normalizePath(m.path) == path }.length > 0 }
       .map { path => Mod(rootPath: path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
   }
 
