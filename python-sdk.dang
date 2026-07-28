@@ -223,7 +223,12 @@ type PythonSdk {
     modules(ws)
       .filter { mod => mod.skipGenerate == false }
       .reduce(pws.fork) { fork, mod =>
-        fork.merge(pws.moduleSource("/" + mod.rootPath).generate)
+        # Stage this module's local dependency closure first (leaf-first, possibly
+        # across SDKs) so its codegen sees up-to-date dependency bindings. The dep
+        # codegen is ephemeral: it appears in both the fork's before and after, so
+        # it cancels in the merge, leaving only each module's own changes.
+        let stagedWs = ws.withChanges(pws.moduleSource("/" + mod.rootPath).core.generateLocalDependencies(ws))
+        fork.merge(polyfill.workspace(stagedWs).moduleSource("/" + mod.rootPath).generate)
       }
       .changes
   }
