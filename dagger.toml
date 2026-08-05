@@ -13,6 +13,9 @@ source = ".dagger/modules/e2e"
 source = "."
 check.skip = ["*"]
 
+[modules.sdk-sdk]
+source = "github.com/dagger/sdk-sdk"
+
 [modules.python-sdk.as-sdk]
 name = "python"
 
