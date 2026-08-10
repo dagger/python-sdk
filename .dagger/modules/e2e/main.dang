@@ -61,6 +61,33 @@ type E2e {
   }
 
   """
+  Assert that a string contains every expected substring.
+  """
+  let assertContainsAll(value: String!, wants: [String!]!): Void {
+    wants.each { want =>
+      assertContains(value, want, "expected value to contain: " + want)
+    }
+    null
+  }
+
+  """
+  Assert that a string contains none of the unwanted substrings.
+  """
+  let assertContainsNone(value: String!, unwanted: [String!]!): Void {
+    unwanted.each { want =>
+      assertNotContains(value, want, "expected value not to contain: " + want)
+    }
+    null
+  }
+
+  """
+  Return the rendered Python module source from an init changeset.
+  """
+  let initSource(changes: Changeset!, path: String!, package: String!): String! {
+    changes.layer.file(path + "/src/" + package + "/__init__.py").contents
+  }
+
+  """
   The helper should expose the generate skip marker used by callers.
   """
   pub skipGenerateFilenameCheck: Void @check {
@@ -134,9 +161,52 @@ type E2e {
     assert(contains(defaultChanges.addedPaths, defaultPath + "/" + generatedMarkerPath) == false, "init should not produce SDK-generated files")
     assert(defaultChanges.modifiedPaths.length == 0, "init unexpectedly modified existing files")
     assert(defaultChanges.removedPaths.length == 0, "init unexpectedly removed files")
-    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "minimal template did not render the module type")
+    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "default template did not render the module type")
 
     assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")
+
+    null
+  }
+
+  """
+  The default template should render a working module that reads source from
+  the workspace and returns a ready-to-build container. The empty template
+  should remain available as a bare object class.
+  """
+  pub templateCheck(ws: Workspace!): Void @check {
+    let defaultPath = outputRoot + "/template-default"
+    let emptyPath = outputRoot + "/template-empty"
+
+    let defaultSource = initSource(
+      pythonSdk.initModule(ws, name: "template-default", path: defaultPath),
+      defaultPath,
+      "template_default",
+    )
+    assertContainsAll(defaultSource, [
+      "class TemplateDefault:",
+      "@classmethod\n    def create(",
+      "ws: dagger.Workspace",
+      "base_image_address: str = \"alpine:3.24\"",
+      "return cls(",
+      "def container(self) -> dagger.Container:",
+      ".with_directory(\"/src\", self.source)",
+    ])
+    assertContainsNone(defaultSource, ["def __init__", "{{"])
+
+    let compatibleDefaultSource = initSource(
+      pythonSdk.initModule(ws, name: "template-default", path: defaultPath, template: ""),
+      defaultPath,
+      "template_default",
+    )
+    assert(compatibleDefaultSource == defaultSource, "an explicitly empty template should select the default template")
+
+    let emptySource = initSource(
+      pythonSdk.initModule(ws, name: "template-empty", path: emptyPath, template: "empty"),
+      emptyPath,
+      "template_empty",
+    )
+    assertContainsAll(emptySource, ["class TemplateEmpty:", "    pass"])
+    assertContainsNone(emptySource, ["def container", "{{"])
 
     null
   }
