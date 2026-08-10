@@ -12,7 +12,7 @@ class {{ .ModuleType }}:
         cls,
         ws: dagger.Workspace,
         base_image_address: str = "alpine:3.24",
-    ):
+    ) -> {{ .ModuleType }}:
         return cls(
             source=ws.directory(
                 "/",
