@@ -1,3 +1,7 @@
+# Matches the image the polyfill dependency's own Go helpers pull, so a cold
+# engine pulls one Go base image instead of two. Bump in step with polyfill.
+let goImage: String! = "golang:1.26-alpine"
+
 """
 Manage Dagger modules that use the Python SDK.
 """
@@ -332,7 +336,7 @@ type PythonSdk {
     } else {
       let pyproj = "/rendered/pyproject.toml"
       let built = container
-        .from("golang:1.26-alpine")
+        .from(goImage)
         .withoutEntrypoint
         .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
         .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
