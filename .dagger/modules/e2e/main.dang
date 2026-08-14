@@ -47,6 +47,19 @@ type E2e {
   }
 
   """
+  Assert the exact set of files a changeset added, so an extra or a missing
+  file fails instead of slipping past a contains-only assertion. Directory
+  entries are ignored: they only ever appear because of a file below them.
+  """
+  let assertPaths(changes: Changeset!, want: [String!]!): Void {
+    let got = changes.addedPaths.filter { path => path.hasSuffix("/") == false }
+    assert(
+      got.length == want.length and want.all { path => contains(got, path) },
+      "expected exactly [" + want.join(", ") + "], got [" + got.join(", ") + "]",
+    )
+  }
+
+  """
   Assert that a string contains a substring.
   """
   let assertContains(value: String!, want: String!, message: String!): Void {
@@ -164,6 +177,48 @@ type E2e {
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "default template did not render the module type")
 
     assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")
+
+    assertPaths(defaultChanges, [
+      defaultPath + "/pyproject.toml",
+      defaultPath + "/src/init_default/__init__.py",
+    ])
+    assertPaths(legacyChanges, [
+      legacyPath + "/.gitattributes",
+      legacyPath + "/.gitignore",
+      legacyPath + "/pyproject.toml",
+      legacyPath + "/src/init_legacy/__init__.py",
+      legacyPath + "/src/init_legacy/main.py",
+    ])
+    assertContains(legacyChanges.layer.file(legacyPath + "/.gitignore").contents, "/sdk", "legacy template dropped the contents of a non-template file")
+
+    null
+  }
+
+  """
+  A module name should render the same type and package names the templates
+  expect, for every spelling a user might pass to init.
+  """
+  pub initNamingCheck(ws: Workspace!): Void @check {
+    [
+      ["my-module", "MyModule", "my_module"],
+      ["my_module", "MyModule", "my_module"],
+      ["myModule", "MyModule", "my_module"],
+      ["simple", "Simple", "simple"],
+      ["HTTPServer", "Httpserver", "http_server"],
+    ].each { naming =>
+      let name = naming.takeFirst(1).join("")
+      let type = naming.dropFirst(1).takeFirst(1).join("")
+      let package = naming.takeLast(1).join("")
+      let path = outputRoot + "/init-naming/" + package
+
+      let changes = pythonSdk.initModule(ws, name: name, path: path)
+      assertAdded(changes, path + "/src/" + package + "/__init__.py")
+      assertContains(
+        changes.layer.file(path + "/src/" + package + "/__init__.py").contents,
+        "class " + type + ":",
+        "init " + name + " did not render the type as " + type,
+      )
+    }
 
     null
   }
