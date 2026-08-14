@@ -83,7 +83,7 @@ type ModConfig {
     }
 
     let edited = withImage.file(toolPath).contents
-    polyfill.workspace(ws).fork.withNewFile(pyprojectPath, edited).changes
+    ws.withNewFile("/" + pyprojectPath, edited).changes(ws)
   }
 
   """

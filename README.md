@@ -10,7 +10,7 @@ Shared, language-agnostic operations — editing a module's dependencies or its
 required engine version — are owned by the core CLI (`dagger module deps`,
 `dagger module engine`) and are no longer part of this module's surface.
 
-Backed by [`github.com/dagger/sdk-sdk/polyfill`](https://github.com/dagger/sdk-sdk/tree/main/polyfill).
+It uses the engine's native `Workspace` and `ModuleSource` APIs directly.
 
 ## Install
 

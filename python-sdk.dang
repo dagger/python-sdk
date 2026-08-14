@@ -17,34 +17,16 @@ type PythonSdk {
   pub targetRuntime: String! { "python" }
 
   """
-  Return every managed Python SDK module visible from the client's cwd: the
-  nearest enclosing module plus modules at or below the cwd. Discovery uses the
-  shared polyfill and intersects its results with the SDK list on the passed
-  workspace.
+  Return every managed Python SDK module in the client's cwd scope: every module
+  at or below the cwd, plus the nearest enclosing module when the cwd itself is
+  not managed. The engine selects this directly from the workspace's registered
+  SDK modules; no filesystem discovery is required.
   """
   pub modules(ws: Workspace!): [Mod!]! {
-    let managed = currentModule.asSDK(workspace: ws).modules.{{path}}
-    let cwd = normalizePath(ws.cwd)
-    polyfill.workspace(ws)
-      .findConfigDirs(moduleConfigFilenames, exclude: ["**/.venv/**", "**/site-packages/**"])
-      .map { dir => workspacePath(cwd, dir) }
-      .uniq
-      .filter { path => managed.filter { m => normalizePath(m.path) == path }.length > 0 }
-      .map { path => Mod(rootPath: path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
-  }
-
-  let workspacePath(cwd: String!, path: String!): String! {
-    let base = if (cwd == ".") { [] } else { cwd.split("/") }
-    let segments = path.split("/").reduce(base) { acc, segment =>
-      if (segment == "..") {
-        acc.dropLast(1)
-      } else if (segment == "." or segment == "") {
-        acc
-      } else {
-        acc + [segment]
-      }
-    }
-    if (segments.length == 0) { "." } else { segments.join("/") }
+    currentModule
+      .asSDK(workspace: ws)
+      .modules.{{path}}
+      .map { module => Mod(rootPath: module.path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
   }
 
   let normalizePath(path: String!): String! {
@@ -162,9 +144,9 @@ type PythonSdk {
     } else {
       let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
 
-      polyfill.workspace(ws).fork
-        .withDirectory(modPath, templateSource)
-        .changes
+      ws
+        .withNewDirectory("/" + modPath, templateSource)
+        .changes(ws)
     }
   }
 
@@ -219,18 +201,11 @@ type PythonSdk {
   Modules with the generate skip marker are skipped.
   """
   pub generateAll(ws: Workspace!): Changeset! @generate {
-    let pws = polyfill.workspace(ws)
-
     modules(ws)
       .filter { mod => mod.skipGenerate == false }
-      .reduce(pws.fork) { fork, mod =>
-        # Stage this module's local dependency closure first (leaf-first, possibly
-        # across SDKs) so its codegen sees up-to-date dependency bindings. The dep
-        # codegen is ephemeral: it appears in both the fork's before and after, so
-        # it cancels in the merge, leaving only each module's own changes.
-        let stagedWs = ws.withChanges(pws.moduleSource("/" + mod.rootPath).core.generateLocalDependencies(ws))
-        fork.merge(polyfill.workspace(stagedWs).moduleSource("/" + mod.rootPath).generate)
+      .reduce(ws) { stagedWs, mod =>
+        stagedWs.moduleSource("/" + mod.rootPath).generate(stagedWs)
       }
-      .changes
+      .changes(ws)
   }
 }
