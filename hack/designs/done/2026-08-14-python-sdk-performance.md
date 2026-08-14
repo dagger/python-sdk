@@ -1,6 +1,6 @@
 # Python SDK module performance
 
-Status: in progress
+Status: done
 Date: 2026-08-14
 
 ## Problem
@@ -416,3 +416,11 @@ Review findings deliberately left alone:
   doc at `b407e47`. All 13 e2e checks green locally. Call-path config sweep run
   and reported above; its only shipped outcome is the 3.14 template fix, by
   design.
+- Phase 5 (code review + fix) — two independent code reviewers, findings
+  curated, applied in `306d089`, `e95ab8c`, `146b66c`, `2d63359`. The reviewers'
+  strongest shared finding — that digit-bearing names diverge from `strcase` —
+  turned out on testing to be a bug this branch fixes rather than one it
+  introduces.
+- Phase 6–7 (ship) — draft PR dagger/python-sdk#16, head `2d63359`. All 36
+  Dagger Cloud checks green.
+- Phase 8 (archive) — this file.
