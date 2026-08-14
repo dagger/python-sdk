@@ -332,7 +332,7 @@ type PythonSdk {
     } else {
       let pyproj = "/rendered/pyproject.toml"
       let built = container
-        .from("golang:1.25-alpine")
+        .from("golang:1.26-alpine")
         .withoutEntrypoint
         .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
         .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
