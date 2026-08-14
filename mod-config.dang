@@ -122,7 +122,7 @@ type ModConfig {
   """
   let tool: Container! {
     container
-      .from("golang:1.25-alpine")
+      .from(goImage)
       .withoutEntrypoint
       .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
       .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
