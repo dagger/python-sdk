@@ -176,6 +176,10 @@ type E2e {
     assert(defaultChanges.removedPaths.length == 0, "init unexpectedly removed files")
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "default template did not render the module type")
 
+    let defaultPyproject = defaultChanges.layer.file(defaultPath + "/pyproject.toml").contents
+    assertContains(defaultPyproject, "name = \"init-default\"", "default template did not render the module name into pyproject.toml")
+    assertNotContains(defaultPyproject, "{{", "default template left an unexpanded action in pyproject.toml")
+
     assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")
 
     assertPaths(defaultChanges, [
@@ -197,6 +201,14 @@ type E2e {
   """
   A module name should render the same type and package names the templates
   expect, for every spelling a user might pass to init.
+
+  The package name must match what the `uv_build` backend derives from the
+  project name in pyproject.toml, or the module cannot be loaded: that is why
+  `s3-bucket` has to yield `s3_bucket`.
+
+  The `HTTPServer` row characterizes the current conversion rather than a
+  desired outcome — `Httpserver` is what it renders today, and changing it
+  deliberately is fine.
   """
   pub initNamingCheck(ws: Workspace!): Void @check {
     [
@@ -204,12 +216,13 @@ type E2e {
       ["my_module", "MyModule", "my_module"],
       ["myModule", "MyModule", "my_module"],
       ["simple", "Simple", "simple"],
+      ["s3-bucket", "S3Bucket", "s3_bucket"],
       ["HTTPServer", "Httpserver", "http_server"],
     ].each { naming =>
       let name = naming.takeFirst(1).join("")
       let type = naming.dropFirst(1).takeFirst(1).join("")
       let package = naming.takeLast(1).join("")
-      let path = outputRoot + "/init-naming/" + package
+      let path = outputRoot + "/init-naming/" + name
 
       let changes = pythonSdk.initModule(ws, name: name, path: path)
       assertAdded(changes, path + "/src/" + package + "/__init__.py")
@@ -238,6 +251,7 @@ type E2e {
       "template_default",
     )
     assertContainsAll(defaultSource, [
+      "from __future__ import annotations",
       "class TemplateDefault:",
       "@classmethod\n    def create(",
       "ws: dagger.Workspace",
