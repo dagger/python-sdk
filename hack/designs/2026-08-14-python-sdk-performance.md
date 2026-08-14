@@ -21,10 +21,12 @@ captured with `dagger --progress=plain` (and `-d` for child spans), replayed
 with `dagger trace <id>`.
 
 The host is shared with other work and is noisy: wall-clock runs vary by
-±0.5s independent of anything measured here. Every A/B below therefore
+±0.5s independent of anything measured here. Every warm A/B below therefore
 **interleaves arms** (A,B,A,B) rather than batching them, and reports every
-individual run. Where a claim rests on a cold cache, the run used a throwaway
-engine container and volume (`docker run --rm --privileged
+individual run. The one exception is the cold-`init` A/B, which was run
+3-then-3: each of its runs gets a throwaway engine of its own, so there is no
+shared warm cache for run order to bias. Where a claim rests on a cold cache,
+the run used a throwaway engine container and volume (`docker run --rm --privileged
 registry.dagger.io/engine:v1.0.0-beta.9` + a fresh `/var/lib/dagger` volume,
 selected with `_EXPERIMENTAL_DAGGER_RUNNER_HOST`) so the shared engine's cache
 was neither used nor disturbed.
@@ -185,7 +187,9 @@ the module's local dependency closure and then generates it. The polyfill
 
 ## Goals
 
-1. Remove the Go toolchain from the default `init` path.
+1. Remove *this module's* Go toolchain from the default `init` path. The
+   polyfill dependency still pulls a Go image on the same path; the goal is to
+   stop adding a second Go build of our own, not to make `init` Go-free.
 2. Stop a cold engine from pulling two different Go base images.
 3. Establish, by measurement, whether any default this repo controls changes
    warm call time — and act on it if so.
@@ -254,8 +258,11 @@ humps and keeps runs of capitals together. That is why `HTTPServer` yields type
 **Equivalence evidence.** Rendered output was diffed against the Go helper's
 for `my-module`, `my_module`, `myModule`, `HTTPServer` and `simple`, across the
 `default`, `empty` and `legacy` templates — 15 combinations, **byte-identical,
-same file modes**. The strcase-drift risk an earlier draft flagged does not
-materialise.
+same file modes**. Modes match because every non-template file in the tree is
+0644: the Go helper wrote 0644 unconditionally, while `withFile` preserves the
+source mode, so a template file with any other mode would differ. The
+strcase-drift risk an earlier draft flagged does not materialise for these
+names; for names carrying a digit it does, deliberately — see fix 4.
 
 **Result — honest.** Cold engine `withInitModule` 12.4 / 12.0 / 12.7 s →
 **11.2 / 11.3 / 11.1 s**: about **1.2s (~10%)**, plus one fewer image pull and
@@ -284,7 +291,7 @@ polyfill's Go runtime pulls `golang:1.26-alpine`. Aligned to `1.26-alpine` so
 the flag-bearing init and `config get`/`set` paths reuse an image the workspace
 has already pulled. `helpers/pyproject` declares `go 1.25.0`, which 1.26 builds.
 
-### 3. The default template works below Python 3.14 again (`36539cd`)
+### 3. The default template works below Python 3.14 again (`60f469a`)
 
 Found while benchmarking the `requires-python` arms. The default template's
 `create()` returns the class it is declared in, and deferred annotations only
@@ -303,45 +310,91 @@ annotations from `__future__`. Verified by initializing, generating and calling
 a module at 3.12, 3.13 and the 3.14 default. The import is free — within noise
 across two interleaved benchmark batches (−13 ms, +10 ms).
 
-### 4. Tests (`3b7e5b8`)
+### 4. Module names containing a digit produce a loadable module (`ec61085`)
+
+The second correctness bug the rewrite shipped, found while pinning the name
+conversions. `strcase.ToSnake` treats a digit as a word boundary, so on `main`
+
+```
+dagger module init python s3-bucket
+```
+
+renders the package as `src/s_3_bucket/`, while `uv_build` derives `s3_bucket`
+from `name = "s3-bucket"` in the pyproject.toml the same template wrote. The
+package is therefore never importable and the module cannot be loaded at all:
+
+```
+failed to call module "s3-bucket" to get functions: call constructor: exit code: 1
+```
+
+The Dang `splitWords` breaks on separators and on camelCase humps only, not on
+digits, so the same command now renders `src/s3_bucket/`; `dagger generate` and
+`dagger call s-3-bucket container` both succeed. (`s-3-bucket` is the engine's
+own kebab-casing of the module name for the CLI, unrelated to this change.)
+
+Pinned by the `s3-bucket` row in `initNamingCheck`.
+
+### 5. Tests (`3b7e5b8`)
 
 The rendering assertions were all contains-only, so an extra, missing, or
 misnamed output file passed. `initCheck` now asserts the exact file set for the
 `default` and `legacy` templates — which also covers the legacy template's
 `.gitignore` and `.gitattributes`, non-template files no check referenced
 before — and a new `initNamingCheck` pins the type and package names for
-kebab, snake, camel, plain, and `HTTPServer` spellings.
+kebab, snake, camel, plain, digit-bearing, and `HTTPServer` spellings.
 
 ## Affected components
 
-- `python-sdk.dang` — `renderedTemplate` and its string helpers;
-  `configuredTemplate` base image.
+- `python-sdk.dang` — `renderedTemplate` and its string helpers; the file-scope
+  `goImage` binding both Go helper containers build on.
 - `helpers/render-template/` — deleted.
-- `mod-config.dang` — base image.
+- `mod-config.dang` — `goImage`.
+- `.dagger/lock` — the pinned Go image.
 - `.dagger/modules/e2e/main.dang` — `assertPaths`, `initCheck`,
-  `initNamingCheck`.
+  `initNamingCheck`, `templateCheck`.
 - `templates/default/src/{{.ModulePackage}}/__init__.py.tmpl` — future import.
 
 ## Risks
 
-- **Empty template directories are dropped.** The renderer builds output from
-  file paths, so a template directory containing no files would not survive.
-  No template has one; the behaviour is documented at the call site.
-- **Symlinks in templates.** The Go helper explicitly errored on them; the Dang
-  renderer has no such guard. Templates are repo-owned and contain none.
 - **`glob("**")` returns directories and dotfiles.** Both confirmed empirically
   (dotfiles are why the legacy template still works); directories are filtered
   by their trailing `/`. The trailing-slash marker is engine-version gated
   (`v0.17.0`+), well below this repo's `engineVersion`.
-- **Cross-SDK consistency.** `dagger/go-sdk` and `dagger/sdk-sdk` carry their
-  own copies of this Go helper. Because the output here is byte-identical,
-  there is no naming drift between SDKs today — but the implementations have
-  now forked, and a future change to one will not reach the others. The
-  language-agnostic home for a shared `renderTemplate` would be
-  `sdk-sdk`/polyfill; not done here, and noted for whoever consolidates. This
-  change is consistent with go-sdk's own `future/helper-cleanup.md`, which
-  states the shared direction: prefer native Dang/core calls, use helpers only
-  where they are unavoidable.
+- **Template language capability.** The renderer replaced Go `text/template`
+  with a `{{ .Var }}`-only substituter. `{{ if }}`, `{{ range }}`, pipelines,
+  `{{/* comments */}}` and the `{{"{{"}}` literal-brace escape are all gone: a
+  template using any of them fails with "unknown template variable". No current
+  template needs them, but the next person adding one is who finds out.
+- **Cross-SDK consistency.** There was never one shared implementation to
+  diverge from. `dagger/go-sdk`'s copy of the Go helper had already forked —
+  no path templating, no `ModulePackage` — and `dagger/sdk-sdk`'s
+  `helpers/render-init-template` is a different tool entirely: 45 lines of
+  `strings.ReplaceAll` over `__SDK_NAME__`. So deleting ours removes a fork
+  rather than breaking a contract. Naming output does now differ from
+  `strcase`, and so from go-sdk, for digit-bearing names — deliberately,
+  because `strcase`'s answer produced modules that could not load (fix 4);
+  otherwise the output is byte-identical. The consolidation target is a Dang
+  `renderTemplate` primitive in polyfill, with go-sdk as the second consumer —
+  the code here shows native rendering is enough — not another shared Go
+  helper. Not done here, and noted for whoever picks it up. This is consistent
+  with go-sdk's own `future/helper-cleanup.md`, which states the shared
+  direction: prefer native Dang/core calls, use helpers only where they are
+  unavoidable.
+
+### Accepted, not fixed
+
+Review findings deliberately left alone:
+
+- **Template symlinks are no longer rejected.** The Go helper errored on them;
+  the renderer has no equivalent guard. Templates are repo-owned and contain
+  none, so the guard would only ever fire on a change we are writing ourselves.
+- **Empty template directories are dropped.** The renderer builds output from
+  file paths, so a template directory containing no files does not survive. No
+  template has one, the behaviour is documented at the call site, and adding one
+  would fail visibly the first time that template was used.
+- **The raise-on-unknown-variable path is untested.** Exercising it needs a
+  fixture template carrying a bad action, which costs more than the one line of
+  behaviour it would pin.
 
 ## Progress
 
@@ -359,6 +412,7 @@ kebab, snake, camel, plain, and `HTTPServer` spellings.
   proven no-op, the `helpers/pyproject` and CI claims were corrected, the
   `generateAll` non-goal was restated honestly, and the call-path section
   stopped claiming "interpreter boot".
-- Phase 4 (implement) — `ec61085`, `3b7e5b8`, `a6efef5`, `36539cd`. All 13
-  e2e checks green locally. Call-path config sweep run and reported above; its
-  only shipped outcome is the 3.14 template fix, by design.
+- Phase 4 (implement) — `ec61085`, `3b7e5b8`, `a6efef5`, `60f469a`, and this
+  doc at `b407e47`. All 13 e2e checks green locally. Call-path config sweep run
+  and reported above; its only shipped outcome is the 3.14 template fix, by
+  design.
