@@ -170,19 +170,153 @@ type PythonSdk {
 
   """
   Render a Python template with the requested module name.
+
+  Both file contents and file paths carry `{{ .Var }}` actions, so a template
+  directory named `{{.ModulePackage}}` becomes the module's Python package.
+  Rendering runs in the engine rather than a toolchain container: a template is
+  a handful of small text files, and pulling a Go image to substitute three
+  variables dominated the cost of `init`.
+
+  Only `.tmpl` files are expanded; everything else is carried over as a file so
+  its bytes and mode survive untouched. `glob("**")` also returns directories,
+  which are filtered out — they reappear implicitly from the file paths, so an
+  empty directory in a template would not survive.
   """
   let renderedTemplate(name: String!, templateName: String!): Directory! {
-    container
-      .from("golang:1.25-alpine")
-      .withoutEntrypoint
-      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
-      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
-      .withDirectory("/helper", currentModule.source.directory("helpers/render-template"))
-      .withDirectory("/template", currentModule.source.directory("templates/" + templateName))
-      .withWorkdir("/helper")
-      .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
-      .withExec(["render-template", name, "/template", "/rendered"])
-      .directory("/rendered")
+    let vars = templateVars(name)
+    let source = currentModule.source.directory("templates/" + templateName)
+
+    source
+      .glob("**")
+      .filter { path => path.hasSuffix("/") == false }
+      .reduce(directory) { rendered, path =>
+        let target = expandTemplate(path.trimSuffix(".tmpl"), vars)
+        if (path.hasSuffix(".tmpl")) {
+          rendered.withNewFile(target, expandTemplate(source.file(path).contents, vars))
+        } else {
+          rendered.withFile(target, source.file(path))
+        }
+      }
+  }
+
+  """
+  The template variables exposed to a template, as [name, value] pairs.
+  """
+  let templateVars(name: String!): [[String!]!]! {
+    [
+      ["ModuleName", name],
+      ["ModuleType", camelName(name)],
+      ["ModulePackage", splitWords(name).map { word => word.toLower }.join("_")],
+    ]
+  }
+
+  let upperLetters: String! = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  let lowerLetters: String! = "abcdefghijklmnopqrstuvwxyz"
+  let separators: String! = "-_. "
+  let wordBreak: String! = "\n"
+
+  """
+  Split an identifier into words, on separators and on camelCase humps.
+
+  A run of capitals is one word up to its last letter, which starts the next
+  word when a lower-case letter follows: `HTTPServer` splits as `HTTP` +
+  `Server`. This matches Go's strcase.ToSnake, which the Go helper this
+  replaced used for the package name.
+  """
+  let splitWords(value: String!): [String!]! {
+    let chars = value.split("")
+    chars
+      .map { char, index =>
+        if (separators.contains(char)) {
+          wordBreak
+        } else if (
+          isUpper(char)
+          and index > 0
+          and (isUpper(charAt(chars, index - 1)) == false or isLower(charAt(chars, index + 1)))
+        ) {
+          wordBreak + char
+        } else {
+          char
+        }
+      }
+      .join("")
+      .split(wordBreak)
+      .filter { word => word != "" }
+  }
+
+  """
+  Upper-camel-case an identifier.
+
+  Reproduces Go's strcase.ToCamel, which splits on separators only — not on
+  camelCase humps — and lower-cases any letter following another upper-case
+  letter, so `HTTPServer` becomes `Httpserver` while `myModule` keeps its hump.
+  """
+  let camelName(value: String!): String! {
+    separators
+      .split("")
+      .reduce(value) { normalized, separator => normalized.replace(separator, wordBreak) }
+      .split(wordBreak)
+      .filter { segment => segment != "" }
+      .map { segment => camelSegment(segment) }
+      .join("")
+  }
+
+  let camelSegment(segment: String!): String! {
+    let chars = segment.split("")
+    chars
+      .map { char, index =>
+        if (index == 0) {
+          char.toUpper
+        } else if (isUpper(charAt(chars, index - 1))) {
+          char.toLower
+        } else {
+          char
+        }
+      }
+      .join("")
+  }
+
+  let charAt(chars: [String!]!, index: Int!): String! {
+    if (index < 0) { "" } else { chars.dropFirst(index).takeFirst(1).join("") }
+  }
+
+  let isUpper(char: String!): Boolean! {
+    char != "" and upperLetters.contains(char)
+  }
+
+  let isLower(char: String!): Boolean! {
+    char != "" and lowerLetters.contains(char)
+  }
+
+  """
+  Expand `{{ .Var }}` actions against the template variables.
+
+  Unknown variables raise instead of rendering empty, so a typo in a template
+  fails init rather than shipping a broken module.
+  """
+  let expandTemplate(text: String!, vars: [[String!]!]!): String! {
+    let segments = text.split("{{")
+    segments
+      .dropFirst(1)
+      .reduce(segments.takeFirst(1).join("")) { expanded, segment =>
+        let sides = segment.split("}}", limit: 2)
+        if (sides.length < 2) {
+          raise "unterminated template action: {{" + segment
+        } else {
+          expanded
+            + lookupVar(vars, sides.takeFirst(1).join("").trimSpace.trimPrefix("."))
+            + sides.dropFirst(1).join("")
+        }
+      }
+  }
+
+  let lookupVar(vars: [[String!]!]!, name: String!): String! {
+    let entry = vars.find { pair => pair.takeFirst(1).join("") == name }
+    if (entry == null) {
+      raise "unknown template variable: " + name
+    } else {
+      entry.dropFirst(1).join("")
+    }
   }
 
   """
