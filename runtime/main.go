@@ -46,15 +46,39 @@ type UserConfig struct {
 	UvVersion string `toml:"uv-version"`
 }
 
+// sdkSourceFilter is what a contextual `+ignore` used to do for sdkSourceDir:
+// keep the library and the code generator, and nothing else, out of whatever
+// happens to sit next to them. It has to be applied by hand now that the
+// directory comes from the module's own source.
+var sdkSourceFilter = []string{
+	"**",
+	"!pyproject.toml",
+	"!uv.lock",
+	"!src/**/*.py",
+	"!src/**/*.typed",
+	"!codegen/pyproject.toml",
+	"!codegen/**/*.py",
+	"!LICENSE",
+	"!README.md",
+	"!dist/*",
+}
+
 func New(
-	// Directory with the Python SDK source code.
-	// +defaultPath=".."
-	// +ignore=["**", "!pyproject.toml", "!uv.lock", "!src/**/*.py", "!src/**/*.typed", "!codegen/pyproject.toml", "!codegen/**/*.py", "!LICENSE", "!README.md", "!dist/*"]
+	// Directory with the Python SDK source code. Defaults to the copy vendored
+	// in this module; extension SDKs can pass their own.
+	//
+	// NB: deliberately not a contextual (+defaultPath) argument. Contextual
+	// resolution is redirected to a Workspace bound into the context when there
+	// is one, which for a runtime loaded by ref means the *consuming* workspace
+	// rather than this module. currentModule().source() has no such ambiguity.
+	// +optional
 	sdkSourceDir *dagger.Directory,
 ) (*PythonSdkRuntime, error) {
-	// Shouldn't happen due to defaultPath, but just in case.
 	if sdkSourceDir == nil {
-		return nil, fmt.Errorf("sdk source directory not provided")
+		sdkSourceDir = dag.CurrentModule().
+			Source().
+			Directory("sdk").
+			Filter(dagger.DirectoryFilterOpts{Exclude: sdkSourceFilter})
 	}
 	d, err := NewDiscovery(UserConfig{
 		UseUv: true,
