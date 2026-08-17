@@ -1,0 +1,10 @@
+{
+  "name": "python-sdk-runtime",
+  "engineVersion": "v0.21.7",
+  "sdk": {
+    "source": "go"
+  },
+  "codegen": {
+    "automaticGitignore": false
+  }
+}
