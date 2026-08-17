@@ -14,6 +14,8 @@ type E2e {
   let configModulePath: String! = fixtureRoot + "/config/app"
   let configuredModulePath: String! = fixtureRoot + "/config/configured"
   let tomlModulePath: String! = fixtureRoot + "/toml/app"
+  let runtimeModulePath: String! = fixtureRoot + "/runtime/app"
+  let runtimeGreeting: String! = "served by the python-sdk runtime"
   let mixedDiscoveryModulePath: String! = fixtureRoot + "/mixed-discovery/ancestor/work/app"
   let mixedDiscoveryNestedPath: String! = mixedDiscoveryModulePath + "/nested/deeper"
 
@@ -292,9 +294,107 @@ type E2e {
 
   """
   The SDK should report the builtin runtime that modules it authors target.
+
+  Still the builtin: modules created by this SDK move to this repository's own
+  runtime only once `runtime/` exists on the default branch, since the ref they
+  would record resolves from there rather than from a pull request.
   """
   pub targetRuntimeCheck: Void @check {
     assert(pythonSdk.targetRuntime == "python", "targetRuntime should be the python builtin runtime")
+
+    null
+  }
+
+  """
+  A module whose runtime is this repository's own should build and run.
+
+  Driven through a released CLI so nothing about the call is mocked: the
+  fixture points its `[runtime] source` at `runtime/` by relative path, so
+  what answers is the runtime in this working tree, not a published one.
+  """
+  pub runtimeCallCheck(ws: Workspace!): Void @check {
+    let run = sdkSdk
+      .target(ws.directory("/"), ".")
+      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
+    run.assertSuccess
+    assertContains(run.stdout, runtimeGreeting, "the module did not run on this repository's runtime")
+
+    null
+  }
+
+  """
+  The runtime must refuse a module whose generated files are missing rather
+  than quietly regenerating them.
+
+  This is the no-codegen-at-module-load contract. The engine's builtin runtime
+  honours it too, so this is not a behaviour difference — it is proof that this
+  implementation of it works.
+  """
+  pub runtimeRequiresGeneratedFilesCheck(ws: Workspace!): Void @check {
+    let stripped = ws
+      .directory("/")
+      .withoutFile(runtimeModulePath + "/sdk/pyproject.toml")
+    let run = sdkSdk
+      .target(stripped, ".")
+      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
+    run.assertFailure
+    assertContains(run.stderr, "run `dagger generate` and commit", "the runtime did not report the missing generated file")
+
+    null
+  }
+
+  """
+  Path of the runtime fixture inside the sdk-sdk harness's scratch workspace,
+  where this repository is vendored rather than sitting at the root.
+  """
+  let runtimeFixturePath: String! = "vendor/sdk-workspace/" + fixtureRoot + "/runtime/app"
+
+  """
+  The runtime module's own directory, vendored client library included.
+  """
+  let runtimeSource(ws: Workspace!): Directory! {
+    ws
+      .directory("/", include: ["runtime/**", "!runtime/**/.venv", "!runtime/**/__pycache__"])
+      .directory("runtime")
+  }
+
+  """
+  The runtime's Go unit tests should pass.
+
+  This also compiles the committed generated bindings, which is the only place
+  a mismatch between them and the runtime's source would show up before a
+  module tries to load.
+  """
+  pub runtimeGoTestCheck(ws: Workspace!): Void @check {
+    container
+      .from("golang:1.26-alpine")
+      .withoutEntrypoint
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withDirectory("/runtime", runtimeSource(ws), exclude: ["sdk"])
+      .withWorkdir("/runtime")
+      .withExec(["go", "test", "./..."], experimentalPrivilegedNesting: true)
+      .sync
+
+    null
+  }
+
+  """
+  The vendored client library and code generator should pass their own tests.
+
+  These are the upstream suites for exactly what this repository now owns:
+  generator output and module registration. They are what catches the vendored
+  copy breaking as it diverges from dagger/dagger's.
+  """
+  pub sdkTestCheck(ws: Workspace!): Void @check {
+    container
+      .from("ghcr.io/astral-sh/uv:python3.14-alpine")
+      .withoutEntrypoint
+      .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
+      .withDirectory("/sdk", runtimeSource(ws).directory("sdk"))
+      .withWorkdir("/sdk")
+      .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
+      .sync
 
     null
   }
