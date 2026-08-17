@@ -33,19 +33,25 @@ func TestProjectNameNormalization(t *testing.T) {
 }
 
 func TestPackageNameNormalization(t *testing.T) {
-	// Valid "pyproject.toml" names
-	inputs := []string{
+	// NormalizePackageName documents that it takes an already-normalized
+	// project name, so that is what it gets here; the messier module names it
+	// used to be handed directly are covered by TestProjectNameNormalization,
+	// which is the step that actually normalizes them.
+	require.Equal(t, "friendly_bard", NormalizePackageName("friendly-bard"))
+	require.Equal(t, "friendly_2", NormalizePackageName("friendly-2"))
+
+	// The two steps compose: any module name reaches the same package name,
+	// which is the path discovery takes.
+	for _, input := range []string{
 		"friendly-bard",
 		"Friendly-Bard",
 		"FRIENDLY-BARD",
 		"friendly.bard",
 		"friendly_bard",
 		"friendly--bard",
-		"FrIeNdLy-._.-bArD",
+		"friendlyBard",
+	} {
+		got := NormalizePackageName(NormalizeProjectNameFromModule(input))
+		require.Equalf(t, "friendly_bard", got, "input: %s", input)
 	}
-	for _, input := range inputs {
-		// require.Equal(t, "friendly-bard",  NormalizeProjectName(input)
-		require.Equalf(t, "friendly_bard", NormalizePackageName(input), "input: %s", input)
-	}
-	require.Equal(t, "friendly_2", NormalizePackageName("friendly-2"))
 }
