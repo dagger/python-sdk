@@ -370,7 +370,7 @@ func (d *Discovery) loadFiles(ctx context.Context, m *PythonSdkRuntime) error {
 func (d *Discovery) loadConfig(ctx context.Context, m *PythonSdkRuntime) error {
 	// d.Files can be empty if EnableCustomConfig is false, which can be disabled
 	// on extension modules. Otherwise, `pyproject.toml` can only be empty
-	// on `dagger init`, in which case it will be created from template.
+	// on `dagger init`, in which case it is created by this SDK's initModule.
 	contents, exists := d.Files["pyproject.toml"]
 	if !exists {
 		return nil

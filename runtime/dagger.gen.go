@@ -530,13 +530,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
 			return (*PythonSdkRuntime).WithSource(&parent), nil
-		case "WithTemplate":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			return (*PythonSdkRuntime).WithTemplate(&parent), nil
 		case "WithUpdates":
 			var parent PythonSdkRuntime
 			err = json.Unmarshal(parentJSON, &parent)
@@ -728,11 +721,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Add the module's source code").
 							WithSourceMap(dag.SourceMap("main.go", 505, 1))).
-					WithFunction(
-						dag.Function("WithTemplate",
-							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithDescription("Add the template files to skaffold a new module\n\nThe following files are added:\n- /runtime\n- <source>/pyproject.toml\n- <source>/src/<package_name>/__init__.py\n- <source>/src/<package_name>/main.py").
-							WithSourceMap(dag.SourceMap("main.go", 381, 1))).
 					WithFunction(
 						dag.Function("WithUpdates",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).

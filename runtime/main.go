@@ -4,10 +4,8 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"path"
-	"strings"
 
 	"python-sdk-runtime/internal/dagger"
 )
@@ -23,7 +21,6 @@ const (
 	ProjectCfg            = "pyproject.toml"
 	PipCompileLock        = "requirements.lock"
 	UvLock                = "uv.lock"
-	MainObjectName        = "Main"
 )
 
 // UserConfig is the custom user configuration that users can add to their pyproject.toml.
@@ -95,15 +92,6 @@ func New(
 	}, nil
 }
 
-//go:embed template/pyproject.toml
-var tplToml string
-
-//go:embed template/__init__.py
-var tplInit string
-
-//go:embed template/main.py
-var tplMain string
-
 // Functions for building the runtime module for the Python SDK.
 //
 // The server interacts directly with the ModuleRuntime and Codegen functions.
@@ -162,12 +150,11 @@ type PythonSdkRuntime struct {
 	// It's assumed that this is the case if there's no pyproject.toml file.
 	IsInit bool
 
-	// TrustedSource is true when the runtime is built from the module's
-	// committed generated files: the committed vendored sdk is kept as-is
-	// (not stripped and re-vendored), no client bindings are generated, and
-	// lock files are trusted rather than updated. Set when the engine calls
-	// ModuleRuntime without introspection JSON, which it only does for
-	// modules that opted out of runtime codegen.
+	// TrustedSource is true when building the module rather than generating
+	// its code: the committed vendored sdk is kept as-is (not stripped and
+	// re-vendored) and the committed lock file is trusted rather than
+	// re-resolved. Set by ModuleRuntime and never by Codegen, which is the
+	// one path that legitimately rewrites those files.
 	// +private
 	TrustedSource bool
 
@@ -199,44 +186,31 @@ func (m *PythonSdkRuntime) Codegen(
 	}
 
 	return dag.
-		GeneratedCode(
-			m.Container.Directory(m.ContextDirPath).
-				WithoutDirectory("sdk/runtime")).
+		GeneratedCode(m.Container.Directory(m.ContextDirPath)).
 		WithVCSGeneratedPaths(genPaths).
 		WithVCSIgnoredPaths(ignorePaths), nil
 }
 
 // Container for executing the Python module runtime
+//
+// The container is built from the module's committed generated files: no SDK
+// vendoring, no client bindings generation, no lock update. Dependencies are
+// still installed — the language-level assemble step, like the Go SDK still
+// running go build on its trusted path.
+//
+// introspectionJSON is declared and unused on purpose. Its optionality is the
+// signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may skip
+// runtime codegen and omit the argument entirely, which it does for every
+// dagger-module.toml module — the only kind this runtime is meant to serve.
+// A legacy dagger.json module that named this runtime explicitly would still
+// be handed one; it is ignored, so such a module works if it has committed its
+// generated files and fails the check below with an actionable error if not.
 func (m *PythonSdkRuntime) ModuleRuntime(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	// +optional
 	introspectionJSON *dagger.File,
 ) (*dagger.Container, error) {
-	// The engine omits the introspection JSON for dagger-module.toml
-	// modules, which never run codegen at runtime: trust the committed
-	// generated files instead of regenerating them.
-	if introspectionJSON == nil {
-		return m.moduleRuntimeTrusted(ctx, modSource)
-	}
-	runtime, err := m.Common(ctx, modSource, introspectionJSON)
-	if err != nil {
-		return nil, err
-	}
-	runtime = runtime.WithInstall()
-	ctr := runtime.Container
-	if runtime.Debug {
-		ctr = ctr.Terminal()
-	}
-	return ctr, nil
-}
-
-// moduleRuntimeTrusted builds the runtime container from the module's
-// committed generated files: no SDK vendoring, no client bindings
-// generation, no lock update. Dependencies are still installed (the
-// language-level assemble step, like the Go SDK still running go build on
-// its trusted path).
-func (m *PythonSdkRuntime) moduleRuntimeTrusted(ctx context.Context, modSource *dagger.ModuleSource) (*dagger.Container, error) {
 	m.TrustedSource = true
 
 	if _, err := m.Load(ctx, modSource); err != nil {
@@ -290,7 +264,11 @@ func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 	return nil
 }
 
-// Common steps for the ModuleRuntime and Codegen functions
+// Common steps for the Codegen function
+//
+// ModuleRuntime no longer shares this: it builds from committed files and so
+// runs neither WithSDK nor WithUpdates. Kept exported and granular because
+// extension SDKs compose it.
 func (m *PythonSdkRuntime) Common(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
@@ -309,13 +287,21 @@ func (m *PythonSdkRuntime) Common(
 	if err != nil {
 		return nil, err
 	}
+	// Upstream seeded a pyproject.toml from a template here. Templates live in
+	// this repository's initModule now, so say what is missing rather than
+	// letting `uv lock` fail on an empty directory further down.
+	if m.IsInit {
+		return nil, fmt.Errorf(
+			"module %q has no Python source to generate from; create it with `dagger module init python`",
+			m.ModName)
+	}
 	_, err = m.WithBase()
 	if err != nil {
 		return nil, err
 	}
 	return m.
 		WithSDK(introspectionJSON).
-		WithTemplate().
+		withRuntimeScript().
 		WithSource().
 		WithUpdates(), nil
 }
@@ -395,75 +381,13 @@ func (m *PythonSdkRuntime) uv() dagger.WithContainerFunc {
 	}
 }
 
-// Add the template files to skaffold a new module
-//
-// The following files are added:
-// - /runtime
-// - <source>/pyproject.toml
-// - <source>/src/<package_name>/__init__.py
-// - <source>/src/<package_name>/main.py
-func (m *PythonSdkRuntime) WithTemplate() *PythonSdkRuntime {
-	m = m.withRuntimeScript()
-
-	d := m.Discovery
-
-	// NB: We can't detect if it's a new module with `dagger develop --sdk`
-	// if there's also a pyproject.toml file to customize the base container.
-	//
-	// The reason for adding sources only on new modules is because it's
-	// been reported that it's surprising for users to delete the pyhton
-	// file on the host and not fail on `dagger functions` and `dagger call`,
-	// if we always recreate from the template. That's because only `init`
-	// and `develop` export the generated files back to the host, potentially
-	// creating a discrepancy.
-	//
-	// Throwing an error on missing files when not a new module is less
-	// surprising, which is done during discovery.
-
-	if m.IsInit {
-		// On `dagger init --sdk`, one can first set a `pyproject.toml` to
-		// change the base image, but if it's `dagger develop --sdk` the
-		// existence of this file will set d.IsInit = true, thus skipping
-		// this entire branch.
-		if !d.HasFile(ProjectCfg) {
-			projCfg := strings.ReplaceAll(tplToml, "main", m.ProjectName)
-			// Align the template's requires-python with the version the
-			// runtime actually selected (typically from .python-version),
-			// otherwise a freshly created pyproject can declare a higher
-			// minimum than the Python that ends up in the container and uv
-			// will refuse to lock.
-			if version := d.findPythonVersion(); version != "" {
-				projCfg = strings.Replace(
-					projCfg,
-					`requires-python = ">=3.14"`,
-					fmt.Sprintf(`requires-python = ">=%s"`, version),
-					1,
-				)
-			}
-			m.AddNewFile(ProjectCfg, VendorConfig(projCfg, m.VendorPath))
-		}
-		if !d.HasFile("*.py") {
-			m.AddNewFile(
-				path.Join("src", m.PackageName, "__init__.py"),
-				strings.ReplaceAll(tplInit, MainObjectName, m.MainObjectName),
-			)
-			m.AddNewFile(
-				path.Join("src", m.PackageName, "main.py"),
-				strings.ReplaceAll(tplMain, MainObjectName, m.MainObjectName),
-			)
-		}
-	}
-
-	return m
-}
-
 // withRuntimeScript mounts the runtime entrypoint script and sets it as the
 // container entrypoint.
 func (m *PythonSdkRuntime) withRuntimeScript() *PythonSdkRuntime {
 	m.Container = m.Container.
 		WithFile(
 			RuntimeExecutablePath,
-			dag.CurrentModule().Source().File("template/runtime.py"),
+			dag.CurrentModule().Source().File("runtime.py"),
 			dagger.ContainerWithFileOpts{Permissions: 0o755},
 		).
 		WithEntrypoint([]string{RuntimeExecutablePath})
