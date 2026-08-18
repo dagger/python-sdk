@@ -46,7 +46,7 @@ by name. `targetRuntime` — what `dagger module init python` writes into a new
 module — is therefore still `python` today; it moves to
 `github.com/dagger/python-sdk/runtime` in a follow-up, once `runtime/` exists
 on the default branch for that ref to resolve to. See
-[`future/self-contained-python-sdk.md`](./future/self-contained-python-sdk.md)
+[`future/done/self-contained-python-sdk.md`](./future/done/self-contained-python-sdk.md)
 for the full reasoning and for the engine change that would let one name serve
 both.
 
