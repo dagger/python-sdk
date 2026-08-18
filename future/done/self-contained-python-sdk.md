@@ -2,7 +2,7 @@
 
 author: yves
 created: 2026-08-17
-status: in progress
+status: done (PR 1 of 2 landed as a draft; PR 2 flips targetRuntime)
 related: `github.com/dagger/dagger` `future/spin-out-generated-clients.md`,
 `future/sdk-tests.md`; `github.com/dagger/java-sdk` (prior art)
 
@@ -285,7 +285,7 @@ the Chief of Staff, not folded in.
 
 ## Affected components (PR 1)
 
-- `future/self-contained-python-sdk.md` (this doc)
+- `future/done/self-contained-python-sdk.md` (this doc)
 - `runtime/**` (new) — the simplified module runtime
 - `runtime/sdk/**` (new) — vendored client library + code generator
 - `python-sdk.dang` — `tomlConfigPattern` widened
@@ -535,6 +535,10 @@ behaviour is untouched; `discovery.go` already passes it a normalized name.
   - Host: GitHub. CI: Dagger Cloud checks driven by `dagger.toml` (no
     `.github/`).
 - Phase 1/2 — feature doc + implementation plan: this document.
+- Phases 6–8 — draft PR https://github.com/dagger/python-sdk/pull/17 at
+  `49cb500`, **39/39 CI checks green**, doc archived here. PR 2 (the
+  `targetRuntime` flip plus its check) is the remaining work, and is unblocked
+  now that `runtime/` is on the default branch.
 - Phase 5 — code review: **passed**. Two independent reviewers on the diff, no
   blockers. Fixes applied: the deviation-1 diagnosis was wrong and is corrected
   above (polyfill's generate helper, not an engine limit — and therefore
