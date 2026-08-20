@@ -69,9 +69,6 @@ type Discovery struct {
 	// DefaultImages is a map of default container image addresses.
 	DefaultImages map[string]Image
 
-	// FileSet is a set of file names in the SDK source directory.
-	SdkFileSet map[string]struct{}
-
 	// FileSet is a set of file names from an initial Entries() call for quick lookups.
 	FileSet map[string]struct{}
 
@@ -101,7 +98,6 @@ func NewDiscovery(cfg UserConfig) (*Discovery, error) {
 		Config:        proj,
 		DefaultImages: images,
 		Images:        make(map[string]Image),
-		SdkFileSet:    make(map[string]struct{}),
 		FileSet:       make(map[string]struct{}),
 		Files:         make(map[string]string),
 
@@ -126,22 +122,6 @@ func (d *Discovery) HasFile(name string) bool {
 	return ok
 }
 
-// SdkHasFile returns true if the file exists in the SDK's source directory.
-func (d *Discovery) SdkHasFile(name string) bool {
-	_, ok := d.SdkFileSet[name]
-	return ok
-}
-
-// AddNewFile adds a new file, with contents, to the module's source.
-func (m *PythonSdkRuntime) AddNewFile(name, contents string) {
-	m.ContextDir = m.ContextDir.WithNewFile(path.Join(m.SubPath, name), contents)
-}
-
-// AddFile adds a file to the module's source.
-func (m *PythonSdkRuntime) AddFile(name string, file *dagger.File) {
-	m.ContextDir = m.ContextDir.WithFile(path.Join(m.SubPath, name), file)
-}
-
 // GetFile returns a file from the module's source.
 func (m *PythonSdkRuntime) GetFile(name string) *dagger.File {
 	return m.ContextDir.File(path.Join(m.SubPath, name))
@@ -151,11 +131,6 @@ func (m *PythonSdkRuntime) GetFile(name string) *dagger.File {
 func (m *PythonSdkRuntime) UseUvLock() bool {
 	d := m.Discovery
 	return m.UseUv() && (d.HasFile(UvLock) || !d.HasFile(PipCompileLock) && m.IsInit)
-}
-
-// AddDirectory adds a directory to the module's source.
-func (m *PythonSdkRuntime) AddDirectory(name string, dir *dagger.Directory) {
-	m.ContextDir = m.ContextDir.WithDirectory(path.Join(m.SubPath, name), dir)
 }
 
 // We could use modSource.Directory("") but we'll need to use the
@@ -292,9 +267,8 @@ func (d *Discovery) loadFiles(ctx context.Context, m *PythonSdkRuntime) error {
 	// These paths should be in "exclude" in dagger.json.
 	// Let's remove them just in case, to avoid conflicts.
 	for _, exclude := range DirExcludes {
-		if m.TrustedSource && exclude == GenDir {
-			// The committed vendored sdk is the trusted codegen output;
-			// it won't be re-vendored so keep it.
+		if exclude == GenDir {
+			// The committed vendored sdk is what this runtime builds from.
 			continue
 		}
 		if d.HasFile(exclude) {
@@ -338,28 +312,6 @@ func (d *Discovery) loadFiles(ctx context.Context, m *PythonSdkRuntime) error {
 			// a pyproject.toml present to customize the base container.
 			return fmt.Errorf("no python files found in module source")
 		}
-		return nil
-	})
-
-	eg.Go(func() error {
-		entries, _ := m.SdkSourceDir.Entries(gctx)
-		d.mu.Lock()
-		for _, entry := range entries {
-			d.SdkFileSet[entry] = struct{}{}
-		}
-		// quick check to avoid an unnecessary request
-		hasDist := d.SdkHasFile("dist/")
-		d.mu.Unlock()
-
-		if hasDist {
-			entries, _ = m.SdkSourceDir.Glob(gctx, "dist/*")
-			d.mu.Lock()
-			for _, entry := range entries {
-				d.SdkFileSet[entry] = struct{}{}
-			}
-			d.mu.Unlock()
-		}
-
 		return nil
 	})
 

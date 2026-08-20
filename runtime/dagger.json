@@ -7,10 +7,7 @@
   "include": [
     "!**/.venv",
     "!**/__pycache__",
-    "!**/*.pyc",
-    "!sdk/.mypy_cache",
-    "!sdk/.pytest_cache",
-    "!sdk/.ruff_cache"
+    "!**/*.pyc"
   ],
   "codegen": {
     "automaticGitignore": false

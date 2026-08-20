@@ -16,7 +16,6 @@ const (
 	GenDir                = "sdk"
 	SDKGenPath            = "src/dagger/client/gen.py"
 	UserGenPath           = "src/dagger_gen.py"
-	SchemaPath            = "/schema.json"
 	VenvPath              = "/opt/venv"
 	ProjectCfg            = "pyproject.toml"
 	PipCompileLock        = "requirements.lock"
@@ -43,40 +42,7 @@ type UserConfig struct {
 	UvVersion string `toml:"uv-version"`
 }
 
-// sdkSourceFilter is what a contextual `+ignore` used to do for sdkSourceDir:
-// keep the library and the code generator, and nothing else, out of whatever
-// happens to sit next to them. It has to be applied by hand now that the
-// directory comes from the module's own source.
-var sdkSourceFilter = []string{
-	"**",
-	"!pyproject.toml",
-	"!uv.lock",
-	"!src/**/*.py",
-	"!src/**/*.typed",
-	"!codegen/pyproject.toml",
-	"!codegen/**/*.py",
-	"!LICENSE",
-	"!README.md",
-	"!dist/*",
-}
-
-func New(
-	// Directory with the Python SDK source code. Defaults to the copy vendored
-	// in this module; extension SDKs can pass their own.
-	//
-	// NB: deliberately not a contextual (+defaultPath) argument. Contextual
-	// resolution is redirected to a Workspace bound into the context when there
-	// is one, which for a runtime loaded by ref means the *consuming* workspace
-	// rather than this module. currentModule().source() has no such ambiguity.
-	// +optional
-	sdkSourceDir *dagger.Directory,
-) (*PythonSdkRuntime, error) {
-	if sdkSourceDir == nil {
-		sdkSourceDir = dag.CurrentModule().
-			Source().
-			Directory("sdk").
-			Filter(dagger.DirectoryFilterOpts{Exclude: sdkSourceFilter})
-	}
+func New() (*PythonSdkRuntime, error) {
 	d, err := NewDiscovery(UserConfig{
 		UseUv: true,
 	})
@@ -84,10 +50,9 @@ func New(
 		return nil, err
 	}
 	return &PythonSdkRuntime{
-		Discovery:    d,
-		SdkSourceDir: sdkSourceDir,
-		Container:    dag.Container(),
-		// TODO: remove the following when we no longer vendor every time
+		Discovery: d,
+		Container: dag.Container(),
+		// Where a module commits its vendored client library.
 		VendorPath: GenDir,
 	}, nil
 }
@@ -98,9 +63,6 @@ func New(
 // The others were built to be composable and chainable to facilitate the
 // creation of extension modules (custom SDKs that depend on this one).
 type PythonSdkRuntime struct {
-	// Directory with the Python SDK source code
-	SdkSourceDir *dagger.Directory
-
 	// Resulting container after each composing step
 	Container *dagger.Container
 
@@ -150,45 +112,24 @@ type PythonSdkRuntime struct {
 	// It's assumed that this is the case if there's no pyproject.toml file.
 	IsInit bool
 
-	// TrustedSource is true when building the module rather than generating
-	// its code: the committed vendored sdk is kept as-is (not stripped and
-	// re-vendored) and the committed lock file is trusted rather than
-	// re-resolved. Set by ModuleRuntime and never by Codegen, which is the
-	// one path that legitimately rewrites those files.
-	// +private
-	TrustedSource bool
-
 	// Discovery holds the logic for getting more information from the target module.
 	// +private
 	Discovery *Discovery
 }
 
 // Generated code for the Python module
+//
+// A no-op: this repository's SDK module owns code generation, through its
+// `@generate` hook, and modules reaching this runtime already carry their
+// generated files. The function stays because the engine treats its presence
+// as the SDK's code-generator capability, and would otherwise route generation
+// elsewhere.
 func (m *PythonSdkRuntime) Codegen(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJSON *dagger.File,
 ) (*dagger.GeneratedCode, error) {
-	m, err := m.Common(ctx, modSource, introspectionJSON)
-	if err != nil {
-		return nil, err
-	}
-
-	ignorePaths := []string{".venv", "**/__pycache__"}
-	genPaths := []string{
-		// TODO: uncomment when we start generating client bindings outside the library
-		// UserGenPath,
-	}
-
-	if m.VendorPath != "" {
-		ignorePaths = append(ignorePaths, m.VendorPath)
-		genPaths = []string{m.VendorPath + "/**"}
-	}
-
-	return dag.
-		GeneratedCode(m.Container.Directory(m.ContextDirPath)).
-		WithVCSGeneratedPaths(genPaths).
-		WithVCSIgnoredPaths(ignorePaths), nil
+	return dag.GeneratedCode(modSource.ContextDirectory()), nil
 }
 
 // Container for executing the Python module runtime
@@ -211,8 +152,6 @@ func (m *PythonSdkRuntime) ModuleRuntime(
 	// +optional
 	introspectionJSON *dagger.File,
 ) (*dagger.Container, error) {
-	m.TrustedSource = true
-
 	if _, err := m.Load(ctx, modSource); err != nil {
 		return nil, err
 	}
@@ -262,48 +201,6 @@ func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 			m.ModName, rel)
 	}
 	return nil
-}
-
-// Common steps for the Codegen function
-//
-// ModuleRuntime no longer shares this: it builds from committed files and so
-// runs neither WithSDK nor WithUpdates. Kept exported and granular because
-// extension SDKs compose it.
-func (m *PythonSdkRuntime) Common(
-	ctx context.Context,
-	modSource *dagger.ModuleSource,
-	// +optional
-	introspectionJSON *dagger.File,
-) (*PythonSdkRuntime, error) {
-	// The following functions were built to be composable in a granular way,
-	// to allow a custom SDK to depend on this one and hook into before or
-	// after major steps in the process. For example, you can get the base
-	// container, add system packages, use the new one with `WithContainer`,
-	// and then continue with the rest of the steps. Without this, you'd need
-	// to copy the entire function and modify it.
-
-	// NB: In extension modules, Load is chainable.
-	_, err := m.Load(ctx, modSource)
-	if err != nil {
-		return nil, err
-	}
-	// Upstream seeded a pyproject.toml from a template here. Templates live in
-	// this repository's initModule now, so say what is missing rather than
-	// letting `uv lock` fail on an empty directory further down.
-	if m.IsInit {
-		return nil, fmt.Errorf(
-			"module %q has no Python source to generate from; create it with `dagger module init python`",
-			m.ModName)
-	}
-	_, err = m.WithBase()
-	if err != nil {
-		return nil, err
-	}
-	return m.
-		WithSDK(introspectionJSON).
-		withRuntimeScript().
-		WithSource().
-		WithUpdates(), nil
 }
 
 // Get all the needed information from the module's metadata and source files
@@ -363,13 +260,7 @@ func (m *PythonSdkRuntime) uv() dagger.WithContainerFunc {
 	uvImage := m.getImage(UvImageName)
 
 	return func(ctr *dagger.Container) *dagger.Container {
-		var bins *dagger.Directory
-		// Use bundled uv binaries if version wasn't overridden.
-		if m.Discovery.SdkHasFile("dist/uv") && uvImage.Equal(m.Discovery.DefaultImages[UvImageName]) {
-			bins = m.SdkSourceDir.Directory("dist")
-		} else {
-			bins = dag.Container().From(uvImage.String()).Rootfs()
-		}
+		bins := dag.Container().From(uvImage.String()).Rootfs()
 
 		return ctr.
 			WithMountedFile("/usr/local/bin/uv", bins.File("uv")).
@@ -394,61 +285,6 @@ func (m *PythonSdkRuntime) withRuntimeScript() *PythonSdkRuntime {
 	return m
 }
 
-// Add the SDK package to the source directory
-//
-// This includes regenerating the client bindings for the current API schema
-// (codegen).
-func (m *PythonSdkRuntime) WithSDK(introspectionJSON *dagger.File) *PythonSdkRuntime {
-	if m.VendorPath != "" {
-		src := m.SdkSourceDir
-		// If not vendoring we don't care to remove this
-		if m.Discovery.SdkHasFile("dist/") {
-			src = src.WithoutDirectory("dist")
-		}
-		m.AddDirectory(m.VendorPath, src)
-	}
-
-	// Allow empty introspection to facilitate debugging the container with a
-	// `dagger call module-runtime terminal` command.
-	if introspectionJSON != nil {
-		ctr := m.Container
-		cmd := []string{"codegen"}
-
-		// When not using the bundled codegen executable we can revert to executing directly
-		if m.Discovery.SdkHasFile("dist/codegen") {
-			ctr = ctr.
-				WithMountedCache("/root/.shiv", dag.CacheVolume("shiv")).
-				WithMountedFile("/usr/local/bin/codegen", m.SdkSourceDir.File("dist/codegen"))
-		} else {
-			ctr = ctr.
-				WithWorkdir("/sdk").
-				WithMountedDirectory("", m.SdkSourceDir)
-			cmd = []string{
-				"uv", "run", "--isolated", "--frozen", "--package", "codegen",
-				"python", "-m", "codegen",
-			}
-		}
-
-		genFile := ctr.
-			// mounted schema as late as possible because it varies more often
-			WithMountedFile(SchemaPath, introspectionJSON).
-			WithExec(append(cmd, "generate", "-i", SchemaPath, "-o", "/gen.py")).
-			File("/gen.py")
-
-		genPath := UserGenPath
-
-		// For now, patch vendored client library with generated bindings.
-		// TODO: Always generate outside library, even if vendored.
-		if m.VendorPath != "" {
-			genPath = path.Join(m.VendorPath, SDKGenPath)
-		}
-
-		m.AddFile(genPath, genFile)
-	}
-
-	return m
-}
-
 // Add the module's source code
 func (m *PythonSdkRuntime) WithSource() *PythonSdkRuntime {
 	m.Container = m.Container.
@@ -466,43 +302,6 @@ func (m *PythonSdkRuntime) WithSource() *PythonSdkRuntime {
 	return m
 }
 
-// Make any updates to current source
-func (m *PythonSdkRuntime) WithUpdates() *PythonSdkRuntime {
-	if !m.UseUv() {
-		return m
-	}
-
-	ctr := m.Container
-	d := m.Discovery
-
-	// Update lock file but without upgrading dependencies.
-	switch {
-	case m.UseUvLock():
-		// Support uv.lock. Takes precedence.
-		// Always update if uv.lock exists, but only create a new uv.lock
-		// if init and there's not already a requirements.lock.
-		ctr = ctr.WithExec([]string{"uv", "lock"})
-
-	case d.HasFile(PipCompileLock) && !m.IsInit:
-		// Support requirements.lock (legacy).
-		args := []string{
-			"uv", "pip", "compile", "-q", "--universal",
-			"-o", PipCompileLock,
-			ProjectCfg,
-		}
-
-		if m.VendorPath != "" {
-			args = append(args, path.Join(m.VendorPath, ProjectCfg))
-		}
-
-		ctr = ctr.WithExec(args)
-	}
-
-	m.Container = ctr
-
-	return m
-}
-
 // Install the module's package and dependencies
 func (m *PythonSdkRuntime) WithInstall() *PythonSdkRuntime {
 	// NB: Only enable bytecode compilation in `dagger call`
@@ -512,12 +311,9 @@ func (m *PythonSdkRuntime) WithInstall() *PythonSdkRuntime {
 
 	// Support uv.lock for simple and fast project management workflow.
 	if m.UseUvLock() {
-		syncArgs := []string{"uv", "sync", "--no-dev"}
-		if m.TrustedSource {
-			// Trust the committed lockfile: fail loudly if it's stale
-			// instead of silently re-resolving.
-			syncArgs = append(syncArgs, "--locked")
-		}
+		// Trust the committed lockfile: fail loudly if it's stale instead of
+		// silently re-resolving. Nothing here ever rewrites it.
+		syncArgs := []string{"uv", "sync", "--no-dev", "--locked"}
 		// While best practice is to sync dependencies first with only pyproject.toml and
 		// uv.lock, user projects can have more required files for a minimally successful
 		// `uv sync --no-install-project --no-dev`.
