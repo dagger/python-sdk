@@ -470,7 +470,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 		return dag.Module().
 			WithDescription("Runtime module for the Python SDK\n").
 			WithObject(
-				dag.TypeDef().WithObject("PythonSdkRuntime", dagger.TypeDefWithObjectOpts{Description: "Functions for building the runtime module for the Python SDK.\n\nThe server interacts directly with the ModuleRuntime and Codegen functions.\nThe others were built to be composable and chainable to facilitate the\ncreation of extension modules (custom SDKs that depend on this one).", SourceMap: dag.SourceMap("main.go", 88, 6)}).
+				dag.TypeDef().WithObject("PythonSdkRuntime", dagger.TypeDefWithObjectOpts{Description: "Functions for building the runtime module for the Python SDK.\n\nThe server interacts directly with the ModuleRuntime and Codegen functions.\nThe others were built to be composable and chainable to facilitate the\ncreation of extension modules (custom SDKs that depend on this one).", SourceMap: dag.SourceMap("main.go", 65, 6)}).
 					WithFunction(
 						dag.Function("BaseImage",
 							dag.TypeDef().WithKind(dagger.TypeDefKindStringKind)).
@@ -479,10 +479,10 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					WithFunction(
 						dag.Function("Codegen",
 							dag.TypeDef().WithObject("GeneratedCode")).
-							WithDescription("Generated code for the Python module").
-							WithSourceMap(dag.SourceMap("main.go", 156, 1)).
-							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 158, 2)}).
-							WithArg("introspectionJSON", dag.TypeDef().WithObject("File"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 159, 2)})).
+							WithDescription("Generated code for the Python module\n\nA no-op: this repository's SDK module owns code generation, through its\n`@generate` hook, and modules reaching this runtime already carry their\ngenerated files. The function stays because the engine treats its presence\nas the SDK's code-generator capability, and would otherwise route generation\nelsewhere.").
+							WithSourceMap(dag.SourceMap("main.go", 127, 1)).
+							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 129, 2)}).
+							WithArg("introspectionJSON", dag.TypeDef().WithObject("File"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 130, 2)})).
 					WithFunction(
 						dag.Function("ExtraIndexURL",
 							dag.TypeDef().WithKind(dagger.TypeDefKindStringKind)).
@@ -492,8 +492,8 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 						dag.Function("GetFile",
 							dag.TypeDef().WithObject("File")).
 							WithDescription("GetFile returns a file from the module's source.").
-							WithSourceMap(dag.SourceMap("discovery.go", 146, 1)).
-							WithArg("name", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 146, 29)})).
+							WithSourceMap(dag.SourceMap("discovery.go", 126, 1)).
+							WithArg("name", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 126, 36)})).
 					WithFunction(
 						dag.Function("IndexURL",
 							dag.TypeDef().WithKind(dagger.TypeDefKindStringKind)).
@@ -503,20 +503,20 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 						dag.Function("Load",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Get all the needed information from the module's metadata and source files").
-							WithSourceMap(dag.SourceMap("main.go", 300, 1)).
-							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 300, 47)})).
+							WithSourceMap(dag.SourceMap("main.go", 207, 1)).
+							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 207, 54)})).
 					WithFunction(
 						dag.Function("ModuleRuntime",
 							dag.TypeDef().WithObject("Container")).
-							WithDescription("Container for executing the Python module runtime").
-							WithSourceMap(dag.SourceMap("main.go", 186, 1)).
-							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 188, 2)}).
-							WithArg("introspectionJSON", dag.TypeDef().WithObject("File").WithOptional(true), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 190, 2)})).
+							WithDescription("Container for executing the Python module runtime\n\nThe container is built from the module's committed generated files: no SDK\nvendoring, no client bindings generation, no lock update. Dependencies are\nstill installed — the language-level assemble step, like the Go SDK still\nrunning go build on its trusted path.\n\nintrospectionJSON is declared and unused on purpose. Its optionality is the\nsignal the engine reads (RuntimeTrustsCommittedFiles) to decide it may skip\nruntime codegen and omit the argument entirely, which it does for every\ndagger-module.toml module — the only kind this runtime is meant to serve.\nA legacy dagger.json module that named this runtime explicitly would still\nbe handed one; it is ignored, so such a module works if it has committed its\ngenerated files and fails the check below with an actionable error if not.").
+							WithSourceMap(dag.SourceMap("main.go", 149, 1)).
+							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 151, 2)}).
+							WithArg("introspectionJSON", dag.TypeDef().WithObject("File").WithOptional(true), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 153, 2)})).
 					WithFunction(
 						dag.Function("Source",
 							dag.TypeDef().WithObject("Directory")).
 							WithDescription("We could use modSource.Directory(\"\") but we'll need to use the\ncontext directory in GeneratedCode later, so rather than trying\nto replace the source directory in the context directory, we'll\njust use the context directory with subpath everywhere.").
-							WithSourceMap(dag.SourceMap("discovery.go", 165, 1))).
+							WithSourceMap(dag.SourceMap("discovery.go", 140, 1))).
 					WithFunction(
 						dag.Function("UseUv",
 							dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind)).
@@ -526,7 +526,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 						dag.Function("UseUvLock",
 							dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind)).
 							WithDescription("UseUvLock returns true if the runtime should expect a uv.lock file.").
-							WithSourceMap(dag.SourceMap("discovery.go", 151, 1))).
+							WithSourceMap(dag.SourceMap("discovery.go", 131, 1))).
 					WithFunction(
 						dag.Function("UvImage",
 							dag.TypeDef().WithKind(dagger.TypeDefKindStringKind)).
@@ -541,7 +541,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 						dag.Function("WithBase",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Initialize the base Python container\n\nWorkdir is set to the module's source directory.").
-							WithSourceMap(dag.SourceMap("main.go", 319, 1))).
+							WithSourceMap(dag.SourceMap("main.go", 226, 1))).
 					WithFunction(
 						dag.Function("WithBaseImage",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
@@ -558,12 +558,12 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 						dag.Function("WithInstall",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Install the module's package and dependencies").
-							WithSourceMap(dag.SourceMap("main.go", 559, 1))).
+							WithSourceMap(dag.SourceMap("main.go", 306, 1))).
 					WithFunction(
 						dag.Function("WithSource",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Add the module's source code").
-							WithSourceMap(dag.SourceMap("main.go", 505, 1))).
+							WithSourceMap(dag.SourceMap("main.go", 289, 1))).
 					WithFunction(
 						dag.Function("WithUv",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
@@ -585,22 +585,22 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Disable the use of uv").
 							WithSourceMap(dag.SourceMap("extension.go", 88, 1))).
-					WithField("Container", dag.TypeDef().WithObject("Container"), dagger.TypeDefWithFieldOpts{Description: "Resulting container after each composing step", SourceMap: dag.SourceMap("main.go", 93, 2)}).
-					WithField("Debug", dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind), dagger.TypeDefWithFieldOpts{Description: "Whether the module runtime should run in debug mode.", SourceMap: dag.SourceMap("main.go", 96, 2)}).
-					WithField("ModName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The original module's name", SourceMap: dag.SourceMap("main.go", 99, 2)}).
-					WithField("ProjectName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The normalized python distribution package name (in pyproject.toml)", SourceMap: dag.SourceMap("main.go", 102, 2)}).
-					WithField("PackageName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The normalized python import package name (in the filesystem)", SourceMap: dag.SourceMap("main.go", 105, 2)}).
-					WithField("MainObjectName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The normalized main object name in Python", SourceMap: dag.SourceMap("main.go", 108, 2)}).
-					WithField("ModSource", dag.TypeDef().WithObject("ModuleSource"), dagger.TypeDefWithFieldOpts{Description: "The source needed to load and run a module", SourceMap: dag.SourceMap("main.go", 111, 2)}).
-					WithField("ContextDir", dag.TypeDef().WithObject("Directory"), dagger.TypeDefWithFieldOpts{Description: "ContextDir is a copy of the context directory from the module source\n\nWe add files to this directory, always joining paths with the source's\nsubpath. We could use modSource.Directory(\"\") for that if it was read-only,\nbut since we have to mount the context directory in the end, rather than\nmounting the context dir and then mounting the forked source dir on top,\nwe fork the context dir instead so there's only one mount in the end.", SourceMap: dag.SourceMap("main.go", 120, 2)}).
-					WithField("ContextDirPath", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "ContextDirPath is a unique host path for the module being loaded\n\nHACK: this property is computed as a unique value for a ModuleSource to\nprovide a unique path on the filesystem. This is because the uv cache\nuses hashes of source paths - so we need to have something unique, or we\ncan get very real conflicts in the uv cache.", SourceMap: dag.SourceMap("main.go", 128, 2)}).
-					WithField("SubPath", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "Relative path from the context directory to the source directory", SourceMap: dag.SourceMap("main.go", 131, 2)}).
-					WithField("VendorPath", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "Relative path to vendor client library into", SourceMap: dag.SourceMap("main.go", 134, 2)}).
-					WithField("IsInit", dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind), dagger.TypeDefWithFieldOpts{Description: "True if the module is new and we need to create files from the template\n\nIt's assumed that this is the case if there's no pyproject.toml file.", SourceMap: dag.SourceMap("main.go", 139, 2)}).
+					WithField("Container", dag.TypeDef().WithObject("Container"), dagger.TypeDefWithFieldOpts{Description: "Resulting container after each composing step", SourceMap: dag.SourceMap("main.go", 67, 2)}).
+					WithField("Debug", dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind), dagger.TypeDefWithFieldOpts{Description: "Whether the module runtime should run in debug mode.", SourceMap: dag.SourceMap("main.go", 70, 2)}).
+					WithField("ModName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The original module's name", SourceMap: dag.SourceMap("main.go", 73, 2)}).
+					WithField("ProjectName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The normalized python distribution package name (in pyproject.toml)", SourceMap: dag.SourceMap("main.go", 76, 2)}).
+					WithField("PackageName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The normalized python import package name (in the filesystem)", SourceMap: dag.SourceMap("main.go", 79, 2)}).
+					WithField("MainObjectName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The normalized main object name in Python", SourceMap: dag.SourceMap("main.go", 82, 2)}).
+					WithField("ModSource", dag.TypeDef().WithObject("ModuleSource"), dagger.TypeDefWithFieldOpts{Description: "The source needed to load and run a module", SourceMap: dag.SourceMap("main.go", 85, 2)}).
+					WithField("ContextDir", dag.TypeDef().WithObject("Directory"), dagger.TypeDefWithFieldOpts{Description: "ContextDir is a copy of the context directory from the module source\n\nWe add files to this directory, always joining paths with the source's\nsubpath. We could use modSource.Directory(\"\") for that if it was read-only,\nbut since we have to mount the context directory in the end, rather than\nmounting the context dir and then mounting the forked source dir on top,\nwe fork the context dir instead so there's only one mount in the end.", SourceMap: dag.SourceMap("main.go", 94, 2)}).
+					WithField("ContextDirPath", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "ContextDirPath is a unique host path for the module being loaded\n\nHACK: this property is computed as a unique value for a ModuleSource to\nprovide a unique path on the filesystem. This is because the uv cache\nuses hashes of source paths - so we need to have something unique, or we\ncan get very real conflicts in the uv cache.", SourceMap: dag.SourceMap("main.go", 102, 2)}).
+					WithField("SubPath", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "Relative path from the context directory to the source directory", SourceMap: dag.SourceMap("main.go", 105, 2)}).
+					WithField("VendorPath", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "Relative path to vendor client library into", SourceMap: dag.SourceMap("main.go", 108, 2)}).
+					WithField("IsInit", dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind), dagger.TypeDefWithFieldOpts{Description: "True if the module is new and we need to create files from the template\n\nIt's assumed that this is the case if there's no pyproject.toml file.", SourceMap: dag.SourceMap("main.go", 113, 2)}).
 					WithConstructor(
 						dag.Function("New",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithSourceMap(dag.SourceMap("main.go", 46, 1)))), nil
+							WithSourceMap(dag.SourceMap("main.go", 45, 1)))), nil
 	default:
 		return nil, fmt.Errorf("unknown object %s", parentName)
 	}
