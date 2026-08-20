@@ -6,8 +6,10 @@
 > client library and code generator that the runtime above it vendors into the
 > modules it builds. `dagger/dagger` keeps its own copy to serve legacy
 > `dagger.json` modules; the two are expected to diverge from here.
-> Sphinx docs, changelog history and the client/provisioning test suites were
-> not carried over — only the tests covering what this repository now owns.
+> Sphinx docs and changelog history were not carried over. Of the test suites,
+> only `tests/codegen` and `tests/mod` came along; `tests/client` and
+> `tests/provisioning` did not, so the vendored connection and provisioning
+> code is carried without its tests.
 
 [![PyPI Version](https://img.shields.io/pypi/v/dagger-io)](https://pypi.org/project/dagger-io/)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/dagger-io.svg)](https://anaconda.org/conda-forge/dagger-io)
