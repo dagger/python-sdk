@@ -207,7 +207,11 @@ func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 func (m *PythonSdkRuntime) Load(ctx context.Context, modSource *dagger.ModuleSource) (*PythonSdkRuntime, error) {
 	m.ModSource = modSource
 	m.ContextDir = modSource.ContextDirectory()
-	debug, err := modSource.SDK().Debug(ctx)
+	sdkConfig, err := modSource.SDK(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("runtime module load: %w", err)
+	}
+	debug, err := sdkConfig.Debug(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("runtime module load: %w", err)
 	}

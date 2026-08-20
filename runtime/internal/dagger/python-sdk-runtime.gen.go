@@ -14,12 +14,9 @@ import (
 // The server interacts directly with the ModuleRuntime and Codegen functions.
 // The others were built to be composable and chainable to facilitate the
 // creation of extension modules (custom SDKs that depend on this one).
-type PythonSDKRuntime struct { // python-sdk-runtime (../../../../../:0:0)
+type PythonSDKRuntime struct { // python-sdk-runtime (../../../:0:0)
 	query *querybuilder.Selection
 
-	addDirectory   *Void
-	addFile        *Void
-	addNewFile     *Void
 	baseImage      *string
 	contextDirPath *string
 	debug          *bool
@@ -38,12 +35,12 @@ type PythonSDKRuntime struct { // python-sdk-runtime (../../../../../:0:0)
 	uvVersion      *string
 	vendorPath     *string
 }
-type WithPythonSDKFunc func(r *PythonSDKRuntime) *PythonSDKRuntime
+type WithPythonSDKRuntimeFunc func(r *PythonSDKRuntime) *PythonSDKRuntime
 
 // With calls the provided function with current PythonSDKRuntime.
 //
 // This is useful for reusability and readability by not breaking the calling chain.
-func (r *PythonSDKRuntime) With(f WithPythonSDKFunc) *PythonSDKRuntime {
+func (r *PythonSDKRuntime) With(f WithPythonSDKRuntimeFunc) *PythonSDKRuntime {
 	return f(r)
 }
 
@@ -51,44 +48,6 @@ func (r *PythonSDKRuntime) WithGraphQLQuery(q *querybuilder.Selection) *PythonSD
 	return &PythonSDKRuntime{
 		query: q,
 	}
-}
-
-// AddDirectory adds a directory to the module's source.
-func (r *PythonSDKRuntime) AddDirectory(ctx context.Context, name string, dir *Directory) error {
-	assertNotNil("dir", dir)
-	if r.addDirectory != nil {
-		return nil
-	}
-	q := r.query.Select("addDirectory")
-	q = q.Arg("name", name)
-	q = q.Arg("dir", dir)
-
-	return q.Execute(ctx)
-}
-
-// AddFile adds a file to the module's source.
-func (r *PythonSDKRuntime) AddFile(ctx context.Context, name string, file *File) error {
-	assertNotNil("file", file)
-	if r.addFile != nil {
-		return nil
-	}
-	q := r.query.Select("addFile")
-	q = q.Arg("name", name)
-	q = q.Arg("file", file)
-
-	return q.Execute(ctx)
-}
-
-// AddNewFile adds a new file, with contents, to the module's source.
-func (r *PythonSDKRuntime) AddNewFile(ctx context.Context, name string, contents string) error {
-	if r.addNewFile != nil {
-		return nil
-	}
-	q := r.query.Select("addNewFile")
-	q = q.Arg("name", name)
-	q = q.Arg("contents", contents)
-
-	return q.Execute(ctx)
 }
 
 // Image reference for the base container
@@ -105,6 +64,12 @@ func (r *PythonSDKRuntime) BaseImage(ctx context.Context) (string, error) {
 }
 
 // Generated code for the Python module
+//
+// A no-op: this repository's SDK module owns code generation, through its
+// `@generate` hook, and modules reaching this runtime already carry their
+// generated files. The function stays because the engine treats its presence
+// as the SDK's code-generator capability, and would otherwise route generation
+// elsewhere.
 func (r *PythonSDKRuntime) Codegen(modSource *ModuleSource, introspectionJson *File) *GeneratedCode {
 	assertNotNil("modSource", modSource)
 	assertNotNil("introspectionJson", introspectionJson)
@@ -113,28 +78,6 @@ func (r *PythonSDKRuntime) Codegen(modSource *ModuleSource, introspectionJson *F
 	q = q.Arg("introspectionJson", introspectionJson)
 
 	return &GeneratedCode{
-		query: q,
-	}
-}
-
-// PythonSDKCommonOpts contains options for PythonSDKRuntime.Common
-type PythonSDKCommonOpts struct {
-	IntrospectionJSON *File
-}
-
-// Common steps for the ModuleRuntime and Codegen functions
-func (r *PythonSDKRuntime) Common(modSource *ModuleSource, opts ...PythonSDKCommonOpts) *PythonSDKRuntime {
-	assertNotNil("modSource", modSource)
-	q := r.query.Select("common")
-	for i := len(opts) - 1; i >= 0; i-- {
-		// `introspectionJson` optional argument
-		if !querybuilder.IsZeroValue(opts[i].IntrospectionJSON) {
-			q = q.Arg("introspectionJson", opts[i].IntrospectionJSON)
-		}
-	}
-	q = q.Arg("modSource", modSource)
-
-	return &PythonSDKRuntime{
 		query: q,
 	}
 }
@@ -340,13 +283,26 @@ func (r *PythonSDKRuntime) ModSource() *ModuleSource {
 	}
 }
 
-// PythonSDKModuleRuntimeOpts contains options for PythonSDKRuntime.ModuleRuntime
-type PythonSDKModuleRuntimeOpts struct {
+// PythonSDKRuntimeModuleRuntimeOpts contains options for PythonSDKRuntime.ModuleRuntime
+type PythonSDKRuntimeModuleRuntimeOpts struct {
 	IntrospectionJSON *File
 }
 
 // Container for executing the Python module runtime
-func (r *PythonSDKRuntime) ModuleRuntime(modSource *ModuleSource, opts ...PythonSDKModuleRuntimeOpts) *Container {
+//
+// The container is built from the module's committed generated files: no SDK
+// vendoring, no client bindings generation, no lock update. Dependencies are
+// still installed — the language-level assemble step, like the Go SDK still
+// running go build on its trusted path.
+//
+// introspectionJSON is declared and unused on purpose. Its optionality is the
+// signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may skip
+// runtime codegen and omit the argument entirely, which it does for every
+// dagger-module.toml module — the only kind this runtime is meant to serve.
+// A legacy dagger.json module that named this runtime explicitly would still
+// be handed one; it is ignored, so such a module works if it has committed its
+// generated files and fails the check below with an actionable error if not.
+func (r *PythonSDKRuntime) ModuleRuntime(modSource *ModuleSource, opts ...PythonSDKRuntimeModuleRuntimeOpts) *Container {
 	assertNotNil("modSource", modSource)
 	q := r.query.Select("moduleRuntime")
 	for i := len(opts) - 1; i >= 0; i-- {
@@ -386,15 +342,6 @@ func (r *PythonSDKRuntime) ProjectName(ctx context.Context) (string, error) {
 
 	q = q.Bind(&response)
 	return response, q.Execute(ctx)
-}
-
-// Directory with the Python SDK source code
-func (r *PythonSDKRuntime) SDKSourceDir() *Directory {
-	q := r.query.Select("sdkSourceDir")
-
-	return &Directory{
-		query: q,
-	}
 }
 
 // We could use modSource.Directory("") but we'll need to use the
@@ -535,47 +482,9 @@ func (r *PythonSDKRuntime) WithInstall() *PythonSDKRuntime {
 	}
 }
 
-// Add the SDK package to the source directory
-//
-// This includes regenerating the client bindings for the current API schema
-// (codegen).
-func (r *PythonSDKRuntime) WithSDK(introspectionJson *File) *PythonSDKRuntime {
-	assertNotNil("introspectionJson", introspectionJson)
-	q := r.query.Select("withSdk")
-	q = q.Arg("introspectionJson", introspectionJson)
-
-	return &PythonSDKRuntime{
-		query: q,
-	}
-}
-
 // Add the module's source code
 func (r *PythonSDKRuntime) WithSource() *PythonSDKRuntime {
 	q := r.query.Select("withSource")
-
-	return &PythonSDKRuntime{
-		query: q,
-	}
-}
-
-// Add the template files to skaffold a new module
-//
-// The following files are added:
-// - /runtime
-// - <source>/pyproject.toml
-// - <source>/src/<package_name>/__init__.py
-// - <source>/src/<package_name>/main.py
-func (r *PythonSDKRuntime) WithTemplate() *PythonSDKRuntime {
-	q := r.query.Select("withTemplate")
-
-	return &PythonSDKRuntime{
-		query: q,
-	}
-}
-
-// Make any updates to current source
-func (r *PythonSDKRuntime) WithUpdates() *PythonSDKRuntime {
-	q := r.query.Select("withUpdates")
 
 	return &PythonSDKRuntime{
 		query: q,
@@ -623,20 +532,8 @@ func (r *PythonSDKRuntime) WithoutUv() *PythonSDKRuntime {
 	}
 }
 
-// PythonSDKRuntimeOpts contains options for Query.PythonSDKRuntime
-type PythonSDKRuntimeOpts struct {
-	// Directory with the Python SDK source code.
-	SDKSourceDir *Directory
-}
-
-func (r *Query) PythonSDKRuntime(opts ...PythonSDKRuntimeOpts) *PythonSDKRuntime { // python-sdk-runtime (../../../../../:0:0)
-	q := r.query.Select("pythonSdk")
-	for i := len(opts) - 1; i >= 0; i-- {
-		// `sdkSourceDir` optional argument
-		if !querybuilder.IsZeroValue(opts[i].SDKSourceDir) {
-			q = q.Arg("sdkSourceDir", opts[i].SDKSourceDir)
-		}
-	}
+func (r *Query) PythonSDKRuntime() *PythonSDKRuntime { // python-sdk-runtime (../../../:0:0)
+	q := r.query.Select("pythonSdkRuntime")
 
 	return &PythonSDKRuntime{
 		query: q,
