@@ -522,6 +522,43 @@ project name and only maps `-` to `_`. Corrected to test the documented
 contract plus the composed pipeline discovery actually uses. Production
 behaviour is untouched; `discovery.go` already passes it a normalized name.
 
+## Follow-up: generation moved out of the runtime
+
+Landed after the first review round, on Yves's call, before merge.
+
+The runtime module implemented `codegen` because this SDK's `@generate` hook
+did not generate anything itself: `generateAll` handed each module back to the
+engine (`polyfill … moduleSource(path).generate` →
+`GeneratedContextChangeset`), and the engine dispatches `codegen` to whatever
+the module's `[runtime] source` names. So `dagger generate` on a Python module
+ran the *engine's builtin* generator, and the code generator vendored here was
+never reached — embedding it bought nothing.
+
+Now `generateAll`/`Mod.generate` generate directly for `dagger-module.toml`
+modules: take the module's dependency schema, run `sdk/`'s code generator
+against it, vendor the result. `dagger.json` modules keep going through the
+engine, so the pre-1.0 path is untouched.
+
+Two things this depended on:
+
+- The schema must come from `ModuleSource.introspectionSchemaJSON`
+  (`core/schema/modulesource.go:257`), which loads only the *dependency*
+  modules. `Module.introspectionSchemaJSON` goes through `asModule`, which
+  builds the module's runtime — impossible before its bindings exist.
+- A public Dang function cannot return a dependency's type, so the shared
+  fork helper stays private and `generateAll` merges `Changeset`s instead.
+
+Consequences: the runtime's `codegen` is a no-op (kept, because the engine
+reads its presence as the SDK's code-generator capability), and everything that
+served it is gone — SDK vendoring, `Common`/`WithSDK`/`WithUpdates`,
+`SdkSourceDir` and its `dist/` probing, and `TrustedSource`, which now only ever
+had one value. The client library moved from `runtime/sdk/` to `sdk/`, since the
+authoring module is now its consumer and the runtime does not need it at all.
+
+This also closes the codegen coverage gap recorded above: `e2e:toml-generate-check`
+generates a `dagger-module.toml` module and asserts the result came from this
+SDK rather than the builtin, which vendors its whole `sdk/python` tree.
+
 ## Progress
 
 - Phase 0 — orientation: done.
