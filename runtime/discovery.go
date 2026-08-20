@@ -134,7 +134,7 @@ func (m *PythonSdkRuntime) UseUvLock() bool {
 }
 
 // We could use modSource.Directory("") but we'll need to use the
-// context directory in GeneratedCode later, so rather than trying
+// context directory later, so rather than trying
 // to replace the source directory in the context directory, we'll
 // just use the context directory with subpath everywhere.
 func (m *PythonSdkRuntime) Source() *dagger.Directory {
@@ -235,8 +235,8 @@ func (d *Discovery) loadModInfo(ctx context.Context, m *PythonSdkRuntime) error 
 	// the CLI changes the "sdk" field in dagger.json before loading the module.
 	//
 	// The boolean could be provided to the runtime module's constructor,
-	// the codegen function, or call a new and specific function only when using
-	// `--sdk` in the CLI, like `Init()`.
+	// the module runtime function, or call a new and specific function only when
+	// using `--sdk` in the CLI, like `Init()`.
 
 	eg.Go(func() error {
 		// If there's no dagger.json file, it's definitely a new module

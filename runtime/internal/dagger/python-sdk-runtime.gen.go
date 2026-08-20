@@ -11,9 +11,9 @@ import (
 
 // Functions for building the runtime module for the Python SDK.
 //
-// The server interacts directly with the ModuleRuntime and Codegen functions.
-// The others were built to be composable and chainable to facilitate the
-// creation of extension modules (custom SDKs that depend on this one).
+// The server interacts directly with ModuleRuntime. The others were built to be
+// composable and chainable to facilitate the creation of extension modules
+// (custom SDKs that depend on this one).
 type PythonSDKRuntime struct { // python-sdk-runtime (../../../:0:0)
 	query *querybuilder.Selection
 
@@ -61,25 +61,6 @@ func (r *PythonSDKRuntime) BaseImage(ctx context.Context) (string, error) {
 
 	q = q.Bind(&response)
 	return response, q.Execute(ctx)
-}
-
-// Generated code for the Python module
-//
-// A no-op: this repository's SDK module owns code generation, through its
-// `@generate` hook, and modules reaching this runtime already carry their
-// generated files. The function stays because the engine treats its presence
-// as the SDK's code-generator capability, and would otherwise route generation
-// elsewhere.
-func (r *PythonSDKRuntime) Codegen(modSource *ModuleSource, introspectionJson *File) *GeneratedCode {
-	assertNotNil("modSource", modSource)
-	assertNotNil("introspectionJson", introspectionJson)
-	q := r.query.Select("codegen")
-	q = q.Arg("modSource", modSource)
-	q = q.Arg("introspectionJson", introspectionJson)
-
-	return &GeneratedCode{
-		query: q,
-	}
 }
 
 // Resulting container after each composing step
@@ -290,18 +271,15 @@ type PythonSDKRuntimeModuleRuntimeOpts struct {
 
 // Container for executing the Python module runtime
 //
-// The container is built from the module's committed generated files: no SDK
-// vendoring, no client bindings generation, no lock update. Dependencies are
-// still installed — the language-level assemble step, like the Go SDK still
-// running go build on its trusted path.
+// The container is built from the module's committed generated files. This
+// runtime generates nothing: code generation belongs to `dagger generate`,
+// which the Python SDK module owns. Dependencies are still installed — the
+// language-level assemble step, like the Go SDK still running go build.
 //
-// introspectionJSON is declared and unused on purpose. Its optionality is the
-// signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may skip
-// runtime codegen and omit the argument entirely, which it does for every
-// dagger-module.toml module — the only kind this runtime is meant to serve.
-// A legacy dagger.json module that named this runtime explicitly would still
-// be handed one; it is ignored, so such a module works if it has committed its
-// generated files and fails the check below with an actionable error if not.
+// introspectionJSON is declared, and never read, on purpose: its optionality is
+// the signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may
+// skip runtime codegen and omit the argument altogether. Dropping the argument
+// would tell the engine the opposite. It is the opt-out, not a code path.
 func (r *PythonSDKRuntime) ModuleRuntime(modSource *ModuleSource, opts ...PythonSDKRuntimeModuleRuntimeOpts) *Container {
 	assertNotNil("modSource", modSource)
 	q := r.query.Select("moduleRuntime")
@@ -345,7 +323,7 @@ func (r *PythonSDKRuntime) ProjectName(ctx context.Context) (string, error) {
 }
 
 // We could use modSource.Directory("") but we'll need to use the
-// context directory in GeneratedCode later, so rather than trying
+// context directory later, so rather than trying
 // to replace the source directory in the context directory, we'll
 // just use the context directory with subpath everywhere.
 func (r *PythonSDKRuntime) Source() *Directory {

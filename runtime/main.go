@@ -59,9 +59,9 @@ func New() (*PythonSdkRuntime, error) {
 
 // Functions for building the runtime module for the Python SDK.
 //
-// The server interacts directly with the ModuleRuntime and Codegen functions.
-// The others were built to be composable and chainable to facilitate the
-// creation of extension modules (custom SDKs that depend on this one).
+// The server interacts directly with ModuleRuntime. The others were built to be
+// composable and chainable to facilitate the creation of extension modules
+// (custom SDKs that depend on this one).
 type PythonSdkRuntime struct {
 	// Resulting container after each composing step
 	Container *dagger.Container
@@ -117,35 +117,17 @@ type PythonSdkRuntime struct {
 	Discovery *Discovery
 }
 
-// Generated code for the Python module
-//
-// A no-op: this repository's SDK module owns code generation, through its
-// `@generate` hook, and modules reaching this runtime already carry their
-// generated files. The function stays because the engine treats its presence
-// as the SDK's code-generator capability, and would otherwise route generation
-// elsewhere.
-func (m *PythonSdkRuntime) Codegen(
-	ctx context.Context,
-	modSource *dagger.ModuleSource,
-	introspectionJSON *dagger.File,
-) (*dagger.GeneratedCode, error) {
-	return dag.GeneratedCode(modSource.ContextDirectory()), nil
-}
-
 // Container for executing the Python module runtime
 //
-// The container is built from the module's committed generated files: no SDK
-// vendoring, no client bindings generation, no lock update. Dependencies are
-// still installed — the language-level assemble step, like the Go SDK still
-// running go build on its trusted path.
+// The container is built from the module's committed generated files. This
+// runtime generates nothing: code generation belongs to `dagger generate`,
+// which the Python SDK module owns. Dependencies are still installed — the
+// language-level assemble step, like the Go SDK still running go build.
 //
-// introspectionJSON is declared and unused on purpose. Its optionality is the
-// signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may skip
-// runtime codegen and omit the argument entirely, which it does for every
-// dagger-module.toml module — the only kind this runtime is meant to serve.
-// A legacy dagger.json module that named this runtime explicitly would still
-// be handed one; it is ignored, so such a module works if it has committed its
-// generated files and fails the check below with an actionable error if not.
+// introspectionJSON is declared, and never read, on purpose: its optionality is
+// the signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may
+// skip runtime codegen and omit the argument altogether. Dropping the argument
+// would tell the engine the opposite. It is the opt-out, not a code path.
 func (m *PythonSdkRuntime) ModuleRuntime(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
@@ -176,8 +158,8 @@ func (m *PythonSdkRuntime) ModuleRuntime(
 }
 
 // requireGeneratedFiles verifies the module's committed generated files are
-// present. Called only on the trusted path; the codegen path regenerates
-// them so the check would be redundant.
+// present, so a module that was never generated fails with an actionable error
+// rather than an import error deep inside Python.
 func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 	// The generated client bindings live inside the vendored SDK, or at
 	// UserGenPath when the library isn't vendored.

@@ -4,7 +4,7 @@
 // as a custom SDK.
 //
 // WARNING: Extending this module is considered experimental and may change
-// in the future. The public API is the ModuleRuntime and Codegen functions.
+// in the future. The public API is the ModuleRuntime function.
 package main
 
 import "python-sdk-runtime/internal/dagger"
