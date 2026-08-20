@@ -61,7 +61,6 @@ func convertSlice[I any, O any](in []I, f func(I) O) []O {
 
 func (r PythonSdkRuntime) MarshalJSON() ([]byte, error) {
 	var concrete struct {
-		SdkSourceDir   *dagger.Directory
 		Container      *dagger.Container
 		Debug          bool
 		ModName        string
@@ -74,10 +73,8 @@ func (r PythonSdkRuntime) MarshalJSON() ([]byte, error) {
 		SubPath        string
 		VendorPath     string
 		IsInit         bool
-		TrustedSource  bool
 		Discovery      *Discovery
 	}
-	concrete.SdkSourceDir = r.SdkSourceDir
 	concrete.Container = r.Container
 	concrete.Debug = r.Debug
 	concrete.ModName = r.ModName
@@ -90,14 +87,12 @@ func (r PythonSdkRuntime) MarshalJSON() ([]byte, error) {
 	concrete.SubPath = r.SubPath
 	concrete.VendorPath = r.VendorPath
 	concrete.IsInit = r.IsInit
-	concrete.TrustedSource = r.TrustedSource
 	concrete.Discovery = r.Discovery
 	return json.Marshal(&concrete)
 }
 
 func (r *PythonSdkRuntime) UnmarshalJSON(bs []byte) error {
 	var concrete struct {
-		SdkSourceDir   *dagger.Directory
 		Container      *dagger.Container
 		Debug          bool
 		ModName        string
@@ -110,14 +105,12 @@ func (r *PythonSdkRuntime) UnmarshalJSON(bs []byte) error {
 		SubPath        string
 		VendorPath     string
 		IsInit         bool
-		TrustedSource  bool
 		Discovery      *Discovery
 	}
 	err := json.Unmarshal(bs, &concrete)
 	if err != nil {
 		return err
 	}
-	r.SdkSourceDir = concrete.SdkSourceDir
 	r.Container = concrete.Container
 	r.Debug = concrete.Debug
 	r.ModName = concrete.ModName
@@ -130,7 +123,6 @@ func (r *PythonSdkRuntime) UnmarshalJSON(bs []byte) error {
 	r.SubPath = concrete.SubPath
 	r.VendorPath = concrete.VendorPath
 	r.IsInit = concrete.IsInit
-	r.TrustedSource = concrete.TrustedSource
 	r.Discovery = concrete.Discovery
 	return nil
 }
@@ -254,72 +246,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 	switch parentName {
 	case "PythonSdkRuntime":
 		switch fnName {
-		case "AddDirectory":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var name string
-			if inputArgs["name"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["name"]), &name)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg name", err))
-				}
-			}
-			var dir *dagger.Directory
-			if inputArgs["dir"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["dir"]), &dir)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg dir", err))
-				}
-			}
-			(*PythonSdkRuntime).AddDirectory(&parent, name, dir)
-			return nil, nil
-		case "AddFile":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var name string
-			if inputArgs["name"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["name"]), &name)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg name", err))
-				}
-			}
-			var file *dagger.File
-			if inputArgs["file"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["file"]), &file)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg file", err))
-				}
-			}
-			(*PythonSdkRuntime).AddFile(&parent, name, file)
-			return nil, nil
-		case "AddNewFile":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var name string
-			if inputArgs["name"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["name"]), &name)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg name", err))
-				}
-			}
-			var contents string
-			if inputArgs["contents"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["contents"]), &contents)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg contents", err))
-				}
-			}
-			(*PythonSdkRuntime).AddNewFile(&parent, name, contents)
-			return nil, nil
 		case "BaseImage":
 			var parent PythonSdkRuntime
 			err = json.Unmarshal(parentJSON, &parent)
@@ -348,27 +274,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*PythonSdkRuntime).Codegen(&parent, ctx, modSource, introspectionJson)
-		case "Common":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var modSource *dagger.ModuleSource
-			if inputArgs["modSource"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["modSource"]), &modSource)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg modSource", err))
-				}
-			}
-			var introspectionJson *dagger.File
-			if inputArgs["introspectionJSON"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["introspectionJSON"]), &introspectionJson)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg introspectionJSON", err))
-				}
-			}
-			return (*PythonSdkRuntime).Common(&parent, ctx, modSource, introspectionJson)
 		case "ExtraIndexURL":
 			var parent PythonSdkRuntime
 			err = json.Unmarshal(parentJSON, &parent)
@@ -509,20 +414,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
 			return (*PythonSdkRuntime).WithInstall(&parent), nil
-		case "WithSDK":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var introspectionJson *dagger.File
-			if inputArgs["introspectionJSON"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["introspectionJSON"]), &introspectionJson)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg introspectionJSON", err))
-				}
-			}
-			return (*PythonSdkRuntime).WithSDK(&parent, introspectionJson), nil
 		case "WithSource":
 			var parent PythonSdkRuntime
 			err = json.Unmarshal(parentJSON, &parent)
@@ -530,13 +421,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
 			return (*PythonSdkRuntime).WithSource(&parent), nil
-		case "WithUpdates":
-			var parent PythonSdkRuntime
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			return (*PythonSdkRuntime).WithUpdates(&parent), nil
 		case "WithUv":
 			var parent PythonSdkRuntime
 			err = json.Unmarshal(parentJSON, &parent)
@@ -578,14 +462,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 			if err != nil {
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
-			var sdkSourceDir *dagger.Directory
-			if inputArgs["sdkSourceDir"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["sdkSourceDir"]), &sdkSourceDir)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg sdkSourceDir", err))
-				}
-			}
-			return New(sdkSourceDir)
+			return New()
 		default:
 			return nil, fmt.Errorf("unknown function %s", fnName)
 		}
@@ -594,27 +471,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 			WithDescription("Runtime module for the Python SDK\n").
 			WithObject(
 				dag.TypeDef().WithObject("PythonSdkRuntime", dagger.TypeDefWithObjectOpts{Description: "Functions for building the runtime module for the Python SDK.\n\nThe server interacts directly with the ModuleRuntime and Codegen functions.\nThe others were built to be composable and chainable to facilitate the\ncreation of extension modules (custom SDKs that depend on this one).", SourceMap: dag.SourceMap("main.go", 88, 6)}).
-					WithFunction(
-						dag.Function("AddDirectory",
-							dag.TypeDef().WithKind(dagger.TypeDefKindVoidKind).WithOptional(true)).
-							WithDescription("AddDirectory adds a directory to the module's source.").
-							WithSourceMap(dag.SourceMap("discovery.go", 157, 1)).
-							WithArg("name", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 157, 34)}).
-							WithArg("dir", dag.TypeDef().WithObject("Directory"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 157, 47)})).
-					WithFunction(
-						dag.Function("AddFile",
-							dag.TypeDef().WithKind(dagger.TypeDefKindVoidKind).WithOptional(true)).
-							WithDescription("AddFile adds a file to the module's source.").
-							WithSourceMap(dag.SourceMap("discovery.go", 141, 1)).
-							WithArg("name", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 141, 29)}).
-							WithArg("file", dag.TypeDef().WithObject("File"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 141, 42)})).
-					WithFunction(
-						dag.Function("AddNewFile",
-							dag.TypeDef().WithKind(dagger.TypeDefKindVoidKind).WithOptional(true)).
-							WithDescription("AddNewFile adds a new file, with contents, to the module's source.").
-							WithSourceMap(dag.SourceMap("discovery.go", 136, 1)).
-							WithArg("name", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 136, 32)}).
-							WithArg("contents", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("discovery.go", 136, 38)})).
 					WithFunction(
 						dag.Function("BaseImage",
 							dag.TypeDef().WithKind(dagger.TypeDefKindStringKind)).
@@ -627,13 +483,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 							WithSourceMap(dag.SourceMap("main.go", 156, 1)).
 							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 158, 2)}).
 							WithArg("introspectionJSON", dag.TypeDef().WithObject("File"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 159, 2)})).
-					WithFunction(
-						dag.Function("Common",
-							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithDescription("Common steps for the ModuleRuntime and Codegen functions").
-							WithSourceMap(dag.SourceMap("main.go", 270, 1)).
-							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 272, 2)}).
-							WithArg("introspectionJSON", dag.TypeDef().WithObject("File").WithOptional(true), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 274, 2)})).
 					WithFunction(
 						dag.Function("ExtraIndexURL",
 							dag.TypeDef().WithKind(dagger.TypeDefKindStringKind)).
@@ -711,21 +560,10 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 							WithDescription("Install the module's package and dependencies").
 							WithSourceMap(dag.SourceMap("main.go", 559, 1))).
 					WithFunction(
-						dag.Function("WithSDK",
-							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithDescription("Add the SDK package to the source directory\n\nThis includes regenerating the client bindings for the current API schema\n(codegen).").
-							WithSourceMap(dag.SourceMap("main.go", 453, 1)).
-							WithArg("introspectionJSON", dag.TypeDef().WithObject("File"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 453, 29)})).
-					WithFunction(
 						dag.Function("WithSource",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Add the module's source code").
 							WithSourceMap(dag.SourceMap("main.go", 505, 1))).
-					WithFunction(
-						dag.Function("WithUpdates",
-							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithDescription("Make any updates to current source").
-							WithSourceMap(dag.SourceMap("main.go", 522, 1))).
 					WithFunction(
 						dag.Function("WithUv",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
@@ -747,7 +585,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
 							WithDescription("Disable the use of uv").
 							WithSourceMap(dag.SourceMap("extension.go", 88, 1))).
-					WithField("SdkSourceDir", dag.TypeDef().WithObject("Directory"), dagger.TypeDefWithFieldOpts{Description: "Directory with the Python SDK source code", SourceMap: dag.SourceMap("main.go", 90, 2)}).
 					WithField("Container", dag.TypeDef().WithObject("Container"), dagger.TypeDefWithFieldOpts{Description: "Resulting container after each composing step", SourceMap: dag.SourceMap("main.go", 93, 2)}).
 					WithField("Debug", dag.TypeDef().WithKind(dagger.TypeDefKindBooleanKind), dagger.TypeDefWithFieldOpts{Description: "Whether the module runtime should run in debug mode.", SourceMap: dag.SourceMap("main.go", 96, 2)}).
 					WithField("ModName", dag.TypeDef().WithKind(dagger.TypeDefKindStringKind), dagger.TypeDefWithFieldOpts{Description: "The original module's name", SourceMap: dag.SourceMap("main.go", 99, 2)}).
@@ -763,8 +600,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					WithConstructor(
 						dag.Function("New",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithSourceMap(dag.SourceMap("main.go", 49, 1)).
-							WithArg("sdkSourceDir", dag.TypeDef().WithObject("Directory").WithOptional(true), dagger.FunctionWithArgOpts{Description: "Directory with the Python SDK source code.", SourceMap: dag.SourceMap("main.go", 53, 2), DefaultPath: "..", Ignore: []string{"**", "!pyproject.toml", "!uv.lock", "!src/**/*.py", "!src/**/*.typed", "!codegen/pyproject.toml", "!codegen/**/*.py", "!LICENSE", "!README.md", "!dist/*"}}))), nil
+							WithSourceMap(dag.SourceMap("main.go", 46, 1)))), nil
 	default:
 		return nil, fmt.Errorf("unknown object %s", parentName)
 	}
