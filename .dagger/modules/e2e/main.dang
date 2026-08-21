@@ -110,6 +110,18 @@ type E2e {
   }
 
   """
+  Lookup should refuse a module this SDK does not manage, rather than handing
+  back a Mod for someone else's module.
+  """
+  pub unmanagedLookupCheck(ws: Workspace!): Void @check {
+    let found = pythonSdk.mod(ws, path: nonPythonModulePath).rootPath rescue "raised"
+
+    assert(found == "raised", "lookup returned a module this SDK does not manage: " + found)
+
+    null
+  }
+
+  """
   Lookup must choose the nearest module config even when its filename differs
   from an ancestor config, and modern TOML modules must be supported.
   """

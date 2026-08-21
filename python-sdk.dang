@@ -2,9 +2,6 @@
 Manage Dagger modules that use the Python SDK.
 """
 type PythonSdk {
-  let legacyConfigPattern = "\"sdk\"\\s*:\\s*\\{[^}]*\"source\"\\s*:\\s*\"python\""
-  let tomlConfigPattern = "\\[runtime\\][^\\[]*source\\s*=\\s*\"python\""
-
   """
   Marker filename that skips generate when found at or above a Python SDK module root.
   """
@@ -37,8 +34,8 @@ type PythonSdk {
     if (path == null) { -1 } else if (path == ".") { 0 } else { path.split("/").length }
   }
 
-  let configDir(path: String!, filename: String!): String! {
-    normalizePath(path.trimPrefix("/").trimSuffix(filename))
+  let pathContains(root: String!, path: String!): Boolean! {
+    root == "." or path == root or path.trimPrefix(root + "/") != path
   }
 
   """
@@ -68,26 +65,15 @@ type PythonSdk {
   }
 
   """
-  Return the Python SDK module at or above a workspace path.
+  Return the managed Python SDK module at or above a workspace path.
 
-  When `findUp` is true, `path` may point inside the module.
+  When `findUp` is true, `path` may point inside the module; the nearest
+  enclosing module wins. When it is false, `path` is taken as the module root
+  as given, without asking whether this SDK manages it.
   """
   pub mod(ws: Workspace!, path: String! = ".", findUp: Boolean! = true): Mod! {
     let modPath = if (findUp) {
-      let foundToml = ws.findUp("dagger-module.toml", path)
-      let foundJson = ws.findUp("dagger.json", path)
-      let tomlBase = if (foundToml == null) { null } else { configDir(foundToml, "dagger-module.toml") }
-      let jsonBase = if (foundJson == null) { null } else { configDir(foundJson, "dagger.json") }
-
-      if (tomlBase == null and jsonBase == null) {
-        raise "no Dagger module found containing path: " + path
-      } else if (tomlBase != null and pathDepth(tomlBase) > pathDepth(jsonBase)) {
-        validateConfig(ws, tomlBase, "dagger-module.toml", tomlConfigPattern, path)
-      } else if (jsonBase != null) {
-        validateConfig(ws, jsonBase, "dagger.json", legacyConfigPattern, path)
-      } else {
-        raise "no Dagger module found containing path: " + path
-      }
+      managedModuleAtOrAbove(ws, path)
     } else {
       normalizePath(path)
     }
@@ -99,15 +85,30 @@ type PythonSdk {
     )
   }
 
-  let validateConfig(ws: Workspace!, base: String!, filename: String!, pattern: String!, requestedPath: String!): String! {
-    let configPath = if (base == ".") { filename } else { base + "/" + filename }
-    let matches = ws
-      .directory("/", include: [configPath])
-      .file(configPath)
-      .search(pattern: pattern, multiline: true, dotall: true, limit: 1)
-      .{{id}}
-      .length > 0
-    if (matches) { base } else { raise "Dagger module does not use the Python SDK: " + requestedPath }
+  """
+  Root of the nearest managed Python SDK module containing `path`.
+
+  Re-anchoring the workspace at `path` makes the engine scope its SDK module
+  list to that directory, which is the same selection `modules` reads. Nothing
+  here parses module config: registration is what makes a module ours.
+  """
+  let managedModuleAtOrAbove(ws: Workspace!, path: String!): String! {
+    let scopedWs = ws.withWorkdir(path)
+    let requested = normalizePath(scopedWs.cwd)
+    let found = currentModule
+      .asSDK(workspace: scopedWs)
+      .modules.{{path}}
+      .map { module => normalizePath(module.path) }
+      .filter { root => pathContains(root, requested) }
+      .reduce(null) { best, root =>
+        if (pathDepth(root) > pathDepth(best)) { root } else { best }
+      }
+
+    if (found == null) {
+      raise "no managed Python SDK module found containing path: " + path
+    } else {
+      found
+    }
   }
 
   """
