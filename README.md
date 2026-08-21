@@ -10,7 +10,7 @@ Shared, language-agnostic operations — editing a module's dependencies or its
 required engine version — are owned by the core CLI (`dagger module deps`,
 `dagger module engine`) and are no longer part of this module's surface.
 
-Backed by [`github.com/dagger/sdk-sdk/polyfill`](https://github.com/dagger/sdk-sdk/tree/main/polyfill).
+It uses the engine's native `Workspace` and `ModuleSource` APIs directly.
 
 ## Install
 
@@ -48,8 +48,9 @@ dagger module init python my-module \
     --base-image python:3.13-slim
 ```
 
-`--template` picks a starter template (`minimal` is the default; `legacy` gives
-you a container-echo example). The three `pyproject.toml` flags are optional; by
+`--template` picks a starter template: `default` (a small working module) when
+you pass nothing, `empty` for a bare object class, or `legacy` for a
+container-echo example. The three `pyproject.toml` flags are optional; by
 default the template's Python version is used, uv is enabled, and no base image
 override is written.
 
@@ -120,10 +121,9 @@ dagger call python-sdk modules path
 ```
 
 > [!NOTE]
-> `modules` and `generate-all` discover modules by scanning legacy
-> `dagger.json` files for `sdk.source == "python"`. This is obsolete for
-> workspace-managed modules, where the engine owns the
-> `modules.<sdk>.as-sdk.modules` source of truth.
+> `modules` and `generate-all` read the modules registered under
+> `modules.<sdk>.as-sdk.modules`, which the engine owns and narrows to the
+> caller's cwd. Nothing scans module config files.
 
 See [`python-sdk.dang`](./python-sdk.dang) for the full type surface.
 

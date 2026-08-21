@@ -110,6 +110,18 @@ type E2e {
   }
 
   """
+  Lookup should refuse a module this SDK does not manage, rather than handing
+  back a Mod for someone else's module.
+  """
+  pub unmanagedLookupCheck(ws: Workspace!): Void @check {
+    let found = pythonSdk.mod(ws, path: nonPythonModulePath).rootPath rescue "raised"
+
+    assert(found == "raised", "lookup returned a module this SDK does not manage: " + found)
+
+    null
+  }
+
+  """
   Lookup must choose the nearest module config even when its filename differs
   from an ancestor config, and modern TOML modules must be supported.
   """
@@ -164,6 +176,32 @@ type E2e {
     assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "default template did not render the module type")
 
     assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")
+
+    null
+  }
+
+  """
+  Init into a directory that already holds files should layer the template onto
+  it, never replace it: a user running init inside an existing project keeps
+  their files.
+  """
+  pub initOverExistingCheck(ws: Workspace!): Void @check {
+    let changes = pythonSdk.initModule(ws, name: "init-over-existing", path: lookupModulePath)
+
+    assert(
+      changes.removedPaths.length == 0,
+      "init removed existing files: " + changes.removedPaths.join(", "),
+    )
+    assertContains(
+      changes.after.file(lookupModulePath + "/src/lookup_app/__init__.py").contents,
+      "class LookupApp:",
+      "init must leave the existing module source in place",
+    )
+    assertContains(
+      changes.after.file(lookupModulePath + "/src/init_over_existing/__init__.py").contents,
+      "class InitOverExisting:",
+      "init did not render the template into the existing directory",
+    )
 
     null
   }
