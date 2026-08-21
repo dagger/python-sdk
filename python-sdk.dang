@@ -4,7 +4,6 @@ Manage Dagger modules that use the Python SDK.
 type PythonSdk {
   let legacyConfigPattern = "\"sdk\"\\s*:\\s*\\{[^}]*\"source\"\\s*:\\s*\"python\""
   let tomlConfigPattern = "\\[runtime\\][^\\[]*source\\s*=\\s*\"python\""
-  let moduleConfigFilenames: [String!]! = ["dagger-module.toml", "dagger.json"]
 
   """
   Marker filename that skips generate when found at or above a Python SDK module root.
