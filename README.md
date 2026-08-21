@@ -48,8 +48,9 @@ dagger module init python my-module \
     --base-image python:3.13-slim
 ```
 
-`--template` picks a starter template (`minimal` is the default; `legacy` gives
-you a container-echo example). The three `pyproject.toml` flags are optional; by
+`--template` picks a starter template: `default` (a small working module) when
+you pass nothing, `empty` for a bare object class, or `legacy` for a
+container-echo example. The three `pyproject.toml` flags are optional; by
 default the template's Python version is used, uv is enabled, and no base image
 override is written.
 
