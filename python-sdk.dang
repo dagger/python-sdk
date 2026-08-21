@@ -218,9 +218,7 @@ type PythonSdk {
   pub generateAll(ws: Workspace!): Changeset! @generate {
     modules(ws)
       .filter { mod => mod.skipGenerate == false }
-      .reduce(ws) { stagedWs, mod =>
-        stagedWs.moduleSource("/" + mod.rootPath).generate(stagedWs)
-      }
+      .reduce(ws) { stagedWs, mod => mod.generateInto(stagedWs) }
       .changes(ws)
   }
 }

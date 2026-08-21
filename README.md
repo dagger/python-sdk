@@ -12,6 +12,49 @@ required engine version — are owned by the core CLI (`dagger module deps`,
 
 It uses the engine's native `Workspace` and `ModuleSource` APIs directly.
 
+## What lives here
+
+| Path | What it is |
+| --- | --- |
+| `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `initModule`, `generate`, config, discovery |
+| `sdk/` | the `dagger-io` client library and code generator |
+| `runtime/` | the module runtime the engine calls to run a module |
+
+Code generation happens at `dagger generate`, through this module's `@generate`
+hook, which runs the code generator in `sdk/` and vendors the result into the
+module. The runtime never generates: it builds a module from its **committed**
+generated files, so there is no codegen step in a cold `dagger call`, and a
+module that has not been generated fails with an actionable error rather than
+being silently regenerated.
+
+Pre-1.0 `dagger.json` modules are the exception: they keep being generated and
+run by the Python SDK baked into the engine, exactly as before.
+
+## Two runtimes, one name
+
+Python modules reach one of two implementations, and which one is decided by
+the module's config format:
+
+- **Legacy** — a `dagger.json` with `"sdk": {"source": "python"}` resolves to
+  the runtime baked into the engine (`dagger/dagger`'s `sdk/python`), which
+  still generates bindings at module load. Nothing about those modules changes,
+  and they need no migration.
+- **Modern** — a `dagger-module.toml` can point `[runtime] source` at this
+  repository's `runtime/`, which is the no-codegen path above. Point it at a
+  module ref: a *relative path* works when the CLI loads the module directly
+  (`dagger call -m …`) but not through `dagger generate`, which generates from
+  a filtered view that does not include the runtime.
+
+The engine resolves the short name `python` to exactly one target, the
+engine-baked runtime, so the modern path is reached by module ref rather than
+by name. `targetRuntime` — what `dagger module init python` writes into a new
+module — is therefore still `python` today; it moves to
+`github.com/dagger/python-sdk/runtime` in a follow-up, once `runtime/` exists
+on the default branch for that ref to resolve to. See
+[`future/done/self-contained-python-sdk.md`](./future/done/self-contained-python-sdk.md)
+for the full reasoning and for the engine change that would let one name serve
+both.
+
 ## Install
 
 From your workspace root:
