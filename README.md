@@ -120,10 +120,9 @@ dagger call python-sdk modules path
 ```
 
 > [!NOTE]
-> `modules` and `generate-all` discover modules by scanning legacy
-> `dagger.json` files for `sdk.source == "python"`. This is obsolete for
-> workspace-managed modules, where the engine owns the
-> `modules.<sdk>.as-sdk.modules` source of truth.
+> `modules` and `generate-all` read the modules registered under
+> `modules.<sdk>.as-sdk.modules`, which the engine owns and narrows to the
+> caller's cwd. Nothing scans module config files.
 
 See [`python-sdk.dang`](./python-sdk.dang) for the full type surface.
 
