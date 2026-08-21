@@ -216,11 +216,10 @@ type PythonSdk {
   Modules with the generate skip marker are skipped.
   """
   pub generateAll(ws: Workspace!): Changeset! @generate {
-    modules(ws)
-      .filter { mod => mod.skipGenerate == false }
-      .reduce(ws) { stagedWs, mod =>
-        stagedWs.moduleSource("/" + mod.rootPath).generate(stagedWs)
-      }
-      .changes(ws)
+    changeset.withChangesets(
+      modules(ws)
+        .filter { mod => mod.skipGenerate == false }
+        .map { mod => mod.generate },
+    )
   }
 }
