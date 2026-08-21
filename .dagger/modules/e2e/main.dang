@@ -47,6 +47,17 @@ type E2e {
   }
 
   """
+  Assert that a changeset reported none of `paths` as added.
+  """
+  let assertNoneAdded(changes: Changeset!, paths: [String!]!, what: String!): Void {
+    let reAdded = paths.filter { path => contains(changes.addedPaths, path) }
+    assert(
+      reAdded.length == 0,
+      what + " re-added files that already exist: " + reAdded.join(", "),
+    )
+  }
+
+  """
   Assert that a string contains a substring.
   """
   let assertContains(value: String!, want: String!, message: String!): Void {
@@ -245,6 +256,27 @@ type E2e {
     )
     assertContainsAll(emptySource, ["class TemplateEmpty:", "    pass"])
     assertContainsNone(emptySource, ["def container", "{{"])
+
+    null
+  }
+
+  """
+  Generation should report only what generation produced.
+
+  The module's own config is engine-owned, and the fixture commits the
+  `.gitattributes` that generation emits: both are already on disk, so a
+  changeset claiming to add either describes the workspace base rather than the
+  generated context. Every other generated file is genuinely new on this
+  fixture, which is why only an already-present one can catch that.
+  """
+  pub generateSkipsExistingFilesCheck(ws: Workspace!): Void @check {
+    let existing = [
+      generateModulePath + "/dagger.json",
+      generateModulePath + "/.gitattributes",
+    ]
+
+    assertNoneAdded(pythonSdk.mod(ws, path: generateModulePath).generate, existing, "generate")
+    assertNoneAdded(pythonSdk.generateAll(ws), existing, "generateAll")
 
     null
   }
