@@ -169,6 +169,32 @@ type E2e {
   }
 
   """
+  Init into a directory that already holds files should layer the template onto
+  it, never replace it: a user running init inside an existing project keeps
+  their files.
+  """
+  pub initOverExistingCheck(ws: Workspace!): Void @check {
+    let changes = pythonSdk.initModule(ws, name: "init-over-existing", path: lookupModulePath)
+
+    assert(
+      changes.removedPaths.length == 0,
+      "init removed existing files: " + changes.removedPaths.join(", "),
+    )
+    assertContains(
+      changes.after.file(lookupModulePath + "/src/lookup_app/__init__.py").contents,
+      "class LookupApp:",
+      "init must leave the existing module source in place",
+    )
+    assertContains(
+      changes.after.file(lookupModulePath + "/src/init_over_existing/__init__.py").contents,
+      "class InitOverExisting:",
+      "init did not render the template into the existing directory",
+    )
+
+    null
+  }
+
+  """
   The default template should render a working module that reads source from
   the workspace and returns a ready-to-build container. The empty template
   should remain available as a bare object class.

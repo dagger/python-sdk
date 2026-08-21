@@ -143,9 +143,24 @@ type PythonSdk {
     } else {
       let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
 
+      # withNewDirectory replaces the directory it writes, so layer the
+      # template onto what is already there: init must never remove a user's
+      # files.
       ws
-        .withNewDirectory("/" + modPath, templateSource)
+        .withNewDirectory("/" + modPath, existingDir(ws, modPath).withDirectory(".", templateSource))
         .changes(ws)
+    }
+  }
+
+  """
+  Existing contents of a workspace directory, empty when it does not exist yet.
+  """
+  let existingDir(ws: Workspace!, path: String!): Directory! {
+    let filtered = ws.directory("/", include: [path + "/**"])
+    if (filtered.exists(path)) {
+      filtered.directory(path)
+    } else {
+      directory
     }
   }
 
