@@ -1,6 +1,7 @@
 [["version","2"]]
 ["","container.from",["docker.io/library/alpine:3.22","linux/amd64"],"sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce"]
 ["","container.from",["docker.io/library/golang:1.25-alpine","linux/amd64"],"sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59"]
+["","container.from",["docker.io/library/golang:1.26-alpine","linux/amd64"],"sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468"]
 ["","container.from",["ghcr.io/astral-sh/uv:python3.14-alpine","linux/amd64"],"sha256:56b2e7ad659cd4b8d3abb5e67556a1e7ac53adf3a13eb8c292696df9c1e70b67"]
 ["","git.ref",["https://github.com/dagger/go-sdk","HEAD"],{"ref":"refs/heads/main","sha":"9b6c556101f8fdace897aa3ed1ff9e3efb344e34"}]
-["","git.ref",["https://github.com/dagger/sdk-sdk","HEAD"],{"ref":"refs/heads/main","sha":"00bb06748bcf22d724ed467f2298d31f1fb49be0"}]
+["","git.ref",["https://github.com/dagger/sdk-sdk","HEAD"],{"ref":"refs/heads/main","sha":"334448911a8292fba0d677e5f31926c79ad80ad3"}]

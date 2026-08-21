@@ -484,13 +484,13 @@ Consequences, all confined to PR 1:
   because `generateAll` would fail on it.
 - Its vendored `sdk/` was generated once through the engine builtin and
   committed, then verified by loading the module through *this* runtime.
-- So PR 1 exercises this runtime's **module-load** path for real, but not its
-  **codegen** path.
+- So PR 1 exercises this runtime's **module-load** path for real, but not the
+  code generation that then ran inside it.
 
-This is a gap, not a law: adding `[runtime] source` to the include set that
-polyfill's helper computes would close it, and is worth raising against
-`dagger/polyfill`. It also disappears on its own in PR 2, where modules
-reference the runtime by git ref rather than by path.
+**Since superseded.** The runtime has no codegen at all any more: generation
+moved to the SDK module's `@generate` hook, where `e2e:toml-generate-check`
+covers it directly. The polyfill is also gone. What remains true is only that
+the runtime fixture stays unregistered, so `generateAll` never walks it.
 
 **2. Codegen fidelity is checked by running tests, not by comparing trees.**
 The plan called for asserting `runtime/sdk/codegen` is tree-identical to
@@ -584,10 +584,9 @@ branch now sits on top of it. Two things changed as a result:
   appears when a changeset is applied to disk, and a check built on a synthetic
   workspace passes either way, so it would have proved nothing.
 
-The polyfill-related gap recorded above (this runtime's codegen path not
-exercised end to end) has not been re-tested since the removal; the runtime
-fixture is still deliberately unregistered, so `mod()` refuses it before the
-question arises.
+This also retires the codegen-coverage gap recorded further up: with generation
+owned by the SDK module, `e2e:toml-generate-check` exercises it end to end, and
+the runtime has no codegen path left to leave untested.
 
 ## Progress
 
