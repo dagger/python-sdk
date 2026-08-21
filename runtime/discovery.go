@@ -75,10 +75,6 @@ type Discovery struct {
 	// Files is a map of file names to their contents.
 	Files map[string]string
 
-	// EnableCustomConfig is a flag to enable or disable the discovery of custom
-	// configuration, either from loading pyproject.toml or reacting to the
-	// the presence of certain files like .python-version.
-	EnableCustomConfig bool
 
 	// Used to synchronize updates.
 	mu sync.Mutex
@@ -101,8 +97,6 @@ func NewDiscovery(cfg UserConfig) (*Discovery, error) {
 		FileSet:       make(map[string]struct{}),
 		Files:         make(map[string]string),
 
-		// Custom config can only be disabled by an extension module.
-		EnableCustomConfig: true,
 	}, nil
 }
 
@@ -123,21 +117,21 @@ func (d *Discovery) HasFile(name string) bool {
 }
 
 // GetFile returns a file from the module's source.
-func (m *PythonSdkRuntime) GetFile(name string) *dagger.File {
+func (m *PythonSdkRuntime) getFile(name string) *dagger.File {
 	return m.ContextDir.File(path.Join(m.SubPath, name))
 }
 
 // UseUvLock returns true if the runtime should expect a uv.lock file.
-func (m *PythonSdkRuntime) UseUvLock() bool {
+func (m *PythonSdkRuntime) useUvLock() bool {
 	d := m.Discovery
-	return m.UseUv() && (d.HasFile(UvLock) || !d.HasFile(PipCompileLock) && m.IsInit)
+	return m.useUv() && (d.HasFile(UvLock) || !d.HasFile(PipCompileLock) && m.IsInit)
 }
 
 // We could use modSource.Directory("") but we'll need to use the
 // context directory later, so rather than trying
 // to replace the source directory in the context directory, we'll
 // just use the context directory with subpath everywhere.
-func (m *PythonSdkRuntime) Source() *dagger.Directory {
+func (m *PythonSdkRuntime) source() *dagger.Directory {
 	return m.ContextDir.Directory(m.SubPath)
 }
 
@@ -191,9 +185,9 @@ func (d *Discovery) loadModInfo(ctx context.Context, m *PythonSdkRuntime) error 
 	})
 
 	eg.Go(func() error {
-		// m.Source() depends on SubPath
+		// m.source() depends on SubPath
 		<-doneSubPath
-		entries, _ := m.Source().Entries(gctx)
+		entries, _ := m.source().Entries(gctx)
 		d.mu.Lock()
 		for _, entry := range entries {
 			d.FileSet[entry] = struct{}{}
@@ -280,11 +274,11 @@ func (d *Discovery) loadFiles(ctx context.Context, m *PythonSdkRuntime) error {
 
 	eg, gctx := errgroup.WithContext(ctx)
 
-	if d.EnableCustomConfig {
+	{
 		for _, name := range FileContents {
 			if d.HasFile(name) {
 				eg.Go(func() error {
-					contents, err := m.GetFile(name).Contents(gctx)
+					contents, err := m.getFile(name).Contents(gctx)
 					if err != nil {
 						return fmt.Errorf("get file contents of %q: %w", name, err)
 					}
@@ -302,7 +296,7 @@ func (d *Discovery) loadFiles(ctx context.Context, m *PythonSdkRuntime) error {
 		// python files later. The error is normal when the target directory
 		// on `dagger init` doesn't exist, but just ignore otherwise (best
 		// effort).
-		entries, err := m.Source().Glob(gctx, "src/**/*.py|*.py")
+		entries, err := m.source().Glob(gctx, "src/**/*.py|*.py")
 		if len(entries) > 0 {
 			d.mu.Lock()
 			d.FileSet["*.py"] = struct{}{}
@@ -320,9 +314,8 @@ func (d *Discovery) loadFiles(ctx context.Context, m *PythonSdkRuntime) error {
 
 // loadConfig loads configurations from user files listed in FileContents.
 func (d *Discovery) loadConfig(ctx context.Context, m *PythonSdkRuntime) error {
-	// d.Files can be empty if EnableCustomConfig is false, which can be disabled
-	// on extension modules. Otherwise, `pyproject.toml` can only be empty
-	// on `dagger init`, in which case it is created by this SDK's initModule.
+	// `pyproject.toml` can only be empty on `dagger init`, in which case it is
+	// created by this SDK's initModule.
 	contents, exists := d.Files["pyproject.toml"]
 	if !exists {
 		return nil
@@ -350,7 +343,7 @@ func (d *Discovery) loadConfig(ctx context.Context, m *PythonSdkRuntime) error {
 	}
 
 	// Only look for vendor path when uv.lock is being used
-	if m.UseUvLock() {
+	if m.useUvLock() {
 		m.VendorPath = d.Config.Tool.Uv.Sources.Dagger.Path
 	}
 

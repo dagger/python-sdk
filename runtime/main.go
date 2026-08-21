@@ -52,36 +52,43 @@ func New() (*PythonSdkRuntime, error) {
 	return &PythonSdkRuntime{
 		Discovery: d,
 		Container: dag.Container(),
-		// Where a module commits its vendored client library.
+		// Where a module commits its vendored client library; a module that
+		// depends on a published dagger-io instead leaves this empty.
 		VendorPath: GenDir,
 	}, nil
 }
 
-// Functions for building the runtime module for the Python SDK.
+// State threaded through the steps that build a module's runtime container.
 //
-// The server interacts directly with ModuleRuntime. The others were built to be
-// composable and chainable to facilitate the creation of extension modules
-// (custom SDKs that depend on this one).
+// ModuleRuntime is the only thing the engine calls; everything else here is
+// internal to it.
 type PythonSdkRuntime struct {
-	// Resulting container after each composing step
+	// Resulting container after each step
+	// +private
 	Container *dagger.Container
 
 	// Whether the module runtime should run in debug mode.
+	// +private
 	Debug bool
 
 	// The original module's name
+	// +private
 	ModName string
 
 	// The normalized python distribution package name (in pyproject.toml)
+	// +private
 	ProjectName string
 
 	// The normalized python import package name (in the filesystem)
+	// +private
 	PackageName string
 
 	// The normalized main object name in Python
+	// +private
 	MainObjectName string
 
 	// The source needed to load and run a module
+	// +private
 	ModSource *dagger.ModuleSource
 
 	// ContextDir is a copy of the context directory from the module source
@@ -91,6 +98,7 @@ type PythonSdkRuntime struct {
 	// but since we have to mount the context directory in the end, rather than
 	// mounting the context dir and then mounting the forked source dir on top,
 	// we fork the context dir instead so there's only one mount in the end.
+	// +private
 	ContextDir *dagger.Directory
 
 	// ContextDirPath is a unique host path for the module being loaded
@@ -99,17 +107,21 @@ type PythonSdkRuntime struct {
 	// provide a unique path on the filesystem. This is because the uv cache
 	// uses hashes of source paths - so we need to have something unique, or we
 	// can get very real conflicts in the uv cache.
+	// +private
 	ContextDirPath string
 
 	// Relative path from the context directory to the source directory
+	// +private
 	SubPath string
 
-	// Relative path to vendor client library into
+	// Relative path the client library is vendored into, empty when the module
+	// depends on a published dagger-io instead
+	// +private
 	VendorPath string
 
-	// True if the module is new and we need to create files from the template
-	//
-	// It's assumed that this is the case if there's no pyproject.toml file.
+	// True when the module has no pyproject.toml yet, so there is nothing to
+	// build from
+	// +private
 	IsInit bool
 
 	// Discovery holds the logic for getting more information from the target module.
@@ -134,7 +146,7 @@ func (m *PythonSdkRuntime) ModuleRuntime(
 	// +optional
 	introspectionJSON *dagger.File,
 ) (*dagger.Container, error) {
-	if _, err := m.Load(ctx, modSource); err != nil {
+	if _, err := m.load(ctx, modSource); err != nil {
 		return nil, err
 	}
 	if m.IsInit {
@@ -143,13 +155,13 @@ func (m *PythonSdkRuntime) ModuleRuntime(
 	if err := m.requireGeneratedFiles(ctx); err != nil {
 		return nil, err
 	}
-	if _, err := m.WithBase(); err != nil {
+	if _, err := m.withBase(); err != nil {
 		return nil, err
 	}
 	runtime := m.
 		withRuntimeScript().
-		WithSource().
-		WithInstall()
+		withSource().
+		withInstall()
 	ctr := runtime.Container
 	if runtime.Debug {
 		ctr = ctr.Terminal()
@@ -161,8 +173,8 @@ func (m *PythonSdkRuntime) ModuleRuntime(
 // present, so a module that was never generated fails with an actionable error
 // rather than an import error deep inside Python.
 func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
-	// The generated client bindings live inside the vendored SDK, or at
-	// UserGenPath when the library isn't vendored.
+	// The generated bindings live inside the vendored library, or at
+	// UserGenPath for a module that depends on a published dagger-io.
 	required := []string{UserGenPath}
 	if m.VendorPath != "" {
 		required = []string{
@@ -171,7 +183,7 @@ func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 		}
 	}
 	for _, rel := range required {
-		exists, err := m.Source().Exists(ctx, rel)
+		exists, err := m.source().Exists(ctx, rel)
 		if err != nil {
 			return fmt.Errorf("check generated file %q: %w", rel, err)
 		}
@@ -186,7 +198,7 @@ func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 }
 
 // Get all the needed information from the module's metadata and source files
-func (m *PythonSdkRuntime) Load(ctx context.Context, modSource *dagger.ModuleSource) (*PythonSdkRuntime, error) {
+func (m *PythonSdkRuntime) load(ctx context.Context, modSource *dagger.ModuleSource) (*PythonSdkRuntime, error) {
 	m.ModSource = modSource
 	m.ContextDir = modSource.ContextDirectory()
 	sdkConfig, err := modSource.SDK(ctx)
@@ -209,7 +221,7 @@ func (m *PythonSdkRuntime) Load(ctx context.Context, modSource *dagger.ModuleSou
 // Initialize the base Python container
 //
 // Workdir is set to the module's source directory.
-func (m *PythonSdkRuntime) WithBase() (*PythonSdkRuntime, error) {
+func (m *PythonSdkRuntime) withBase() (*PythonSdkRuntime, error) {
 	baseAddr := m.getImage(BaseImageName).String()
 
 	// NB: Adding env vars with container images that were pulled allows
@@ -229,14 +241,14 @@ func (m *PythonSdkRuntime) WithBase() (*PythonSdkRuntime, error) {
 		WithEnvVariable("UV_NATIVE_TLS", "1").
 		WithEnvVariable("UV_PROJECT_ENVIRONMENT", "/opt/venv")
 
-	if !m.UseUv() {
+	if !m.useUv() {
 		m.Container = m.Container.WithMountedCache("/root/.cache/pip", dag.CacheVolume("modpython-pip"))
 	}
-	if m.IndexURL() != "" {
-		m.Container = m.Container.WithEnvVariable("UV_INDEX_URL", m.IndexURL())
+	if m.indexURL() != "" {
+		m.Container = m.Container.WithEnvVariable("UV_INDEX_URL", m.indexURL())
 	}
-	if m.ExtraIndexURL() != "" {
-		m.Container = m.Container.WithEnvVariable("UV_EXTRA_INDEX_URL", m.ExtraIndexURL())
+	if m.extraIndexURL() != "" {
+		m.Container = m.Container.WithEnvVariable("UV_EXTRA_INDEX_URL", m.extraIndexURL())
 	}
 
 	return m, nil
@@ -272,16 +284,13 @@ func (m *PythonSdkRuntime) withRuntimeScript() *PythonSdkRuntime {
 }
 
 // Add the module's source code
-func (m *PythonSdkRuntime) WithSource() *PythonSdkRuntime {
+func (m *PythonSdkRuntime) withSource() *PythonSdkRuntime {
 	m.Container = m.Container.
 		WithWorkdir(path.Join(m.ContextDirPath, m.SubPath)).
 		WithMountedDirectory(m.ContextDirPath, m.ContextDir).
-		// These are added as late as possible  to avoid cache invalidation
-		// between different modules. It may be used by the runtime entrypoint
-		// so only needed in ModuleRuntime but added here so that extension
-		// modules get it for free since they need to reimplement ModuleRuntime.
-		// It's ok since the previous layer is already dependent on the target
-		// module's sources.
+		// Added as late as possible to avoid cache invalidation between
+		// different modules; the previous layer already depends on the target
+		// module's sources anyway.
 		WithEnvVariable("DAGGER_MODULE", m.ModName).
 		WithEnvVariable("DAGGER_DEFAULT_PYTHON_PACKAGE", m.PackageName).
 		WithEnvVariable("DAGGER_MAIN_OBJECT", m.MainObjectName)
@@ -289,14 +298,14 @@ func (m *PythonSdkRuntime) WithSource() *PythonSdkRuntime {
 }
 
 // Install the module's package and dependencies
-func (m *PythonSdkRuntime) WithInstall() *PythonSdkRuntime {
+func (m *PythonSdkRuntime) withInstall() *PythonSdkRuntime {
 	// NB: Only enable bytecode compilation in `dagger call`
 	// (not `dagger init/develop`), to avoid having to remove the .pyc files
 	// before exporting the module back to the host.
 	ctr := m.Container.WithEnvVariable("UV_COMPILE_BYTECODE", "1")
 
 	// Support uv.lock for simple and fast project management workflow.
-	if m.UseUvLock() {
+	if m.useUvLock() {
 		// Trust the committed lockfile: fail loudly if it's stale instead of
 		// silently re-resolving. Nothing here ever rewrites it.
 		syncArgs := []string{"uv", "sync", "--no-dev", "--locked"}
@@ -321,7 +330,7 @@ func (m *PythonSdkRuntime) WithInstall() *PythonSdkRuntime {
 	check := []string{"pip", "check"}
 
 	// uv has a compatible API with pip
-	if m.UseUv() {
+	if m.useUv() {
 		// Support requirements.lock.
 		if m.Discovery.HasFile(PipCompileLock) {
 			// If there's a lock file, we assume that all the dependencies are
@@ -339,4 +348,35 @@ func (m *PythonSdkRuntime) WithInstall() *PythonSdkRuntime {
 		WithExec(check)
 
 	return m
+}
+
+// Whether to install with uv rather than pip.
+func (m *PythonSdkRuntime) useUv() bool {
+	return m.Discovery.UserConfig().UseUv
+}
+
+// Uv's default index URL setting.
+func (m *PythonSdkRuntime) indexURL() string {
+	for _, cfg := range m.Discovery.UvConfig().Index {
+		if cfg.Name != "" {
+			continue
+		}
+		if cfg.Default {
+			return cfg.URL
+		}
+	}
+	return ""
+}
+
+// Uv's "extra-index-url" setting.
+func (m *PythonSdkRuntime) extraIndexURL() string {
+	for _, cfg := range m.Discovery.UvConfig().Index {
+		if cfg.Name != "" {
+			continue
+		}
+		if !cfg.Default {
+			return cfg.URL
+		}
+	}
+	return ""
 }

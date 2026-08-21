@@ -484,8 +484,12 @@ Consequences, all confined to PR 1:
   because `generateAll` would fail on it.
 - Its vendored `sdk/` was generated once through the engine builtin and
   committed, then verified by loading the module through *this* runtime.
-- So PR 1 exercises this runtime's **module-load** path for real, but not its
-  **codegen** path.
+- So PR 1 exercises this runtime's **module-load** path for real, but not the
+  code generation that then ran inside it.
+
+**Since superseded.** The runtime has no codegen at all any more: generation
+moved to the SDK module's `@generate` hook, where `e2e:toml-generate-check`
+covers it directly.
 
 This is a gap, not a law: adding `[runtime] source` to the include set that
 polyfill's helper computes would close it, and is worth raising against
@@ -571,23 +575,29 @@ README already said the engine owns that list.
 `dagger/python-sdk#14` removed the polyfill for native workspace APIs, and this
 branch now sits on top of it. Two things changed as a result:
 
-- Generation writes through `Workspace.withNewDirectory` instead of the
-  polyfill fork. That fixed a real bug: the fork resolved paths against a
-  different root than `vendorPath` assumed, so `dagger module init` wrote the
-  vendored library to a doubled path (`<module>/<module>/sdk`). Verified fixed
-  by running `dagger module init python` before and after.
-- `withNewDirectory` *replaces* the directory it writes, so vendoring now
-  layers onto whatever is already at `sdk/`, using the same `existingDir`
-  pattern `initModule` adopted on main. Verified by A/B on a real workspace: a
-  user file under `sdk/` survives generation with the layering and is deleted
-  without it. No e2e check locks this in — the destructive behaviour only
-  appears when a changeset is applied to disk, and a check built on a synthetic
-  workspace passes either way, so it would have proved nothing.
+- Generation writes through the native workspace API instead of the polyfill
+  fork. That fixed a real bug: the fork resolved paths against a different root
+  than `vendorPath` assumed, so `dagger module init` wrote the vendored library
+  to a doubled path (`<module>/<module>/sdk`). Verified by running
+  `dagger module init python` before and after.
+- `Workspace.withNewDirectory` *replaces* the directory it writes, which would
+  delete anything a user had put under `sdk/`. Verified by A/B on a real
+  workspace: a stray file there survives generation when the new content is
+  layered onto the existing directory, and is deleted when it is not.
 
-The polyfill-related gap recorded above (this runtime's codegen path not
-exercised end to end) has not been re-tested since the removal; the runtime
-fixture is still deliberately unregistered, so `mod()` refuses it before the
-question arises.
+**Since restructured.** `python-sdk: report only what generation produced`
+(`c724b03`) reshaped generation again: it writes the generated context as a
+directory overlay so `Workspace.changes` reports only the real delta. This
+branch now plugs into that shape — for a `dagger-module.toml` module, `generate`
+substitutes this SDK's vendored output for the engine's generated context, and
+main's single layered `withNewDirectory` does the writing. So the
+data-loss protection lives in one place, main's, rather than being duplicated
+here.
+
+Neither behaviour has an e2e check: the destructive one only appears when a
+changeset is applied to disk, and a check built on a workspace value passes
+either way, so it would have proved nothing. The evidence is the on-disk A/B,
+re-run after this rebase.
 
 ## Progress
 
