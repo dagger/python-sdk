@@ -202,23 +202,11 @@ writes that into the new module's `dagger-module.toml`
 resolves it through `externalSDKForModule`. This is what `dagger/java-sdk`
 already does (`main.dang:15`).
 
-This is **not a one-line change**: `python-sdk.dang:6`'s `tomlConfigPattern`
-only matches `source = "python"`, and `mod()` → `validateConfig`
-(`python-sdk.dang:94-130`) raises "Dagger module does not use the Python SDK"
-on a mismatch. Without widening it, every module this SDK creates is rejected
-by its own `mod` API — including the documented `dagger call python-sdk mod
---path my-module generate`. The pattern is widened in PR 1 (it must accept the
-fixture's local path anyway). It is the only behavioural hard-code of
-`"python"`: `mod.dang`, `mod-config.dang` and `template.dang` contain none, and
-`dagger.toml:20`'s `as-sdk name = "python"` is the SDK's *name*, correctly
-untouched.
-
-Widen it narrowly — `python`, this repo's runtime ref, and paths ending in
-`/runtime` — rather than "any local path", which would make `mod()` accept
-modules of any language and hollow out the error `moduleLookupCheck` covers.
-The durable fix is to validate against the `as-sdk` managed list the way
-`modules()` already does (`python-sdk.dang:26,32`) instead of regexing config
-text; that is a follow-up, not PR 1.
+This used to be **not a one-line change**: `mod()` decided whether a module
+belonged to this SDK by pattern-matching its config file for `source =
+"python"`, so every module this SDK created would have been rejected by its own
+`mod` API. That guess is gone — see *Follow-up: module identity* below — and
+changing `targetRuntime` no longer touches module identification at all.
 
 Legacy modules are untouched: their `dagger.json` keeps `sdk.source: "python"`,
 which keeps resolving to the engine builtin.
@@ -250,7 +238,7 @@ So flipping `targetRuntime` in the same change that introduces `runtime/` would
 point CI at a path that does not exist yet. Hence:
 
 - **PR 1 (this workstream)** — add `runtime/` (with `runtime/sdk/`), widen
-  `tomlConfigPattern`, and prove the runtime end to end against an in-repo
+  module identification, and prove the runtime end to end against an in-repo
   fixture that references it by *local path*. `targetRuntime` stays `"python"`.
 - **PR 2 (immediately after PR 1 merges)** — flip `targetRuntime`, update
   `e2e:target-runtime-check`. Green because `runtime/` is by then on `main`.
@@ -288,7 +276,7 @@ the Chief of Staff, not folded in.
 - `future/done/self-contained-python-sdk.md` (this doc)
 - `runtime/**` (new) — the simplified module runtime
 - `runtime/sdk/**` (new) — vendored client library + code generator
-- `python-sdk.dang` — `tomlConfigPattern` widened
+- `python-sdk.dang` — `mod()` identifies modules by the workspace list
 - `dagger.json` — `include` list, so the authoring module's source does not
   grow by ~35k lines of vendored + generated code
 - `.dagger/modules/e2e/main.dang` + `fixtures/runtime/**` — runtime e2e
@@ -376,11 +364,10 @@ check runs `go test ./...` in `runtime/`, otherwise it is untested tree weight.
   and committed; nothing compares it to `runtime/sdk`, so `runtime/sdk` can
   change and the fixture keeps passing on its old copy. Closing the codegen gap
   above (regenerating the fixture in CI) is what would fix this properly.
-- **`tomlConfigPattern`'s "durable fix" conflicts with the fixture.** The
-  comment in `python-sdk.dang` suggests validating against
-  `currentModule.asSDK.modules`. The runtime fixture is deliberately *not* a
-  managed module, so that change would make `mod()` reject it. Whoever picks it
-  up has to register the fixture — which needs the polyfill gap closed first.
+- ~~**`tomlConfigPattern`'s "durable fix" conflicts with the fixture.**~~
+  Resolved: `mod()` now validates against the workspace list, and the runtime
+  fixture is reached by `dagger call -m <path>` rather than through `mod()`, so
+  it does not need to be a managed module.
 - **Vendored client and provisioning code arrives without its tests.**
   `tests/client` and `tests/provisioning` were not copied, so
   `e2e:sdk-test-check` covers the code generator and module registration but
@@ -558,6 +545,49 @@ authoring module is now its consumer and the runtime does not need it at all.
 This also closes the codegen coverage gap recorded above: `e2e:toml-generate-check`
 generates a `dagger-module.toml` module and asserts the result came from this
 SDK rather than the builtin, which vendors its whole `sdk/python` tree.
+
+## Follow-up: module identity
+
+Also landed before merge, on Yves's call.
+
+`mod()` used to pattern-match a module's config file to decide whether it
+belonged to this SDK. That is a guess twice over: the text cannot distinguish
+this SDK's runtime from any other module whose runtime path ends the same way,
+and it is a second source of truth that can disagree with the engine's.
+
+The engine already owns the answer — `modules.<sdk>.as-sdk.modules` in
+`dagger.toml`, reported through `currentModule.asSDK` — and `modules()` had
+always used it. `mod()` now does too, so both agree by construction and neither
+parses config text. `legacyConfigPattern`, `tomlConfigPattern`,
+`validateConfig` and `configDir` are gone.
+
+The cost is that being managed is now what makes a module reachable through
+`mod()`: the `config/app` and `config/configured` fixtures needed workspace
+registrations. That is the intended contract for a 1.0 workspace, and the
+README already said the engine owns that list.
+
+## Follow-up: rebased onto the polyfill removal
+
+`dagger/python-sdk#14` removed the polyfill for native workspace APIs, and this
+branch now sits on top of it. Two things changed as a result:
+
+- Generation writes through `Workspace.withNewDirectory` instead of the
+  polyfill fork. That fixed a real bug: the fork resolved paths against a
+  different root than `vendorPath` assumed, so `dagger module init` wrote the
+  vendored library to a doubled path (`<module>/<module>/sdk`). Verified fixed
+  by running `dagger module init python` before and after.
+- `withNewDirectory` *replaces* the directory it writes, so vendoring now
+  layers onto whatever is already at `sdk/`, using the same `existingDir`
+  pattern `initModule` adopted on main. Verified by A/B on a real workspace: a
+  user file under `sdk/` survives generation with the layering and is deleted
+  without it. No e2e check locks this in — the destructive behaviour only
+  appears when a changeset is applied to disk, and a check built on a synthetic
+  workspace passes either way, so it would have proved nothing.
+
+The polyfill-related gap recorded above (this runtime's codegen path not
+exercised end to end) has not been re-tested since the removal; the runtime
+fixture is still deliberately unregistered, so `mod()` refuses it before the
+question arises.
 
 ## Progress
 
