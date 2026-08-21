@@ -253,6 +253,31 @@ type E2e {
   Generating an existing module should produce generated files rooted at that
   module without touching unrelated paths.
   """
+  """
+  Generation should report only what generation produced.
+
+  A module's own config is engine-owned and already on disk, so a changeset that
+  claims to add it is describing the workspace base rather than the generated
+  context.
+  """
+  pub generateSkipsEngineConfigCheck(ws: Workspace!): Void @check {
+    let config = generateModulePath + "/dagger.json"
+
+    let single = pythonSdk.mod(ws, path: generateModulePath).generate
+    assert(
+      contains(single.addedPaths, config) == false,
+      "generate reported the engine-owned dagger.json as added",
+    )
+
+    let all = pythonSdk.generateAll(ws)
+    assert(
+      contains(all.addedPaths, config) == false,
+      "generateAll reported the engine-owned dagger.json as added",
+    )
+
+    null
+  }
+
   pub generateCheck(ws: Workspace!): Void @check {
     let changes = pythonSdk.mod(ws, path: generateModulePath).generate
 
