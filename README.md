@@ -40,10 +40,9 @@ the module's config format:
   still generates bindings at module load. Nothing about those modules changes,
   and they need no migration.
 - **Modern** — a `dagger-module.toml` can point `[runtime] source` at this
-  repository's `runtime/`, which is the no-codegen path above. Point it at a
-  module ref: a *relative path* works when the CLI loads the module directly
-  (`dagger call -m …`) but not through `dagger generate`, which generates from
-  a filtered view that does not include the runtime.
+  repository's `runtime/`, which is the no-codegen path above. Either a module
+  ref or a path relative to the module works, for both `dagger generate` and
+  `dagger call`.
 
 The engine resolves the short name `python` to exactly one target, the
 engine-baked runtime, so the modern path is reached by module ref rather than
@@ -54,6 +53,25 @@ on the default branch for that ref to resolve to. See
 [`future/done/self-contained-python-sdk.md`](./future/done/self-contained-python-sdk.md)
 for the full reasoning and for the engine change that would let one name serve
 both.
+
+### Trying this repository's runtime
+
+`targetRuntime` still writes `python`, so a module created today runs on the
+engine's runtime. To move one onto this repository's runtime, point it there by
+hand:
+
+```toml
+# <module>/dagger-module.toml
+[runtime]
+source = "github.com/dagger/python-sdk/runtime"
+```
+
+Then `dagger generate` the module and `dagger call` it as usual. The generated
+files are identical either way — generation is this SDK's regardless of which
+runtime runs the module — so switching back is just editing the line again.
+
+Within this repository, a path relative to the module works too, which is how
+the end-to-end fixture exercises the runtime before the ref exists.
 
 ## Install
 
