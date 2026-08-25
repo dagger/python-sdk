@@ -16,6 +16,15 @@ check.skip = ["*"]
 [modules.sdk-sdk]
 source = "github.com/dagger/sdk-sdk"
 
+[modules.go-sdk]
+source = "github.com/dagger/go-sdk"
+
+[modules.go-sdk.as-sdk]
+name = "go"
+
+[[modules.go-sdk.as-sdk.modules]]
+path = "runtime"
+
 [modules.python-sdk.as-sdk]
 name = "python"
 
@@ -42,3 +51,6 @@ path = ".dagger/modules/e2e/fixtures/config/app"
 
 [[modules.python-sdk.as-sdk.modules]]
 path = ".dagger/modules/e2e/fixtures/config/configured"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/toml-generate/app"

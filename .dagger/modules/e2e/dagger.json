@@ -8,6 +8,11 @@
     {
       "name": "python-sdk",
       "source": "../../.."
+    },
+    {
+      "name": "sdk-sdk",
+      "source": "github.com/dagger/sdk-sdk",
+      "pin": "e1747f4b6221fa24da080701e027243e0cc5fa33"
     }
   ]
 }
