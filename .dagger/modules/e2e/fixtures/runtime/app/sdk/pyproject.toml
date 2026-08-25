@@ -52,29 +52,6 @@ dependencies = [
 "Community" = "https://discord.gg/ufnyBtc8uY"
 "Twitter" = "https://twitter.com/dagger_io"
 
-[dependency-groups]
-dev = [
-    "codegen",
-    # lint
-    "ruff>=0.3.4",
-    "mypy>=1.8.0",
-    # test
-    "aiohttp>=3.9.3",
-    "pytest>=8.0.2",
-    "pytest-httpx>=0.30.0",
-    "pytest-mock>=3.12.0",
-    "pytest-subprocess>=1.5.0",
-    # docs
-    "sphinx>=7.2.6",
-    "sphinx-rtd-theme>=2.0.0",
-]
-
-[tool.uv.sources]
-codegen = { workspace = true }
-
-[tool.uv.workspace]
-members = ["codegen"]
-
 [tool.uv.build-backend]
 module-name = "dagger"
 source-include = ["tests/**", "LICENSE"]

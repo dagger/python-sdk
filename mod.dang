@@ -136,26 +136,64 @@ type Mod {
       .withoutEntrypoint
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
       .withEnvVariable("UV_LINK_MODE", "copy")
-      .withDirectory("/sdk", library)
+      .withDirectory("/sdk", codegenSource)
       .withWorkdir("/sdk")
   }
 
   """
-  This SDK's client library and code generator, filtered to what a module needs
-  vendored. Tests, lint config and caches stay behind.
+  What the code generator needs to run: the library plus the generator itself,
+  and the lock that pins the generator's own dependencies.
   """
-  let library: Directory! {
+  let codegenSource: Directory! {
     currentModule.source.directory("sdk").filter(include: [
       "pyproject.toml",
       "uv.lock",
-      "LICENSE",
-      "README.md",
       "src/**/*.py",
       "src/**/*.typed",
       "codegen/pyproject.toml",
       "codegen/**/*.py",
     ])
   }
+
+  """
+  What a module actually needs vendored: the importable client library, its
+  license, and a project file describing just that.
+
+  The code generator runs in this SDK, never in a module, and the library's own
+  lock pins the generator's development environment rather than the module's.
+  """
+  let library: Directory! {
+    currentModule.source
+      .directory("sdk")
+      .filter(include: [
+        "LICENSE",
+        "README.md",
+        "src/**/*.py",
+        "src/**/*.typed",
+        # The library imports this under suppress(ModuleNotFoundError) and says
+        # it "doesn't make sense in modules": it provisions an engine for a
+        # standalone script, which a module already has.
+        "!src/dagger/provisioning/**",
+      ])
+      .withFile("pyproject.toml", libraryPyproject)
+  }
+
+  """
+  The library's project file with its development sections removed.
+
+  As published, it declares the code generator as a uv workspace member and a
+  dev dependency. Vendoring that verbatim without the generator makes `uv`
+  refuse to install the library at all, so the sections that only describe
+  developing this SDK are dropped.
+  """
+  let libraryPyproject: File! {
+    codegenBase
+      .withFile(stripScriptPath, currentModule.source.file("helpers/vendor-pyproject/strip_dev_sections.py"))
+      .withExec(["python", stripScriptPath, "pyproject.toml", "/library-pyproject.toml"])
+      .file("/library-pyproject.toml")
+  }
+
+  let stripScriptPath: String! = "/strip-dev-sections.py"
 
   let vendorDirName: String! = "sdk"
   let generatedBindingsPath: String! = "src/dagger/client/gen.py"
