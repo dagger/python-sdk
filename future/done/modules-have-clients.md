@@ -2,7 +2,7 @@
 
 author: yves
 created: 2026-08-27
-status: proposed
+status: done (draft PR dagger/python-sdk#22, CI green at 2dc64c7)
 related: `github.com/dagger/java-sdk` PR #17
 (`hack/designs/done/2026-08-26-modules-have-clients.md`, the source design this
 ports); `future/done/self-contained-python-sdk.md` (the layout this builds on);
@@ -447,10 +447,12 @@ the entry point is the same identifier. Generation fails loudly when:
 - the module's root type name is a core type name (`container` → `Container`).
 
 Module-owned fields on core types other than `Query` are emitted as
-module-level functions named by `format_name(field)`; when one field name
-appears on more than one parent, every function of that name is named
-`format_name(parent)_format_name(field)` instead. A function name that still
-collides with the entry point or an owned type fails generation.
+module-level functions named `format_name(parent)_format_name(field)`, always:
+a name that depended on which other parents currently carry the same field
+would turn adding `File.asHello` next to `Directory.asHello` into a rename of
+the exported `as_hello`. Only the entry point, on `Query`, is bare. A function
+name that still collides with the entry point or an owned type fails
+generation.
 
 A schema argument that would shadow a name the entry point's body uses
 (`client`, `_ctx`, `_args`, `_core`, `_BINDING`) is suffixed with `_`, exactly
@@ -871,7 +873,7 @@ Unit, `sdk/tests/codegen` (`uv run pytest tests/codegen`):
   local and a git binding, aliased name; core references as `_core.X`
   including a `_core._FooClient` interface return and `execute(_core.T)`; a
   `list[Hello]` return and a `Hello` argument; a function for an owned field on
-  a non-`Query` core type, two of one name on two parents qualified by parent;
+  a non-`Query` core type, always qualified by its parent;
   duplicate client names and a root type named after a core type rejected;
   the emitted file compiles and imports against the real `dagger` package;
   the engine-version floor accepts `v1.0.0-beta.11`, `latest` and `""` and
@@ -1140,6 +1142,21 @@ half-generate.
   environment on `main` itself (`.dagger/lock` is a version-1 lock the local
   engine refuses to parse) — bisected with `stg pop -a`, so not this series'.
   Unit suite: 261 tests.
+- **Phases 6–8 — draft PR, CI, archive: done.** Draft PR
+  https://github.com/dagger/python-sdk/pull/22 on `eunomie:python-unified-clients-lead-afe256c1`,
+  base `main` @ `71c445f`. Two CI fix rounds: `foreignDependencyCheck` had
+  encoded a git-worktree-only failure (in a real checkout the engine stages
+  the Go dependency and the module generates with a client for it — the
+  check now asserts that contract in both environments); and the one-line
+  `runtime/main.go` edit shifted the source-map line numbers embedded in the
+  committed `runtime/dagger.gen.go`, which `go-sdk:generate` guards
+  (regenerated). CI green at `2dc64c7`: 56 checks, including the five new
+  e2e checks, the sdk-sdk chain/contract suites, and `go-sdk:generate`.
+  Follow-ups, not in this series: a `dagger/dagger` issue for
+  `withoutDirectory` turning a later `withDirectory` on an ancestor into a
+  replace; one for the undetectable same-name collision of two local
+  bindings; the `initModule` template rendering `src/probe_2/` for a module
+  named `probe2`.
 - **Round 3 (the cap): the design reviewer passes; the skeptic still fails
   on one blocker and five majors, every one of which is folded in above:**
   "foreign" now means registered to *another* SDK, so an unregistered
@@ -1155,3 +1172,61 @@ half-generate.
   Dang recursion is flagged as the spike. With every finding adopted and the
   cap reached, the plan proceeds to implementation on the lead's call; the
   dissent is recorded here rather than resolved by a fourth round.
+
+- **Post-landing review: six findings, folded into their owning patches.**
+  - Correctness (generated code), major: a description or deprecation reason
+    carrying `\` or `"""` rendered a client Python cannot parse, and a
+    deprecation reason with a newline broke its one-line literal. `doc()`
+    escapes both, the deprecation message escapes backslash first, then the
+    quote, then the newlines; tested from the client renderer. Patch
+    `codegen-modes`.
+  - API stability, major: a function on a core type was qualified by its
+    parent only when two parents shared the field name, so adding a field
+    elsewhere renamed an exported one. Every non-`Query` function is now
+    parent-qualified. Patch `codegen-modes`, with the rule in the README.
+  - Correctness (paths), major: `generateClient` and `initClient` only
+    normalized their `path`, so `../x` was canonicalized by the engine into a
+    root-level directory the caller never named. One `workspacePath` helper
+    rejects any `..` segment, and `initModule` uses it instead of its own
+    inline check. Patch `python-sdk-standalone`, with an e2e assertion in
+    `e2e-clients`.
+  - Correctness (templates), minor: the client's `pyproject.toml` took the
+    directory basename verbatim as its distribution name. It takes
+    `ModulePackage` now, and the template helper accepts only a package name
+    PEP 508 and TOML both take — which also protects `initModule`. Patch
+    `python-sdk-standalone`.
+  - Simplicity, minor: `stagedDependencies` staged an aliased dependency
+    twice; the local dependency paths are deduplicated. Patch
+    `python-sdk-clients`.
+  - Docs, minor: the migration recipe only covered `dag.<dependency>()`. It
+    covers a module-owned function on a core type too. Patches
+    `docs-clients` and `future-archive`.
+
+  Re-review of those fixes, five more findings, folded into the same patches:
+
+  - Correctness (generated code), major: `textwrap.wrap` is applied to the
+    complete docstring literal, and its default `break_long_words` splits a
+    long word anywhere — including inside an escape pair or the closing
+    delimiter. `wrap` breaks on whitespace only now, which glues every
+    delimiter and escape to its word. Patch `codegen-modes`.
+  - Correctness (generated code), major: a NUL made the client unimportable,
+    a carriage return was rewritten as a newline, and a trailing quote got a
+    space appended instead of round-tripping. `doc()` escapes `\r` and
+    `\x00`, and escapes a trailing quote instead of padding it; the
+    deprecation message escapes `\x00` too. Patch `codegen-modes`.
+  - Correctness (paths), major: the engine reads `\` as a separator
+    (`pathutil.SandboxedRelativePath`), so `..\escape` walked straight past
+    the `..` check. `workspacePath` converts backslashes to slashes first.
+    Patch `python-sdk-standalone`, with the e2e assertion extended in
+    `e2e-clients`.
+  - Correctness (templates), minor: the template helper's guard was a
+    blacklist, and `strcase.ToSnake` keeps `@` and newlines, so `foo@bar`
+    rendered a project `uv lock` rejects. One positive rule on the derived
+    name instead. Patch `python-sdk-standalone`.
+  - Docs, minor: this ledger. Patch `future-archive`.
+
+  Follow-ups, not in this series, both for the next refresh of the committed
+  `sdk/src/dagger/client/gen.py` (not regenerated here): `Directory.withPatch`
+  carries an unescaped `\n` in its docstring, rendered before the escaping
+  fix; and a core description ending in a quote will render as `\"` where it
+  is `" ` today.
