@@ -18,8 +18,8 @@ import anyio.from_thread
 import anyio.to_thread
 import typing_extensions
 from cattrs.cols import is_sequence
-from graphql.pyutils import snake_to_camel
 
+from dagger.client._core import snake_to_camel
 from dagger.client.base import Type
 from dagger.mod._arguments import DefaultAddress, DefaultPath, Deprecated, Ignore, Name
 from dagger.mod._types import ContextPath

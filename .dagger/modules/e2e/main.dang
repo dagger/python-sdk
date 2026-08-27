@@ -459,11 +459,8 @@ type E2e {
   }
 
   """
-  The vendored client library and code generator should pass their own tests.
-
-  These are the upstream suites for exactly what this repository now owns:
-  generator output and module registration. They are what catches the vendored
-  copy breaking as it diverges from dagger/dagger's.
+  The client library and code generator pass their own suites: the query
+  builder, generator output and module registration.
   """
   pub sdkTestCheck(ws: Workspace!): Void @check {
     container
@@ -472,7 +469,7 @@ type E2e {
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
       .withDirectory("/sdk", sdkSource(ws))
       .withWorkdir("/sdk")
-      .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
+      .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/client", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
       .sync
 
     null
