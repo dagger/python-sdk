@@ -164,7 +164,7 @@ def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # n
 
 
 @functools.cache
-def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":  # noqa: C901, PLR0911
+def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":  # noqa: C901, PLR0911, PLR0912
     """Convert Python object to API type."""
     if is_initvar(annotation):
         return to_typedef(annotation.type, context)
@@ -202,6 +202,17 @@ def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":  # n
 
     if inspect.isclass(cls := typ.hint):
         name = cls.__name__
+
+        # A generated client's types, including its bootstrap placeholder, are
+        # the API of another module (or of this one, seen from outside): a
+        # module's own API can only use its own types and the core API.
+        if cls.__module__.startswith("dagger.clients."):
+            msg = (
+                f"unsupported {context}: {typ.hint!r} is a generated client "
+                "type; a module's API can only use its own object types "
+                "and the core API"
+            )
+            raise TypeError(msg)
 
         if is_subclass(cls, enum.Enum):
             return td.with_enum(name, description=get_doc(cls))

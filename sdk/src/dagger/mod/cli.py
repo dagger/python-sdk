@@ -11,6 +11,7 @@ import anyio
 
 import dagger
 from dagger import telemetry
+from dagger.client._binding import mark_module_runtime
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
 from dagger.mod._module import MAIN_OBJECT, Module
 
@@ -19,6 +20,7 @@ logger = logging.getLogger(__package__)
 ENTRY_POINT_NAME: typing.Final[str] = "main_object"
 ENTRY_POINT_GROUP: typing.Final[str] = typing.cast(str, __package__)
 IMPORT_PKG: typing.Final[str] = os.getenv("DAGGER_DEFAULT_PYTHON_PACKAGE", "main")
+CLIENTS_PKG: typing.Final[str] = "dagger.clients"
 
 
 def app(mod: Module | None = None, register: bool = False) -> int | None:
@@ -32,6 +34,7 @@ def app(mod: Module | None = None, register: bool = False) -> int | None:
 
 async def main(mod: Module | None = None, register: bool = False) -> int | None:
     """Async entrypoint for a Dagger module."""
+    mark_module_runtime()
     # Establishing connection early on to allow returning dag.error().
     # Note: if there's a connection error dag.error() won't be sent but
     # should be logged and the traceback shown on the function's stderr output.
@@ -56,6 +59,18 @@ def load_module() -> Module:
     ep = get_entry_point()
     try:
         cls = ep.load()
+    except ModuleNotFoundError as e:
+        if e.name and (e.name == CLIENTS_PKG or e.name.startswith(f"{CLIENTS_PKG}.")):
+            msg = (
+                f"generated client '{e.name}' is missing; run `dagger generate` "
+                "and commit the generated files"
+            )
+            raise ModuleLoadError(msg) from e
+        logger.exception(
+            "Error while importing Python module '%s' with Dagger functions",
+            ep.module,
+        )
+        raise ModuleLoadError(str(e)) from e
     except Exception as e:
         logger.exception(
             "Error while importing Python module '%s' with Dagger functions",

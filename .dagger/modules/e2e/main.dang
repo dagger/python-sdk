@@ -472,7 +472,7 @@ type E2e {
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
       .withDirectory("/sdk", sdkSource(ws))
       .withWorkdir("/sdk")
-      .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
+      .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/codegen", "tests/mod", "tests/client"], experimentalPrivilegedNesting: true)
       .sync
 
     null

@@ -2,8 +2,9 @@ import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import anyio
 import gql
 import graphql
 import httpx
@@ -22,6 +23,9 @@ from typing_extensions import Self
 from dagger import ClientConnectionError, telemetry
 from dagger._managers import ResourceManager
 from dagger.client._config import ConnectConfig, Retry
+
+if TYPE_CHECKING:
+    from dagger.client._binding import ModuleBinding
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,11 @@ class ClientSession(ResourceManager):
         self.client = retrying_client(client, cfg.retry) if cfg.retry else client
         self._session: AsyncClientSession | None = None
 
+        # Modules a generated client has served into this session, and the lock
+        # that keeps serve, schema refetch and the mark as one step.
+        self.served: set[ModuleBinding] = set()
+        self.serve_lock = anyio.Lock()
+
     async def __aenter__(self) -> Self:
         await self.start()
         return self
@@ -144,6 +153,10 @@ class ClientSession(ResourceManager):
 
     async def execute(self, query: gql.GraphQLRequest) -> Any:
         return await (await self.get_session()).execute(query)
+
+    async def refetch_schema(self) -> None:
+        """Fetch the schema again, after a module was served into the session."""
+        await (await self.get_session()).fetch_schema()
 
     async def close(self) -> None:
         logger.debug("Closing client session to GraphQL server")
