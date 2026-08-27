@@ -1,29 +1,23 @@
-import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any
 
-import gql
-import graphql
+import anyio
 import httpx
-from gql.client import AsyncClientSession
-from gql.client import Client as GraphQLClient
-from gql.transport.exceptions import (
-    TransportConnectionFailed,
-    TransportProtocolError,
-    TransportQueryError,
-    TransportServerError,
-)
-from gql.transport.httpx import HTTPXAsyncTransport
 from opentelemetry import propagate
 from typing_extensions import Self
 
-from dagger import ClientConnectionError, telemetry
+from dagger import ClientConnectionError, TransportError, telemetry
+from dagger._exceptions import _query_error_from_response
 from dagger._managers import ResourceManager
-from dagger.client._config import ConnectConfig, Retry
+from dagger.client._config import ConnectConfig
 
 logger = logging.getLogger(__name__)
+
+# Safe to retry: every API call is cached on its inputs.
+MAX_ATTEMPTS = 5
+MAX_BACKOFF_SECONDS = 2.0
 
 
 @dataclass(slots=True, kw_only=True)
@@ -58,13 +52,16 @@ class ConnectParams:
 
 class TelemetryTransport(httpx.AsyncHTTPTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        # Get traceparent into request headers if present.
         propagate.inject(request.headers)
         return await super().handle_async_request(request)
 
 
 class ClientSession(ResourceManager):
-    """Establish a GraphQL client connection to the engine."""
+    """HTTP session to the engine's GraphQL API.
+
+    Queries go as text: the generated client knows its schema, so nothing is
+    fetched or validated on connect.
+    """
 
     def __init__(self, conn: ConnectParams, cfg: ConnectConfig | None = None):
         super().__init__()
@@ -72,94 +69,109 @@ class ClientSession(ResourceManager):
         if cfg is None:
             cfg = ConnectConfig()
 
-        transport = HTTPXAsyncTransport(
-            conn.url,
-            transport=TelemetryTransport(),
-            timeout=cfg.timeout,
-            auth=(conn.session_token, ""),
-        )
+        self.conn = conn
+        self.cfg = cfg
+        self._client: httpx.AsyncClient | None = None
 
-        client = GraphQLClient(
-            transport=transport,
-            # Fetch the schema for DSL query building, but don't
-            # validate queries client-side. The server validates with
-            # a corrected PossibleFragmentSpreads rule that handles
-            # interface-implements-interface; the graphql-core library
-            # used here does not, causing false rejections for
-            # `... on SomeIface` inside `node(id:)` when the interface
-            # has no concrete implementors in this schema view.
-            fetch_schema_from_transport=True,
-            # We're using the timeout from the httpx transport.
-            execute_timeout=None,
+    def _make_client(self) -> httpx.AsyncClient:
+        retry = self.cfg.retry
+        return httpx.AsyncClient(
+            auth=(self.conn.session_token, ""),
+            timeout=self.cfg.timeout,
+            transport=TelemetryTransport(
+                retries=MAX_ATTEMPTS if retry and retry.connect else 0,
+                # Plain HTTP on loopback: the default TLS context costs ~70ms
+                # per process start and is never used.
+                verify=False,
+            ),
         )
-        # Disable client-side query validation.  See comment above.
-        client.validate = lambda _request: None  # type: ignore[method-assign]
-
-        self.client = retrying_client(client, cfg.retry) if cfg.retry else client
-        self._session: AsyncClientSession | None = None
 
     async def __aenter__(self) -> Self:
         await self.start()
         return self
 
-    async def start(self) -> AsyncClientSession:
-        if self._session:
-            return self._session
+    async def start(self) -> httpx.AsyncClient:
+        if self._client:
+            return self._client
 
         async with self.get_stack() as stack:
             logger.debug("Establishing client session to GraphQL server")
-
-            try:
-                session = await stack.enter_async_context(self.client)
-            except TransportConnectionFailed as e:
-                raise ClientConnectionError(str(e)) from e
-            except (TransportProtocolError, TransportServerError) as e:
-                msg = f"Got unexpected response from engine: {e}"
-                raise ClientConnectionError(msg) from e
-            except TransportQueryError as e:
-                # Only query during connection is the introspection query
-                # for building the schema.
-                msg = str(e)
-                # Extract only the error message.
-                if e.errors and "message" in e.errors[0]:
-                    msg = e.errors[0]["message"].strip()
-                msg = f"Failed to build schema from introspection query: {msg}"
-                raise ClientConnectionError(msg) from e
-
-            self._session = session
-            return session
+            self._client = await stack.enter_async_context(self._make_client())
+            return self._client
 
     def has_session(self):
-        return self._session is not None
+        return self._client is not None
 
-    async def get_session(self) -> AsyncClientSession:
-        return await self.start()
+    async def execute(self, query: str) -> Any:
+        """Send a query and return its data."""
+        client = await self.start()
+        retry = self.cfg.retry
+        attempts = MAX_ATTEMPTS if retry and retry.execute else 1
 
-    async def get_schema(self) -> graphql.GraphQLSchema:
-        client = (await self.get_session()).client
-        if not client.schema:
-            msg = "No schema in session"
-            raise ClientConnectionError(msg)
-        return client.schema
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await client.post(self.conn.url, json={"query": query})
+            except httpx.TransportError as e:  # noqa: PERF203 — this is the retry loop
+                if attempt == attempts:
+                    raise TransportError(_transport_message(e)) from e
+                delay = min(0.1 * 2 ** (attempt - 1), MAX_BACKOFF_SECONDS)
+                logger.debug("Request failed (%s), retrying in %.1fs", e, delay)
+                await anyio.sleep(delay)
+            except RuntimeError as e:
+                # httpx raises this when the client has already been closed.
+                msg = (
+                    "Connection to engine has been closed. Make sure you're "
+                    "calling the API within a `dagger.connection()` context."
+                )
+                raise TransportError(msg) from e
+            else:
+                return _read_response(response, query)
 
-    async def execute(self, query: gql.GraphQLRequest) -> Any:
-        return await (await self.get_session()).execute(query)
+        msg = "Failed to execute request"
+        raise TransportError(msg)
 
     async def close(self) -> None:
         logger.debug("Closing client session to GraphQL server")
         await super().close()
+        self._client = None
 
 
-@contextlib.asynccontextmanager
-async def retrying_client(client: GraphQLClient, retry: Retry):
-    try:
-        yield await client.connect_async(
-            reconnecting=True,
-            retry_connect=retry.connect,
-            retry_execute=retry.execute,
+def _transport_message(e: httpx.TransportError) -> str:
+    if isinstance(e, httpx.TimeoutException):
+        return (
+            "Request timed out. Try setting a higher timeout value for this connection."
         )
-    finally:
-        await client.close_async()
+    if msg := str(e):
+        return f"Failed to execute request: {msg}"
+    return "Failed to execute request"
+
+
+def _read_response(response: httpx.Response, query: str) -> Any:
+    try:
+        body = response.json()
+    except ValueError as e:
+        msg = _unexpected(response)
+        raise TransportError(msg) from e
+
+    if not isinstance(body, dict):
+        raise TransportError(_unexpected(response))
+
+    if errors := body.get("errors"):
+        if err := _query_error_from_response(errors, query):
+            raise err
+        msg = f"Unexpected error response from engine: {errors!r}"
+        raise TransportError(msg)
+
+    if response.status_code != httpx.codes.OK:
+        raise TransportError(_unexpected(response))
+
+    return body.get("data")
+
+
+def _unexpected(response: httpx.Response) -> str:
+    return (
+        f"Unexpected response from engine: {response.status_code} {response.text[:200]}"
+    )
 
 
 class BaseConnection:

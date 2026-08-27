@@ -4,7 +4,6 @@ import inspect
 import logging
 import typing
 
-from beartype.door import TypeHint
 from cattrs.preconf.json import make_converter as make_json_converter
 
 import dagger
@@ -174,8 +173,8 @@ def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":  # n
 
     td = dag.type_def()
 
-    typ = TypeHint(annotation)
-    error_msg = f"unsupported {context}: {typ.hint!r}"
+    typ = type(None) if annotation is None else annotation
+    error_msg = f"unsupported {context}: {typ!r}"
 
     if is_nullable(typ):
         td = td.with_optional(True)
@@ -194,13 +193,13 @@ def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":  # n
         type(None): dagger.TypeDefKind.VOID_KIND,
     }
 
-    if typ.hint in builtins:
-        return td.with_kind(builtins[typ.hint])
+    if typ in builtins:
+        return td.with_kind(builtins[typ])
 
-    if el := list_of(typ.hint):
+    if el := list_of(typ):
         return td.with_list_of(to_typedef(el))
 
-    if inspect.isclass(cls := typ.hint):
+    if inspect.isclass(cls := typ):
         name = cls.__name__
 
         if is_subclass(cls, enum.Enum):

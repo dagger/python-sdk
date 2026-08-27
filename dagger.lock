@@ -1,7 +1,5 @@
 [["version","2"]]
-["","git-latest",["https://github.com/dagger/go-sdk"],"refs/heads/main"]
 ["","git-latest",["https://github.com/dagger/sdk-sdk"],"refs/heads/main"]
-["","git-sha",["https://github.com/dagger/go-sdk","refs/heads/main"],"902440e3e097a42cf16354e5eba6b2f0b86194e3"]
 ["","git-sha",["https://github.com/dagger/sdk-sdk","refs/heads/main"],"334448911a8292fba0d677e5f31926c79ad80ad3"]
 ["","oci-sha",["docker.io/library/alpine:3.22"],"sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce"]
 ["","oci-sha",["docker.io/library/golang:1.25-alpine"],"sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59"]

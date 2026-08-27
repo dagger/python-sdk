@@ -1,9 +1,5 @@
 name = "python-sdk-runtime"
 engineVersion = "v1.0.0-0"
-include = ["!**/.venv", "!**/__pycache__", "!**/*.pyc"]
 
 [runtime]
-  source = "go"
-
-[codegen]
-  automaticGitignore = false
+  source = "dang"
