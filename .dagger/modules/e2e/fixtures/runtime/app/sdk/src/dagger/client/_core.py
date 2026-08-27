@@ -43,6 +43,7 @@ from dagger import (
     TransportError,
 )
 from dagger._exceptions import _query_error_from_transport
+from dagger.client._binding import ModuleBinding
 from dagger.client._session import BaseConnection, SharedConnection
 from dagger.client.base import Scalar, Type
 
@@ -102,6 +103,7 @@ class Context:
     selections: collections.deque[Field] = dataclasses.field(
         default_factory=collections.deque
     )
+    bindings: tuple[ModuleBinding, ...] = ()
     converter: cattrs.Converter = dataclasses.field(
         init=False,
         compare=False,
@@ -137,6 +139,12 @@ class Context:
         )
         selections.append(field_)
         return dataclasses.replace(self, selections=selections)
+
+    def with_binding(self, binding: ModuleBinding) -> "Context":
+        """Attach a bound module to serve before any query on this context runs."""
+        if binding in self.bindings:
+            return self
+        return dataclasses.replace(self, bindings=(*self.bindings, binding))
 
     def root_select(
         self,
@@ -197,6 +205,8 @@ class Context:
     async def execute(
         self, return_type: TypeForm[T] | type[T] | None = None
     ) -> T | None:
+        for binding in self.bindings:
+            await binding.ensure_served(self.conn)
         await self.resolve_ids()
         request = await self.request()
 

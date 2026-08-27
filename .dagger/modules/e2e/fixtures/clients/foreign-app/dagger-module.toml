@@ -1,0 +1,8 @@
+name = "foreign-app"
+engineVersion = "v1.0.0-0"
+
+[runtime]
+source = "python"
+
+[[dependencies]]
+source = "../../../../../../runtime"

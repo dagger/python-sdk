@@ -281,18 +281,18 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 		return dag.Module().
 			WithDescription("Runtime module for the Python SDK\n").
 			WithObject(
-				dag.TypeDef().WithObject("PythonSdkRuntime", dagger.TypeDefWithObjectOpts{Description: "State threaded through the steps that build a module's runtime container.\n\nModuleRuntime is the only thing the engine calls; everything else here is\ninternal to it.", SourceMap: dag.SourceMap("main.go", 65, 6)}).
+				dag.TypeDef().WithObject("PythonSdkRuntime", dagger.TypeDefWithObjectOpts{Description: "State threaded through the steps that build a module's runtime container.\n\nModuleRuntime is the only thing the engine calls; everything else here is\ninternal to it.", SourceMap: dag.SourceMap("main.go", 66, 6)}).
 					WithFunction(
 						dag.Function("ModuleRuntime",
 							dag.TypeDef().WithObject("Container")).
 							WithDescription("Container for executing the Python module runtime\n\nThe container is built from the module's committed generated files. This\nruntime generates nothing: code generation belongs to `dagger generate`,\nwhich the Python SDK module owns. Dependencies are still installed — the\nlanguage-level assemble step, like the Go SDK still running go build.\n\nintrospectionJSON is declared, and never read, on purpose: its optionality is\nthe signal the engine reads (RuntimeTrustsCommittedFiles) to decide it may\nskip runtime codegen and omit the argument altogether. Dropping the argument\nwould tell the engine the opposite. It is the opt-out, not a code path.").
-							WithSourceMap(dag.SourceMap("main.go", 143, 1)).
-							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 145, 2)}).
-							WithArg("introspectionJSON", dag.TypeDef().WithObject("File").WithOptional(true), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 147, 2)})).
+							WithSourceMap(dag.SourceMap("main.go", 144, 1)).
+							WithArg("modSource", dag.TypeDef().WithObject("ModuleSource"), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 146, 2)}).
+							WithArg("introspectionJSON", dag.TypeDef().WithObject("File").WithOptional(true), dagger.FunctionWithArgOpts{SourceMap: dag.SourceMap("main.go", 148, 2)})).
 					WithConstructor(
 						dag.Function("New",
 							dag.TypeDef().WithObject("PythonSdkRuntime")).
-							WithSourceMap(dag.SourceMap("main.go", 45, 1)))), nil
+							WithSourceMap(dag.SourceMap("main.go", 46, 1)))), nil
 	default:
 		return nil, fmt.Errorf("unknown object %s", parentName)
 	}

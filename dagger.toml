@@ -54,3 +54,9 @@ path = ".dagger/modules/e2e/fixtures/config/configured"
 
 [[modules.python-sdk.as-sdk.modules]]
 path = ".dagger/modules/e2e/fixtures/toml-generate/app"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/clients/dep"
+
+[[modules.python-sdk.as-sdk.modules]]
+path = ".dagger/modules/e2e/fixtures/clients/app"
