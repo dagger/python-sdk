@@ -61,20 +61,25 @@ type Mod {
       # The generated-clients subtree is exclusively generated: sweep it so a
       # dropped dependency or a renamed alias is reported as a removal. The
       # rest of sdk/ is merged onto, so a stray file there survives.
-      ws
-        .withoutDirectory("/" + modulePath(vendorDirName + "/" + clientsDirName))
-        .withDirectory("/" + rootPath, generatedTree(ws, []))
+      codegen
+        .overlay(ws, rootPath, vendorDirName + "/" + clientsDirName, generatedTree(ws))
         .changes(ws)
     }
   }
 
   """
-  This module's generated files, rooted at the module, for either config format.
+  This module's generated files, rooted at the module, for either config
+  format: a directory holding only what generation produces.
+  """
+  pub generatedTree(base: Workspace!): Directory! {
+    generatedTreeIn(base, [])
+  }
 
+  """
   `active` names the modules whose generation is in progress up the dependency
   chain, so a cycle fails with a message instead of recursing without end.
   """
-  let generatedTree(base: Workspace!, active: [String!]!): Directory! {
+  let generatedTreeIn(base: Workspace!, active: [String!]!): Directory! {
     let stagedWs = stagedDependencies(base, active + [rootPath])
     if (isModern) {
       # A dagger-module.toml module is generated here, by this SDK's own code
@@ -129,9 +134,7 @@ type Mod {
           if (dep.skipGenerate) {
             staged
           } else {
-            staged
-              .withoutDirectory("/" + depPath + "/" + vendorDirName)
-              .withDirectory("/" + depPath, dep.generatedTree(staged, active))
+            codegen.overlay(staged, depPath, vendorDirName, dep.generatedTreeIn(staged, active))
           }
         }
       }
@@ -162,15 +165,11 @@ type Mod {
   }
 
   let isGitSource(kind: ModuleSourceKind!): Boolean! {
-    JSON.encode(kind) == "\"GIT_SOURCE\""
+    codegen.isGitSource(kind)
   }
 
   let contains(values: [String!]!, want: String!): Boolean! {
     values.filter { value => value == want }.length > 0
-  }
-
-  let hasDuplicates(values: [String!]!): Boolean! {
-    values.filter { value => values.filter { other => other == value }.length > 1 }.length > 0
   }
 
   let normalizePath(path: String!): String! {
@@ -203,61 +202,47 @@ type Mod {
   """
   let vendoredDir(stagedWs: Workspace!): Directory! {
     let src = stagedWs.moduleSource("/" + rootPath)
-    let selfName = clientName(src.moduleName)
-    let deps = src.dependencies.{{moduleName, kind, sourceRootSubpath, asString, pin, engineVersion}}
-    let names = deps.map { dep => clientName(dep.moduleName) } + [selfName]
+    let deps = src.dependencies.{{moduleName, kind, sourceRootSubpath, asString, pin}}
+    # One call: the generator normalizes every name and rejects two clients of
+    # this module that would share a file under dagger/clients. The module's
+    # own name goes last, so the self client's name is the last one back.
+    let names = codegen.clientNames(deps.map { dep => dep.moduleName } + [src.moduleName])
+    let selfName = names.reduce("") { acc, name => name }
 
-    if (hasDuplicates(names)) {
-      raise "two clients of module " + src.moduleName + " would share a file under dagger/clients: " + names.join(", ")
-    } else {
-      let clients = deps.reduce(directory) { dir, dep =>
-        dir.withFile(clientName(dep.moduleName) + ".py", dependencyClient(stagedWs, dep.moduleName, dep.kind, dep.sourceRootSubpath, dep.asString, dep.pin, dep.engineVersion))
-      }
-      let selfClientPath = clientsDirName + "/" + selfName + ".py"
-
-      # Pass 1 carries the committed self client, or a stub, so the module's
-      # own code imports during the bootstrap build below.
-      let pass1 = library
-        .withFile(generatedBindingsPath, bindings(src.introspectionSchemaJSON))
-        .withDirectory(clientsDirName, clients)
-        .withFile(selfClientPath, carriedSelfClient(selfName, src.moduleName))
-
-      # Reading the module's own client-facing schema installs the module,
-      # which builds it from the staged sdk/.
-      let bootWs = stagedWs
-        .withoutDirectory("/" + modulePath(vendorDirName))
-        .withDirectory("/" + rootPath, directory.withDirectory(vendorDirName, pass1))
-      let selfClient = clientBindings(
-        bootWs.moduleSource("/" + rootPath).clientSchemaIntrospectionJSON,
-        src.moduleName,
-        bindingJSON(src.moduleName, "LOCAL_SOURCE", "/" + rootPath, ""),
-        src.engineVersion,
+    let clients = deps.reduce(directory) { dir, dep =>
+      dir.withFile(
+        codegen.clientName(dep.moduleName) + ".py",
+        codegen.clientOf(dependencySource(stagedWs, dep.moduleName, dep.kind, dep.sourceRootSubpath, dep.asString, dep.pin)),
       )
-
-      directory.withDirectory(vendorDirName, pass1.withFile(selfClientPath, selfClient))
     }
+    let selfClientPath = codegen.clientsDirName + "/" + selfName + ".py"
+
+    # Pass 1 carries the committed self client, or a stub, so the module's
+    # own code imports during the bootstrap build below.
+    let pass1 = codegen.library(false)
+      .withFile(codegen.generatedBindingsPath, codegen.core(src.introspectionSchemaJSON))
+      .withDirectory(codegen.clientsDirName, clients)
+      .withFile(selfClientPath, carriedSelfClient(selfName, src.moduleName))
+
+    # Reading the module's own client-facing schema installs the module,
+    # which builds it from the staged sdk/.
+    let bootWs = codegen.overlay(stagedWs, rootPath, vendorDirName, directory.withDirectory(vendorDirName, pass1))
+    let selfClient = codegen.clientOf(bootWs.moduleSource("/" + rootPath))
+
+    directory.withDirectory(vendorDirName, pass1.withFile(selfClientPath, selfClient))
   }
 
   """
-  The client of one declared dependency, generated from that dependency's own
-  client-facing schema under its final name.
+  One declared dependency, re-resolved from its identity under its final name:
+  a local one from the staged workspace, a git one from its ref and pin.
+  `withName` is what the engine itself uses to alias a dependency, so the
+  client schema comes out namespaced under that name.
   """
-  let dependencyClient(stagedWs: Workspace!, name: String!, kind: ModuleSourceKind!, subpath: String!, ref: String!, pin: String!, engineVersion: String!): File! {
-    if (isGitSource(kind)) {
-      clientBindings(
-        moduleSource(refString: ref, refPin: pin).withName(name).clientSchemaIntrospectionJSON,
-        name,
-        bindingJSON(name, "GIT_SOURCE", ref, pin),
-        engineVersion,
-      )
+  let dependencySource(stagedWs: Workspace!, name: String!, kind: ModuleSourceKind!, subpath: String!, ref: String!, pin: String!): ModuleSource! {
+    if (codegen.isGitSource(kind)) {
+      moduleSource(refString: ref, refPin: pin).withName(name)
     } else {
-      let depPath = normalizePath(subpath)
-      clientBindings(
-        stagedWs.moduleSource("/" + depPath).withName(name).clientSchemaIntrospectionJSON,
-        name,
-        bindingJSON(name, "LOCAL_SOURCE", "/" + depPath, ""),
-        engineVersion,
-      )
+      stagedWs.moduleSource("/" + normalizePath(subpath)).withName(name)
     }
   }
 
@@ -267,148 +252,17 @@ type Mod {
   every name is a placeholder that says the client is not generated yet.
   """
   let carriedSelfClient(selfName: String!, moduleName: String!): File! {
-    let committed = modulePath(vendorDirName + "/" + clientsDirName + "/" + selfName + ".py")
+    let committed = modulePath(vendorDirName + "/" + codegen.clientsDirName + "/" + selfName + ".py")
     let view = ws.directory("/", include: [committed])
     if (view.exists(committed)) {
       view.file(committed)
     } else {
-      directory.withNewFile("stub.py", stubClient(moduleName)).file("stub.py")
+      codegen.stubClient(moduleName)
     }
   }
 
-  let stubClient(moduleName: String!): String! {
-    "# Bootstrap placeholder for the `" + moduleName + "` client; `dagger generate` replaces it.\n"
-    + "\n"
-    + "__all__ = []\n"
-    + "\n"
-    + "\n"
-    + "class _NotGenerated:\n"
-    + "    def __init__(self, *args, **kwargs):\n"
-    + "        msg = \"client for module '" + moduleName + "' is not generated yet: run `dagger generate`\"\n"
-    + "        raise RuntimeError(msg)\n"
-    + "\n"
-    + "\n"
-    + "def __getattr__(name):\n"
-    + "    if name.startswith(\"__\"):\n"
-    + "        raise AttributeError(name)\n"
-    + "    return _NotGenerated\n"
-  }
+  let codegen: Codegen! { Codegen() }
 
-  let bindingJSON(name: String!, kind: String!, ref: String!, pin: String!): String! {
-    "{\"name\":" + JSON.encode(name) + ",\"kind\":" + JSON.encode(kind) + ",\"ref\":" + JSON.encode(ref) + ",\"pin\":" + JSON.encode(pin) + "}"
-  }
-
-  """
-  The Python module name of a bound module's client, as the code generator
-  normalizes it, so Dang and Python agree on the file name.
-  """
-  let clientName(moduleName: String!): String! {
-    codegenBase
-      .withExec(codegenCommand + ["client-name", moduleName])
-      .stdout
-      .trimSuffix("\n")
-  }
-
-  """
-  The core API generated from a schema by this SDK's code generator: every
-  type no module owns, plus the Client root and the dag singleton.
-  """
-  let bindings(schemaJSON: File!): File! {
-    codegenBase
-      .withMountedFile(schemaPath, schemaJSON)
-      .withExec(codegenCommand + ["generate", "-i", schemaPath, "-o", "/gen.py"])
-      .file("/gen.py")
-  }
-
-  """
-  One module's client generated from its client-facing schema: its types, its
-  entry point and its binding.
-  """
-  let clientBindings(schemaJSON: File!, moduleName: String!, binding: String!, engineVersion: String!): File! {
-    codegenBase
-      .withMountedFile(schemaPath, schemaJSON)
-      .withExec(codegenCommand + [
-        "generate", "-i", schemaPath, "-o", "/client.py",
-        "--mode", "client", "--module", moduleName, "--binding", binding, "--engine-version", engineVersion,
-      ])
-      .file("/client.py")
-  }
-
-  let codegenCommand: [String!]! = [
-    "uv", "run", "--isolated", "--frozen", "--package", "codegen", "python", "-m", "codegen",
-  ]
-
-  """
-  Container with this SDK's client library and code generator mounted.
-  """
-  let codegenBase: Container! {
-    container
-      .from(codegenImage)
-      .withoutEntrypoint
-      .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
-      .withEnvVariable("UV_LINK_MODE", "copy")
-      .withDirectory("/sdk", codegenSource)
-      .withWorkdir("/sdk")
-  }
-
-  """
-  What the code generator needs to run: the library plus the generator itself,
-  and the lock that pins the generator's own dependencies.
-  """
-  let codegenSource: Directory! {
-    currentModule.source.directory("sdk").filter(include: [
-      "pyproject.toml",
-      "uv.lock",
-      "src/**/*.py",
-      "src/**/*.typed",
-      "codegen/pyproject.toml",
-      "codegen/**/*.py",
-    ])
-  }
-
-  """
-  What a module actually needs vendored: the importable client library, its
-  license, and a project file describing just that.
-
-  The code generator runs in this SDK, never in a module, and the library's own
-  lock pins the generator's development environment rather than the module's.
-  """
-  let library: Directory! {
-    currentModule.source
-      .directory("sdk")
-      .filter(include: [
-        "LICENSE",
-        "README.md",
-        "src/**/*.py",
-        "src/**/*.typed",
-        # The library imports this under suppress(ModuleNotFoundError) and says
-        # it "doesn't make sense in modules": it provisions an engine for a
-        # standalone script, which a module already has.
-        "!src/dagger/provisioning/**",
-      ])
-      .withFile("pyproject.toml", libraryPyproject)
-  }
-
-  """
-  The library's project file with its development sections removed.
-
-  As published, it declares the code generator as a uv workspace member and a
-  dev dependency. Vendoring that verbatim without the generator makes `uv`
-  refuse to install the library at all, so the sections that only describe
-  developing this SDK are dropped.
-  """
-  let libraryPyproject: File! {
-    codegenBase
-      .withFile(stripScriptPath, currentModule.source.file("helpers/vendor-pyproject/strip_dev_sections.py"))
-      .withExec(["python", stripScriptPath, "pyproject.toml", "/library-pyproject.toml"])
-      .file("/library-pyproject.toml")
-  }
-
-  let stripScriptPath: String! = "/strip-dev-sections.py"
-
-  let vendorDirName: String! = "sdk"
-  let generatedBindingsPath: String! = "src/dagger/client/gen.py"
-  let clientsDirName: String! = "src/dagger/clients"
-  let schemaPath: String! = "/schema.json"
-  let codegenImage: String! = "ghcr.io/astral-sh/uv:python3.14-alpine"
+  let vendorDirName: String! { codegen.vendorDirName }
+  let clientsDirName: String! { codegen.clientsDirName }
 }

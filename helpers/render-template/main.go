@@ -5,11 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
 	"github.com/iancoleman/strcase"
 )
+
+// What the templates render as both a distribution name and a package
+// directory: valid where PEP 508 and TOML are, with nothing to escape.
+var packageName = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9_]*[A-Za-z0-9])?$`)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -31,6 +36,9 @@ func run(args []string) error {
 		"ModuleType":    strcase.ToCamel(moduleName),
 		"ModuleImport":  "dagger/" + strcase.ToKebab(moduleName),
 		"ModulePackage": strcase.ToSnake(moduleName),
+	}
+	if pkg := data["ModulePackage"]; !packageName.MatchString(pkg) {
+		return fmt.Errorf("cannot name a Python package after %q: derived %q is not a valid package name", moduleName, pkg)
 	}
 
 	return filepath.WalkDir(templateDir, func(path string, entry os.DirEntry, err error) error {

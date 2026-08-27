@@ -1,0 +1,229 @@
+"""
+This SDK's code generator and the client library it vendors, shared by module
+generation and standalone client generation.
+"""
+type Codegen {
+  """
+  Where a module or a client vendors this SDK's library.
+  """
+  pub vendorDirName: String! = "sdk"
+
+  """
+  The core API file inside the vendored library.
+  """
+  pub generatedBindingsPath: String! = "src/dagger/client/gen.py"
+
+  """
+  The generated-clients package inside the vendored library, one file per
+  bound module. Exclusively generated.
+  """
+  pub clientsDirName: String! = "src/dagger/clients"
+
+  """
+  The core API generated from a schema: every type no module owns, plus the
+  Client root and the dag singleton.
+  """
+  pub core(schemaJSON: File!): File! {
+    base
+      .withMountedFile(schemaPath, schemaJSON)
+      .withExec(command + ["generate", "-i", schemaPath, "-o", "/gen.py"])
+      .file("/gen.py")
+  }
+
+  """
+  One module's client, generated from its own client-facing schema under its
+  final name: its types, its entry point, and the identity it is served under,
+  all read off the resolved source.
+
+  A module loaded from the workspace binds by its workspace-root-relative path,
+  which resolves against the workspace the client runs in; a git module binds
+  by its canonical ref and pin, which resolve anywhere.
+  """
+  pub clientOf(src: ModuleSource!): File! {
+    let name = src.moduleName
+    let binding = if (isGitSource(src.kind)) {
+      bindingJSON(name, "GIT_SOURCE", src.asString, src.pin)
+    } else {
+      bindingJSON(name, "LOCAL_SOURCE", "/" + normalizePath(src.sourceRootSubpath), "")
+    }
+
+    base
+      .withMountedFile(schemaPath, src.clientSchemaIntrospectionJSON)
+      .withExec(command + [
+        "generate", "-i", schemaPath, "-o", "/client.py",
+        "--mode", "client", "--module", name, "--binding", binding, "--engine-version", src.engineVersion,
+      ])
+      .file("/client.py")
+  }
+
+  """
+  The Python module names of several bound modules' clients, as the code
+  generator normalizes them, so Dang and Python agree on the file names. Two
+  names that would share one file are rejected there, in one place.
+  """
+  pub clientNames(moduleNames: [String!]!): [String!]! {
+    base.withExec(command + ["client-name"] + moduleNames).stdout.trimSuffix("\n").split("\n")
+  }
+
+  """
+  The Python module name of one bound module's client.
+  """
+  pub clientName(moduleName: String!): String! {
+    clientNames([moduleName]).reduce("") { acc, name => name }
+  }
+
+  """
+  A placeholder standing in for a module's own client while the module is
+  built for the first time: every name resolves to a class whose use says the
+  client is not generated yet.
+  """
+  pub stubClient(moduleName: String!): File! {
+    let contents = "# Bootstrap placeholder for the `" + moduleName + "` client; `dagger generate` replaces it.\n"
+      + "\n"
+      + "__all__ = []\n"
+      + "\n"
+      + "\n"
+      + "class _NotGenerated:\n"
+      + "    def __init__(self, *args, **kwargs):\n"
+      + "        msg = \"client for module '" + moduleName + "' is not generated yet: run `dagger generate`\"\n"
+      + "        raise RuntimeError(msg)\n"
+      + "\n"
+      + "\n"
+      + "def __getattr__(name):\n"
+      + "    if name.startswith(\"__\"):\n"
+      + "        raise AttributeError(name)\n"
+      + "    return _NotGenerated\n"
+    directory.withNewFile("stub.py", contents).file("stub.py")
+  }
+
+  """
+  What gets vendored: the importable client library, its license, and a
+  project file describing just that.
+
+  A module gets the library without engine provisioning: it runs inside a
+  session the engine opened. A standalone client gets provisioning too, with
+  the CLI version it downloads stamped from the engine the client was
+  generated against, so it does not start an older engine than its bindings.
+  """
+  pub library(standalone: Boolean!): Directory! {
+    let excludes = if (standalone) { [] } else { ["!src/dagger/provisioning/**"] }
+    let files = currentModule.source
+      .directory("sdk")
+      .filter(include: ["LICENSE", "README.md", "src/**/*.py", "src/**/*.typed"] + excludes)
+      .withFile("pyproject.toml", libraryPyproject)
+
+    if (standalone) {
+      files.withNewFile("src/dagger/_engine/_version.py", versionStamp)
+    } else {
+      files
+    }
+  }
+
+  """
+  Write generated files at `path` in a workspace: `tree` layered onto what is
+  there, with the `swept` subtree (relative to `path`) replaced rather than
+  merged, so a generated file that no longer exists is reported as a removal.
+
+  The whole directory is composed first and written in one go. The engine
+  merges `Workspace.withDirectory` onto an untouched path but replaces it once
+  a `withoutDirectory` below it has run, so writing only the generated tree
+  after the sweep would drop everything else at `path`.
+  """
+  pub overlay(ws: Workspace!, path: String!, swept: String!, tree: Directory!): Workspace! {
+    let composed = existingDir(ws, path).withoutDirectory(swept).withDirectory(".", tree)
+    ws
+      .withoutDirectory("/" + subpath(path, swept))
+      .withDirectory("/" + path, composed)
+  }
+
+  """
+  Existing contents of a workspace directory, empty when it doesn't exist yet.
+  """
+  pub existingDir(ws: Workspace!, path: String!): Directory! {
+    let root = ws.directory("/")
+    if (path == ".") {
+      root
+    } else if (root.exists(path)) {
+      root.directory(path)
+    } else {
+      directory
+    }
+  }
+
+  pub subpath(path: String!, rel: String!): String! {
+    if (path == ".") { rel } else { path + "/" + rel }
+  }
+
+  pub isGitSource(kind: ModuleSourceKind!): Boolean! {
+    JSON.encode(kind) == "\"GIT_SOURCE\""
+  }
+
+  pub normalizePath(path: String!): String! {
+    let normalized = path.trimPrefix("./").trimPrefix("/").trimSuffix("/")
+    if (normalized == "") { "." } else { normalized }
+  }
+
+  let bindingJSON(name: String!, kind: String!, ref: String!, pin: String!): String! {
+    "{\"name\":" + JSON.encode(name) + ",\"kind\":" + JSON.encode(kind) + ",\"ref\":" + JSON.encode(ref) + ",\"pin\":" + JSON.encode(pin) + "}"
+  }
+
+  """
+  The `_version.py` a standalone client provisions from: the running engine's
+  version as the bare release tag the downloader expects.
+  """
+  let versionStamp: String! {
+    let tag = base.withExec(command + ["cli-version", version]).stdout.trimSuffix("\n")
+    "# Code generated by dagger. DO NOT EDIT.\n\nCLI_VERSION = " + JSON.encode(tag) + "\n"
+  }
+
+  """
+  The library's project file with its development sections removed.
+
+  As published, it declares the code generator as a uv workspace member and a
+  dev dependency. Vendoring that verbatim without the generator makes `uv`
+  refuse to install the library at all, so the sections that only describe
+  developing this SDK are dropped.
+  """
+  let libraryPyproject: File! {
+    base
+      .withFile(stripScriptPath, currentModule.source.file("helpers/vendor-pyproject/strip_dev_sections.py"))
+      .withExec(["python", stripScriptPath, "pyproject.toml", "/library-pyproject.toml"])
+      .file("/library-pyproject.toml")
+  }
+
+  """
+  Container with this SDK's client library and code generator mounted.
+  """
+  let base: Container! {
+    container
+      .from(image)
+      .withoutEntrypoint
+      .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
+      .withEnvVariable("UV_LINK_MODE", "copy")
+      .withDirectory("/sdk", source)
+      .withWorkdir("/sdk")
+  }
+
+  """
+  What the code generator needs to run: the library plus the generator itself,
+  and the lock that pins the generator's own dependencies.
+  """
+  let source: Directory! {
+    currentModule.source.directory("sdk").filter(include: [
+      "pyproject.toml",
+      "uv.lock",
+      "src/**/*.py",
+      "src/**/*.typed",
+      "codegen/pyproject.toml",
+      "codegen/**/*.py",
+    ])
+  }
+
+  let command: [String!]! = [
+    "uv", "run", "--isolated", "--frozen", "--package", "codegen", "python", "-m", "codegen",
+  ]
+
+  let stripScriptPath: String! = "/strip-dev-sections.py"
+  let schemaPath: String! = "/schema.json"
+  let image: String! = "ghcr.io/astral-sh/uv:python3.14-alpine"
+}
