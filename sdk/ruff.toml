@@ -74,6 +74,10 @@ ignore = [
     "SLF001",
     # Too many arguments to function call.
     "PLR0913",
+    # Generated argument checks raise with a literal message, one guard per
+    # argument.
+    "EM101",
+    "C901",
 ]
 "codegen/gen.py" = [
     "A",

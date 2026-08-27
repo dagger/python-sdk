@@ -347,6 +347,12 @@ class BuildArg(Input):
     value: str
     """The build argument value."""
 
+    def __post_init__(self):
+        if not (isinstance(self.name, str)):
+            raise _type_error("BuildArg.__init__", "name", self.name, "str")
+        if not (isinstance(self.value, str)):
+            raise _type_error("BuildArg.__init__", "value", self.value, "str")
+
 
 @typecheck
 @dataclass(slots=True)
@@ -374,6 +380,22 @@ class LLMContentBlockInput(Input):
     tool_name: str | None = ''
     """The name of the tool to call (for TOOL_CALL kind)."""
 
+    def __post_init__(self):
+        if not (isinstance(self.kind, LLMContentBlockKind)):
+            raise _type_error("LLMContentBlockInput.__init__", "kind", self.kind, "LLMContentBlockKind")
+        if not (self.text is None or isinstance(self.text, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "text", self.text, "str | None")
+        if not (self.call_id is None or isinstance(self.call_id, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "call_id", self.call_id, "str | None")
+        if not (self.tool_name is None or isinstance(self.tool_name, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "tool_name", self.tool_name, "str | None")
+        if not (self.arguments is None or isinstance(self.arguments, JSON)):
+            raise _type_error("LLMContentBlockInput.__init__", "arguments", self.arguments, "JSON | None")
+        if not (self.errored is None or isinstance(self.errored, bool)):
+            raise _type_error("LLMContentBlockInput.__init__", "errored", self.errored, "bool | None")
+        if not (self.signature is None or isinstance(self.signature, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "signature", self.signature, "str | None")
+
 
 @typecheck
 @dataclass(slots=True)
@@ -385,6 +407,12 @@ class PipelineLabel(Input):
 
     value: str
     """Label value."""
+
+    def __post_init__(self):
+        if not (isinstance(self.name, str)):
+            raise _type_error("PipelineLabel.__init__", "name", self.name, "str")
+        if not (isinstance(self.value, str)):
+            raise _type_error("PipelineLabel.__init__", "value", self.value, "str")
 
 
 @typecheck
@@ -400,6 +428,14 @@ class PortForward(Input):
 
     protocol: NetworkProtocol | None = NetworkProtocol.TCP
     """Transport layer protocol to use for traffic."""
+
+    def __post_init__(self):
+        if not (self.frontend is None or isinstance(self.frontend, int)):
+            raise _type_error("PortForward.__init__", "frontend", self.frontend, "int | None")
+        if not (isinstance(self.backend, int)):
+            raise _type_error("PortForward.__init__", "backend", self.backend, "int")
+        if not (self.protocol is None or isinstance(self.protocol, NetworkProtocol)):
+            raise _type_error("PortForward.__init__", "protocol", self.protocol, "NetworkProtocol | None")
 
 
 @runtime_checkable

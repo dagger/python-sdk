@@ -33,7 +33,6 @@ dependencies = [
     # Avoid a broken release with only cp310 wheels.
     "yarl!=1.24.1",
     "httpcore>=1.0.8",
-    "beartype>=0.22.0",
     "platformdirs>=2.6.2",
     "typing_extensions>=4.13.0",
     "rich>=10.11.0",

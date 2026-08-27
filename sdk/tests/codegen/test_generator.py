@@ -576,3 +576,108 @@ def test_enum_render(type_, expected, ctx: Context):
 )
 def test_doc(original: str, expected: str):
     assert doc(original) == expected
+
+
+def test_arg_check_expected_type(ctx: Context):
+    query_type = _EXPECTED_TYPE_SCHEMA.type_map["Query"]
+    handler = _ObjectField(ctx, "fn", query_type.fields["fn"], query_type)
+    body = handler.func_body()
+
+    assert "if not (isinstance(secret, Secret)):" in body
+    assert 'raise _type_error("Query.fn", "secret", secret, "Secret")' in body
+
+
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (
+            {"name": Argument(NonNull(String))},
+            "if not (isinstance(name, str)):",
+        ),
+        (
+            {"lines": Argument(Int, 1)},
+            "if not (lines is None or isinstance(lines, int)):",
+        ),
+        (
+            {"tags": Argument(NonNull(List(NonNull(String))))},
+            "if not (isinstance(tags, list) "
+            "and all(isinstance(_v0, str) for _v0 in tags)):",
+        ),
+        (
+            {"labels": Argument(List(String))},
+            "if not (labels is None or (isinstance(labels, list) "
+            "and all(_v0 is None or isinstance(_v0, str) for _v0 in labels))):",
+        ),
+        (
+            {"tags": Argument(NonNull(List(NonNull(String))), [])},
+            "if not (tags is None or (isinstance(tags, list) "
+            "and all(isinstance(_v0, str) for _v0 in tags))):",
+        ),
+        (
+            {
+                "color": Argument(
+                    NonNull(GraphQLEnumType("Color", {"RED": GraphQLEnumValue("RED")}))
+                )
+            },
+            "if not (isinstance(color, Color)):",
+        ),
+    ],
+)
+def test_arg_check_expressions(args, expected, ctx: Context):
+    handler = _ObjectField(ctx, "fn", Field(String, args), Object("Foo", {}))
+    assert expected in handler.func_body()
+
+
+def test_input_object_graphql_names():
+    local_ctx = Context()
+    input_type = InputObject(
+        "Block",
+        lambda: {
+            "callId": InputField(String),
+            "sshURL": InputField(String),
+        },
+    )
+
+    rendered = InputHandler(local_ctx).render(input_type)
+
+    assert "@typecheck" not in rendered
+    assert "_graphql_names = (('ssh_url', 'sshURL'),)" in rendered
+
+
+def test_input_object_post_init_checks():
+    local_ctx = Context()
+    input_type = InputObject(
+        "Block",
+        lambda: {
+            "callId": InputField(String),
+            "size": InputField(NonNull(Int)),
+        },
+    )
+
+    rendered = InputHandler(local_ctx).render(input_type)
+
+    assert "def __post_init__(self):" in rendered
+    assert "if not (self.call_id is None or isinstance(self.call_id, str)):" in rendered
+    assert (
+        'raise _type_error("Block.__init__", "call_id", self.call_id, "str | None")'
+        in rendered
+    )
+    assert "if not (isinstance(self.size, int)):" in rendered
+    checks = rendered[rendered.index("def __post_init__") :]
+    assert checks.index("self.size") < checks.index("self.call_id")
+
+
+def test_input_object_mutable_default_accepts_none():
+    local_ctx = Context()
+    input_type = InputObject(
+        "Block",
+        lambda: {"tags": InputField(NonNull(List(NonNull(String))), default_value=[])},
+    )
+
+    rendered = InputHandler(local_ctx).render(input_type)
+
+    assert "tags: list[str] | None = None" in rendered
+    assert (
+        "if not (self.tags is None or (isinstance(self.tags, list) "
+        "and all(isinstance(_v0, str) for _v0 in self.tags))):"
+    ) in rendered

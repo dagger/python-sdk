@@ -3,6 +3,7 @@ import dataclasses
 import enum
 import functools
 import logging
+import types
 import typing
 from dataclasses import MISSING
 from typing import (
@@ -17,7 +18,6 @@ import exceptiongroup
 import gql
 import graphql
 import httpx
-from beartype.door import TypeHint
 from cattrs.preconf.json import make_converter as make_json_converter
 from gql.dsl import (
     DSLField,
@@ -267,14 +267,12 @@ class Context:
     def get_value(self, value: dict[str, Any], return_type: type[T]) -> T: ...
 
     def get_value(self, value: dict[str, Any] | None, return_type: type[T]) -> T | None:
-        type_hint = TypeHint(return_type)
-
         for f in self.selections:
             if not isinstance(value, dict):
                 break
             value = value[f.name]
 
-        if value is None and not type_hint.is_bearable(value):
+        if value is None and not _allows_none(return_type):
             msg = (
                 "Required field got a null response. Check if parent fields are valid."
             )
@@ -316,6 +314,14 @@ class Context:
                                     tg.start_soon(_resolve_seq_id, i, seq_i, k, seq_v)
                         elif is_id_type(v):
                             tg.start_soon(_resolve_id, i, k, v)
+
+
+def _allows_none(t: Any) -> bool:
+    if t is None or t is type(None) or t is Any:
+        return True
+    return typing.get_origin(t) in (typing.Union, types.UnionType) and type(
+        None
+    ) in typing.get_args(t)
 
 
 def make_converter(ctx: Context):
