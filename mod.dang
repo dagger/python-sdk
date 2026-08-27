@@ -79,14 +79,10 @@ type Mod {
           .directory(rootPath)
       }
 
-      # The generated context holds only generated files, and withNewDirectory
-      # replaces rather than layers, so merge it onto the module first.
-      # Workspace.changes then reports just the difference, rooted at the
-      # caller's cwd.
-      ws.withNewDirectory(
-        "/" + rootPath,
-        ws.directory("/" + rootPath).withDirectory(".", generated),
-      ).changes(ws)
+      # The generated context holds only generated files, so merge it onto the
+      # module rather than replacing it. Workspace.changes then reports just
+      # the difference, rooted at the caller's cwd.
+      ws.withDirectory("/" + rootPath, generated).changes(ws)
     }
   }
 
