@@ -82,6 +82,13 @@ ignore = [
     "SLF001",
     "PLR0913",
 ]
+"**/src/dagger/clients/*.py" = [
+    "A",
+    "D",
+    "E501",
+    "SLF001",
+    "PLR0913",
+]
 # Same as above, for dev module
 "src/dagger_gen.py" = ["A", "D", "E501", "SLF001", "PLR0913"]
 # Ignore built-in shadowing in test mocks.

@@ -560,7 +560,7 @@ def test_enum_render(type_, expected, ctx: Context):
         ),
         (
             'Example: "foobar"',
-            r'"""Example: "foobar" """',
+            '"""Example: "foobar\\""""',
         ),
         (
             'Lorem ipsum dolores est.\n\nExample: "foobar"',
@@ -568,7 +568,7 @@ def test_enum_render(type_, expected, ctx: Context):
                 '''\
                 """Lorem ipsum dolores est.
 
-                Example: "foobar"
+                Example: "foobar\\"
                 """''',
             ),
         ),
