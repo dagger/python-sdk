@@ -1,0 +1,50 @@
+"""
+A generated client for one module, for use outside any module: a Python
+project that vendors this SDK's library, the core API as a client sees it, and
+the bound module's client.
+"""
+type GeneratedClient {
+  """
+  Workspace-root-relative path of the client directory.
+  """
+  pub path: String!
+
+  """
+  The workspace the client lives in.
+  """
+  let ws: Workspace!
+
+  """
+  The module the client is bound to, resolved.
+  """
+  let source: ModuleSource!
+
+  """
+  Generate this client.
+
+  Everything generated sits under `sdk/` inside the client directory, so the
+  user's own files next to it survive every run. The generated-clients
+  subtree is swept, the rest of `sdk/` is merged onto what is there.
+  """
+  pub generate: Changeset! {
+    codegen
+      .overlay(ws, path, codegen.vendorDirName + "/" + codegen.clientsDirName, generatedTree)
+      .changes(ws)
+  }
+
+  """
+  The client's generated files, rooted at the client directory: a directory
+  holding only `sdk/`.
+  """
+  pub generatedTree: Directory! {
+    let clientFile = codegen.clientsDirName + "/" + codegen.clientName(source.moduleName) + ".py"
+    directory.withDirectory(
+      codegen.vendorDirName,
+      codegen.library(true)
+        .withFile(codegen.generatedBindingsPath, codegen.core(source.clientSchemaIntrospectionJSON))
+        .withFile(clientFile, codegen.clientOf(source)),
+    )
+  }
+
+  let codegen: Codegen! { Codegen() }
+}

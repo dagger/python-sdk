@@ -3,7 +3,7 @@ from typing import Any
 import graphql
 
 
-def insert_stubs(introspection: Any, schema: graphql.GraphQLSchema):
+def insert_stubs(introspection: Any, schema: graphql.GraphQLSchema):  # noqa: C901
     """Insert ast node stubs into the parsed schema."""
     for tp in introspection["types"]:
         tp_schema = schema.get_type(tp["name"])
@@ -39,6 +39,16 @@ def insert_stubs(introspection: Any, schema: graphql.GraphQLSchema):
             tp_schema.ast_node = graphql.InputObjectTypeDefinitionNode(
                 fields=input_fields,
                 directives=parse_directives(tp["directives"]),
+            )
+
+        elif isinstance(tp_schema, graphql.GraphQLScalarType) and (
+            not graphql.is_specified_scalar_type(tp_schema)
+        ):
+            # The specified scalars are process-wide singletons in graphql-core;
+            # stamping an ast node on them leaks into every other schema built.
+            tp_schema.ast_node = graphql.ScalarTypeDefinitionNode(
+                name=graphql.NameNode(value=tp["name"]),
+                directives=parse_directives(tp.get("directives") or []),
             )
 
         elif isinstance(tp_schema, graphql.GraphQLEnumType):

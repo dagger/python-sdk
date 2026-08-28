@@ -15,6 +15,7 @@ const (
 	RuntimeExecutablePath = "/runtime"
 	GenDir                = "sdk"
 	SDKGenPath            = "src/dagger/client/gen.py"
+	ClientsPkgPath        = "src/dagger/clients/__init__.py"
 	UserGenPath           = "src/dagger_gen.py"
 	VenvPath              = "/opt/venv"
 	ProjectCfg            = "pyproject.toml"
@@ -180,6 +181,7 @@ func (m *PythonSdkRuntime) requireGeneratedFiles(ctx context.Context) error {
 		required = []string{
 			path.Join(m.VendorPath, ProjectCfg),
 			path.Join(m.VendorPath, SDKGenPath),
+			path.Join(m.VendorPath, ClientsPkgPath),
 		}
 	}
 	for _, rel := range required {

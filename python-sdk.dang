@@ -30,6 +30,23 @@ type PythonSdk {
     if (normalized == "") { "." } else { normalized }
   }
 
+  """
+  Normalize a workspace path a caller named, rejecting one that leaves the
+  workspace: a `..` segment reaches a directory the caller did not name, which
+  the engine would canonicalize into a root-level path of its own. Backslashes
+  are separators to the engine (`pathutil.SandboxedRelativePath`), so they are
+  separators here too, before the check.
+  """
+  let workspacePath(path: String!): String! {
+    let normalized = normalizePath(path.split("\\").join("/"))
+    let escapes = normalized.split("/").reduce(false) { acc, part => acc or part == ".." }
+    if (escapes) {
+      raise "path escapes workspace: " + path
+    } else {
+      normalized
+    }
+  }
+
   let pathDepth(path: String): Int! {
     if (path == null) { -1 } else if (path == ".") { 0 } else { path.split("/").length }
   }
@@ -127,15 +144,7 @@ type PythonSdk {
   version is used, uv is enabled, and no base image override is written.
   """
   pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "default", pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
-    let rawPath = path.trimPrefix("./").trimPrefix("/")
-
-    let modPath = if (rawPath == "" or rawPath == ".") {
-      "."
-    } else if (rawPath == ".." or rawPath.trimPrefix("../") != rawPath) {
-      raise "path escapes workspace: " + rawPath
-    } else {
-      rawPath.trimSuffix("/")
-    }
+    let modPath = workspacePath(path)
 
     let selectedTemplate = if (template == "") { "default" } else { template }
 
@@ -154,13 +163,20 @@ type PythonSdk {
   Render a Python template with the requested module name.
   """
   let renderedTemplate(name: String!, templateName: String!): Directory! {
+    renderTemplate(name, currentModule.source.directory("templates/" + templateName))
+  }
+
+  """
+  Render a template directory with the requested name.
+  """
+  let renderTemplate(name: String!, template: Directory!): Directory! {
     container
       .from("golang:1.25-alpine")
       .withoutEntrypoint
       .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
       .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
       .withDirectory("/helper", currentModule.source.directory("helpers/render-template"))
-      .withDirectory("/template", currentModule.source.directory("templates/" + templateName))
+      .withDirectory("/template", template)
       .withWorkdir("/helper")
       .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
       .withExec(["render-template", name, "/template", "/rendered"])
@@ -196,15 +212,146 @@ type PythonSdk {
   }
 
   """
-  Generate every managed Python SDK module visible from the client's cwd.
+  Generate every managed Python SDK module at or below the client's cwd, then
+  every registered client there, on top of the modules' generated state.
 
-  Modules with the generate skip marker are skipped.
+  One hook rather than two: the engine runs a workspace's generators
+  concurrently, and a client bound to a local module must be generated after
+  that module. Modules with the generate skip marker are skipped. The nearest
+  enclosing module of a cwd inside one is left alone: a changeset reaching
+  outside the cwd cannot be applied, and a client initialized inside a module
+  runs this scoped to the client's own directory.
   """
   pub generateAll(ws: Workspace!): Changeset! @generate {
-    changeset.withChangesets(
-      modules(ws)
-        .filter { mod => mod.skipGenerate == false }
-        .map { mod => mod.generate },
-    )
+    let cwd = normalizePath(ws.cwd)
+    # Overlaid directly rather than applied as a changeset: Workspace.changes
+    # measures paths from the cwd and withChanges reads them from the root.
+    let withModules = modules(ws)
+      .filter { mod => mod.skipGenerate == false and pathContains(cwd, mod.rootPath) }
+      .reduce(ws) { staged, mod =>
+        codegen.overlay(staged, mod.rootPath, codegen.vendorDirName + "/" + codegen.clientsDirName, mod.generatedTree(staged))
+      }
+
+    clients(withModules)
+      .reduce(withModules) { staged, client =>
+        codegen.overlay(staged, client.path, codegen.vendorDirName + "/" + codegen.clientsDirName, client.generatedTree)
+      }
+      .changes(ws)
   }
+
+  """
+  Generate a typed Python client for the module at `module`, written to `path`.
+
+  `module` is a workspace-root-relative path to a local module, or a git ref.
+  A local module this SDK manages is generated first, so the client is never
+  read off an ungenerated module. Everything generated sits under `path/sdk/`;
+  the user's own files next to it survive every run.
+  """
+  pub generateClient(ws: Workspace!, module: String!, path: String!): Changeset! {
+    client(ws, workspacePath(path), module, "").generate
+  }
+
+  """
+  Regenerate every client registered to this SDK at or below the client's cwd.
+  """
+  pub generateAllClient(ws: Workspace!): Changeset! {
+    changeset.withChangesets(clients(ws).map { client => client.generate })
+  }
+
+  """
+  Seed the SDK-owned files of a new Python client at `path`: a project file
+  declaring the vendored library, so `uv sync` there just works.
+
+  The engine records the client in the workspace config and generates it
+  through the `@generate` hook; an existing project file is left alone.
+  """
+  pub initClient(ws: Workspace!, path: String!, module: String!): Changeset! {
+    let clientPath = workspacePath(path)
+    let pyproject = clientSubpath(clientPath, "pyproject.toml")
+    if (ws.directory("/", include: [pyproject]).exists(pyproject)) {
+      ws.changes(ws)
+    } else {
+      let dirName = clientPath.split("/").reduce("") { acc, part => part }
+      # A client generated at the workspace root has no directory to name it
+      # after; the module it is bound to does.
+      let name = if (dirName == ".") { refBaseName(module) } else { dirName }
+      ws.withDirectory("/" + clientPath, renderTemplate(name, currentModule.source.directory("client-template"))).changes(ws)
+    }
+  }
+
+  """
+  The clients registered to this SDK at or below the workspace's cwd. The
+  engine does not scope its client list to the cwd, so this does.
+  """
+  let clients(ws: Workspace!): [GeneratedClient!]! {
+    let cwd = normalizePath(ws.cwd)
+    currentModule
+      .asSDK(workspace: ws)
+      .clients.{{path, module, pin}}
+      .filter { entry => pathContains(cwd, normalizePath(entry.path)) }
+      .map { entry => client(ws, normalizePath(entry.path), entry.module, entry.pin) }
+  }
+
+  let client(ws: Workspace!, path: String!, module: String!, pin: String!): GeneratedClient! {
+    GeneratedClient(path: path, ws: ws, source: boundModule(ws, module, pin))
+  }
+
+  """
+  The module a client binds to, resolved. A local module this SDK manages is
+  generated onto a staging workspace first — the same staging a dependency
+  gets — so its client-facing schema can be read; any other local module is
+  assumed committed, and a git module resolves from its ref and pin.
+  """
+  let boundModule(ws: Workspace!, module: String!, pin: String!): ModuleSource! {
+    if (isLocalModuleRef(ws, module)) {
+      let modPath = normalizePath(module)
+      let managed = currentModule
+        .asSDK(workspace: ws.withWorkdir("."))
+        .modules.{{path}}
+        .filter { entry => normalizePath(entry.path) == modPath }
+        .length > 0
+      let mod = Mod(rootPath: modPath, ws: ws, skipGenerateFilename: skipGenerateFilename)
+      let staged = if (managed and mod.skipGenerate == false) {
+        codegen.overlay(ws, modPath, codegen.vendorDirName, mod.generatedTree(ws))
+      } else {
+        ws
+      }
+      staged.moduleSource("/" + modPath)
+    } else {
+      moduleSource(refString: module, refPin: pin)
+    }
+  }
+
+  """
+  Whether a client's bound-module ref points into the workspace rather than
+  at a remote module.
+
+  A ref that leads to a module config in the workspace is a path; anything
+  else is a git ref. Asked of the workspace rather than of the string, so a
+  path with a dot in a directory name (`my.app/dep`) is not read as a git ref.
+  """
+  let isLocalModuleRef(ws: Workspace!, ref: String!): Boolean! {
+    if (ref.hasPrefix("/") or ref.hasPrefix(".")) {
+      true
+    } else {
+      let root = ws.directory("/")
+      let modPath = normalizePath(ref)
+      root.exists(modPath + "/dagger-module.toml") or root.exists(modPath + "/dagger.json")
+    }
+  }
+
+  """
+  Last path segment of a module ref, without any version suffix:
+  `github.com/x/hello@v1` and `.dagger/modules/hello` both name `hello`.
+  """
+  let refBaseName(ref: String!): String! {
+    let unpinned = ref.split("@").reduce("") { acc, part => if (acc == "") { part } else { acc } }
+    normalizePath(unpinned).split("/").reduce("") { acc, part => part }
+  }
+
+  let clientSubpath(clientPath: String!, rel: String!): String! {
+    codegen.subpath(clientPath, rel)
+  }
+
+  let codegen: Codegen! { Codegen() }
 }

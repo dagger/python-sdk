@@ -17,6 +17,8 @@ It uses the engine's native `Workspace` and `ModuleSource` APIs directly.
 | Path | What it is |
 | --- | --- |
 | `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `initModule`, `generate`, config, discovery |
+| `client.dang`, `client-template/` | standalone clients: `generateClient`, `initClient` |
+| `codegen.dang` | how both drive the code generator and vendor the library |
 | `sdk/` | the `dagger-io` client library and code generator |
 | `runtime/` | the module runtime the engine calls to run a module |
 
@@ -157,12 +159,134 @@ For a single module:
 dagger call python-sdk mod --path my-module generate
 ```
 
+Generation vendors the client library into `<module>/sdk/` and, next to it,
+everything the module can call:
+
+```
+<module>/sdk/src/dagger/client/gen.py          the core API, as a module sees it
+<module>/sdk/src/dagger/clients/<self>.py      a client for the module itself
+<module>/sdk/src/dagger/clients/<dep>.py       one client per declared dependency
+```
+
+See [Clients](#clients) for what a client is and how module code uses one.
+
 For every Python SDK module in the workspace (skipping any with a
 `.dagger-python-sdk-skip-generate` marker at or above the module root):
 
 ```sh
 dagger call python-sdk generate-all
 ```
+
+## Clients
+
+A module's dependency and a standalone client are the same thing: generated
+bindings for one module, plus a serve preamble that makes sure the module is
+served in the session before the first query goes through them. Every module
+under `sdk/src/dagger/clients/` is one such client, named after the module it
+binds to — its final name, so a dependency declared with an alias gets a client
+under the alias. Core types are shared: a `dagger.Container` returned by one
+client is the same class everywhere.
+
+A module calls a dependency, and itself, through the client's entry point — a
+function named after the module, taking the module's constructor arguments and
+an optional `client`:
+
+```python
+from dagger import function, object_type
+from dagger.clients.app import app        # the module's own client
+from dagger.clients.builder import builder  # a declared dependency
+
+
+@object_type
+class App:
+    @function
+    async def build(self) -> str:
+        return await builder().build("main")
+
+    @function
+    async def twice(self) -> str:
+        return (await app().build()) * 2   # a self call, through the engine
+```
+
+Inside a module the engine has already served the module's dependencies and
+the module itself, so the preamble does nothing there. A self call goes
+through the engine like any other call, so it gets function-level caching.
+
+Generate first, then call: a symbol imported from the module's own client has
+to exist in the last generated client, so add the function, generate, then
+call it. A client's types are not a module's own types — a function returns
+the module's `@object_type`, never `dagger.clients.app.App`.
+
+### Standalone clients
+
+The same client works from a Python project that is not a module. Register
+one and let `dagger generate` produce it:
+
+```sh
+dagger api client init python clients/builder ./builder
+```
+
+This records the client in the workspace config, seeds `clients/builder/pyproject.toml`
+(declaring the vendored library, so `uv sync` there just works) and generates
+`clients/builder/sdk/`. Regenerate with `dagger generate`, or directly:
+
+```sh
+dagger call python-sdk generate-client --module ./builder --path clients/builder
+```
+
+`module` is a workspace path or a git ref. A local module this SDK manages is
+generated first, so the client is never read off an ungenerated module.
+Everything generated sits under `sdk/`; files next to it are yours.
+
+```python
+import dagger
+from dagger.clients.builder import builder
+
+
+async def main() -> None:
+    async with dagger.connection():
+        print(await builder().build("main"))
+```
+
+Outside a module the preamble serves the bound module the first time a query
+runs, then remembers it for the session. A module bound by workspace path
+needs a workspace — run from inside one, or pass `dagger.Config(workdir=...)`;
+a module bound by git ref resolves anywhere. The vendored library carries
+engine provisioning and the CLI version of the engine the client was
+generated against.
+
+### Migrating a module
+
+Modules on the `dagger-module.toml` config get clients on their next
+`dagger generate`; `dag.<dependency>()` is gone. For each dependency:
+
+```python
+# before
+from dagger import dag
+await dag.builder().build("main")
+
+# after
+from dagger.clients.builder import builder
+await builder().build("main")
+```
+
+A dependency that adds a function to a core type moves the same way: the
+function is no longer a method on the core object, it is a module-level
+function taking that object first. Its name is always its parent's name and
+the field's — only the entry point is bare — so `Directory.asHello` is
+`directory_as_hello`, and adding `File.asHello` next to it renames nothing:
+
+```python
+# before
+await directory.as_hello().greet("world")
+
+# after
+from dagger.clients.hello import directory_as_hello
+await directory_as_hello(directory).greet("world")
+```
+
+Legacy `dagger.json` modules are untouched: they keep the merged `gen.py` the
+engine's builtin Python SDK generates.
 
 ## Manage dependencies and the engine version
 
