@@ -13,7 +13,6 @@ from typing import (
     overload,
 )
 
-from beartype.door import TypeHint
 from cattrs.preconf.json import JsonConverter, make_converter
 from typing_extensions import Self, TypeVar, override
 
@@ -192,7 +191,7 @@ class Function(Generic[P, R]):
             name=get_alt_name(annotated_type) or normalize_name(param.name),
             signature=param,
             resolved_type=annotation,
-            is_nullable=is_nullable(TypeHint(annotation)),
+            is_nullable=is_nullable(annotation),
             doc=get_doc(annotated_type),
             ignore=get_ignore(annotated_type),
             default_path=get_default_path(annotated_type),

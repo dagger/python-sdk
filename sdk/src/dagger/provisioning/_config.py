@@ -19,7 +19,7 @@ class Config(ConnectConfig):
         The maximum time in seconds for establishing a connection to the server,
         or None to disable. Defaults to 10 seconds.
     retry:
-        Retry parameters for connecting to the Dagger API server.
+        Retry policy for talking to the Dagger API server.
     workdir:
         The host workdir loaded into dagger.
     config_path:

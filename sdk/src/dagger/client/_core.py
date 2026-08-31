@@ -2,7 +2,11 @@ import collections
 import dataclasses
 import enum
 import functools
+import json
 import logging
+import math
+import re
+import types
 import typing
 from dataclasses import MISSING
 from typing import (
@@ -14,37 +18,12 @@ from typing import (
 import anyio
 import cattrs
 import exceptiongroup
-import gql
-import graphql
-import httpx
-from beartype.door import TypeHint
 from cattrs.preconf.json import make_converter as make_json_converter
-from gql.dsl import (
-    DSLField,
-    DSLInlineFragment,
-    DSLQuery,
-    DSLSchema,
-    DSLSelectable,
-    DSLType,
-    dsl_gql,
-)
-from gql.transport.exceptions import (
-    TransportClosed,
-    TransportConnectionFailed,
-    TransportProtocolError,
-    TransportQueryError,
-    TransportServerError,
-)
 from typing_extensions import TypeForm
 
-from dagger import (
-    DaggerError,
-    InvalidQueryError,
-    TransportError,
-)
-from dagger._exceptions import _query_error_from_transport
+from dagger import DaggerError, InvalidQueryError
 from dagger.client._session import BaseConnection, SharedConnection
-from dagger.client.base import Scalar, Type
+from dagger.client.base import Input, Scalar, Type
 
 from ._guards import (
     IDType,
@@ -56,6 +35,22 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 Obj_T = TypeVar("Obj_T", bound=Type)
+
+INDENT = "  "
+
+_SNAKE_TO_CAMEL_RE = re.compile(r"(_)([a-z\d])")
+
+
+def snake_to_camel(s: str, upper: bool = True) -> str:
+    """Convert from snake_case to CamelCase.
+
+    If upper is set, then convert to upper CamelCase, otherwise the first
+    character keeps its case.
+    """
+    s = _SNAKE_TO_CAMEL_RE.sub(lambda m: m.group(2).upper(), s)
+    if upper:
+        s = s[:1].upper() + s[1:]
+    return s
 
 
 class Arg(typing.NamedTuple):
@@ -70,27 +65,97 @@ class Field:
     name: str
     args: dict[str, Any]
     children: dict[str, "Field"] = dataclasses.field(default_factory=dict)
-    # When set, children are wrapped in an inline fragment on this type:
-    # field(args) { ... on inline_type { children } }
+    # Wraps the children in `... on inline_type { }`.
     inline_type: str | None = None
 
-    def to_dsl(self, schema: DSLSchema) -> DSLField:
-        type_: DSLType = getattr(schema, self.type_name)
-        field_ = getattr(type_, self.name)(**self.args)
-        if self.children:
-            child_fields = {
-                name: child.to_dsl(schema) for name, child in self.children.items()
-            }
-            if self.inline_type is not None:
-                frag_type: DSLType = getattr(schema, self.inline_type)
-                inline = DSLInlineFragment().on(frag_type).select(**child_fields)
-                field_ = field_.select(inline)
-            else:
-                field_ = field_.select(**child_fields)
-        return field_
+    def to_graphql(self, alias: str | None = None, depth: int = 1) -> str:
+        """Render as a selection, one field per line so error locations line up."""
+        pad = INDENT * depth
+        out = (
+            self.name
+            if alias is None or alias == self.name
+            else f"{alias}: {self.name}"
+        )
+        if self.args:
+            args = ", ".join(f"{k}: {to_literal(v)}" for k, v in self.args.items())
+            out = f"{out}({args})"
+        if not self.children:
+            return f"{pad}{out}"
+
+        child_depth = depth + 2 if self.inline_type is not None else depth + 1
+        children = "\n".join(
+            child.to_graphql(child_alias, child_depth)
+            for child_alias, child in self.children.items()
+        )
+        if self.inline_type is not None:
+            inner_pad = INDENT * (depth + 1)
+            children = (
+                f"{inner_pad}... on {self.inline_type} {{\n{children}\n{inner_pad}}}"
+            )
+        return f"{pad}{out} {{\n{children}\n{pad}}}"
 
     def add_child(self, child: "Field") -> "Field":
         return dataclasses.replace(self, children={child.name: child})
+
+
+def to_literal(value: Any) -> str:
+    """Render a Python value as a GraphQL literal."""
+    if isinstance(value, Input):
+        return _input_literal(value)
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(to_literal(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{k}: {to_literal(v)}" for k, v in value.items()) + "}"
+    return _scalar_literal(value)
+
+
+def _scalar_literal(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    # Before str: an enum may subclass str, and goes by name.
+    if isinstance(value, enum.Enum):
+        return value.name
+    if isinstance(value, str):
+        # GraphQL string escapes are a subset of JSON's.
+        return json.dumps(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and math.isfinite(value):
+        return repr(value)
+    msg = f"Cannot serialize {value!r} as a GraphQL value"
+    raise InvalidQueryError(msg)
+
+
+def _input_literal(obj: Input) -> str:
+    # The generator records only the GraphQL names snake_to_camel can't derive.
+    names = dict(getattr(type(obj), "_graphql_names", ()))
+    fields = []
+    for f in dataclasses.fields(obj):
+        value = getattr(obj, f.name)
+        if f.default is not MISSING and value == f.default:
+            continue
+        name = names.get(f.name) or snake_to_camel(f.name, upper=False)
+        fields.append(f"{name}: {to_literal(value)}")
+    return "{" + ", ".join(fields) + "}"
+
+
+def _snapshot(value: Any) -> Any:
+    """Copy containers: the query is built later, so mutation must not reach it."""
+    if isinstance(value, Input):
+        return dataclasses.replace(
+            value,
+            **{
+                f.name: _snapshot(getattr(value, f.name))
+                for f in dataclasses.fields(value)
+            },
+        )
+    if isinstance(value, (list, tuple)):
+        return [_snapshot(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _snapshot(v) for k, v in value.items()}
+    return value
 
 
 @dataclasses.dataclass(slots=True)
@@ -116,9 +181,9 @@ class Context:
         field_name: str,
         args: typing.Sequence[Arg],
     ) -> "Context":
-        args_ = self.converter.unstructure(
-            {arg.name: arg.value for arg in args if arg.value != arg.default}
-        )
+        args_ = {
+            arg.name: _snapshot(arg.value) for arg in args if arg.value != arg.default
+        }
         field_ = Field(type_name, field_name, args_)
         selections = self.selections.copy()
         selections.append(field_)
@@ -127,12 +192,10 @@ class Context:
     def select_multiple(self, type_name: str, **fields: str) -> "Context":
         selections = self.selections.copy()
         parent = selections.pop()
-        # When selecting multiple fields, set them as children of the last
-        # selection to make `build` logic simpler.
+        # The kwarg names become aliases, so the response already uses the
+        # Python names.
         field_ = dataclasses.replace(
             parent,
-            # Using kwargs for alias names. This way the returned result
-            # is already formatted with the python name we expect.
             children={k: Field(type_name, v, {}) for k, v in fields.items()},
         )
         selections.append(field_)
@@ -159,7 +222,8 @@ class Context:
         selections.append(node_field)
         return dataclasses.replace(ctx, selections=selections)
 
-    async def build(self) -> DSLSelectable:
+    def build(self) -> str:
+        """Render the selection set as a query document."""
         if not self.selections:
             msg = "No field has been selected"
             raise InvalidQueryError(msg)
@@ -167,26 +231,9 @@ class Context:
         def _collapse(child: Field, field_: Field):
             return field_.add_child(child)
 
-        # This transforms the selection set into a single root Field, where
-        # the `children` attribute is set to the next selection in the set,
-        # and so on...
         root = functools.reduce(_collapse, reversed(self.selections))
 
-        # `to_dsl` will cascade to all children, until the end.
-        try:
-            return root.to_dsl(DSLSchema(await self.conn.session.get_schema()))
-        except (graphql.GraphQLError, AttributeError, TypeError) as e:
-            logger.exception("GraphQL query builder failed to build query")
-            msg = (
-                "Failed to build GraphQL query, probably due to a schema validation "
-                "issue. Please file a bug report because anything that could "
-                "fail to validate at this point should really happen sooner. "
-                "See Python logs for more details."
-            )
-            raise InvalidQueryError(msg) from e
-
-    async def request(self) -> gql.GraphQLRequest:
-        return dsl_gql(DSLQuery(await self.build()))
+        return f"query {{\n{root.to_graphql()}\n}}"
 
     @overload
     async def execute(self, return_type: None = None) -> None: ...
@@ -198,40 +245,7 @@ class Context:
         self, return_type: TypeForm[T] | type[T] | None = None
     ) -> T | None:
         await self.resolve_ids()
-        request = await self.request()
-
-        try:
-            result = await self.conn.session.execute(request)
-
-        except TransportClosed as e:
-            msg = (
-                "Connection to engine has been closed. Make sure you're "
-                "calling the API within a `dagger.connection()` context."
-            )
-            raise TransportError(msg) from e
-
-        except (TransportProtocolError, TransportServerError) as e:
-            msg = f"Unexpected response from engine: {e}"
-            raise TransportError(msg) from e
-
-        except TransportConnectionFailed as e:
-            if not (msg := str(e)):
-                match e.__cause__:
-                    case httpx.TimeoutException():
-                        msg = (
-                            "Request timed out. Try setting a higher timeout value "
-                            "for this connection."
-                        )
-                    case _:
-                        msg = "Failed to execute request"
-
-            raise TransportError(msg) from e
-
-        except TransportQueryError as e:
-            if error := _query_error_from_transport(e, request):
-                raise error from e
-            raise
-
+        result = await self.conn.session.execute(self.build())
         return self.get_value(result, return_type) if return_type else None
 
     async def execute_object_list(
@@ -267,14 +281,12 @@ class Context:
     def get_value(self, value: dict[str, Any], return_type: type[T]) -> T: ...
 
     def get_value(self, value: dict[str, Any] | None, return_type: type[T]) -> T | None:
-        type_hint = TypeHint(return_type)
-
         for f in self.selections:
             if not isinstance(value, dict):
                 break
             value = value[f.name]
 
-        if value is None and not type_hint.is_bearable(value):
+        if value is None and not _allows_none(return_type):
             msg = (
                 "Required field got a null response. Check if parent fields are valid."
             )
@@ -283,15 +295,12 @@ class Context:
         return self.converter.structure(value, return_type)
 
     def handle_group_err(self, grp: exceptiongroup.BaseExceptionGroup):
-        """Handle exception group errors."""
-        # just re-raise the first one
-        for exc in grp.exceptions:
-            raise exc from None
+        raise grp.exceptions[0] from None
 
     async def resolve_ids(self) -> None:
-        """Replace Type object instances with their ID implicitly."""
+        """Replace Type arguments with their IDs."""
 
-        # mutating to avoid re-fetching on forked pipeline
+        # In place, so a forked pipeline doesn't fetch them again.
         async def _resolve_id(pos: int, k: str, v: IDType):
             sel = self.selections[pos]
             sel.args[k] = await v.id()
@@ -300,22 +309,23 @@ class Context:
             sel = self.selections[pos]
             sel.args[k][idx] = await v.id()
 
-        # resolve all ids concurrently
-        with exceptiongroup.catch(
-            {(graphql.GraphQLError, DaggerError): self.handle_group_err}
-        ):
+        with exceptiongroup.catch({DaggerError: self.handle_group_err}):
             async with anyio.create_task_group() as tg:
                 for i, sel in enumerate(self.selections):
                     for k, v in sel.args.items():
-                        # check if it's a sequence of Type objects
                         if is_id_type_sequence(v):
-                            # make sure it's a list, to mutate by index
-                            sel.args[k] = list(v)
-                            for seq_i, seq_v in enumerate(sel.args[k]):
-                                if is_id_type(seq_v):
-                                    tg.start_soon(_resolve_seq_id, i, seq_i, k, seq_v)
+                            for seq_i, seq_v in enumerate(v):
+                                tg.start_soon(_resolve_seq_id, i, seq_i, k, seq_v)
                         elif is_id_type(v):
                             tg.start_soon(_resolve_id, i, k, v)
+
+
+def _allows_none(t: Any) -> bool:
+    if t is None or t is type(None) or t is Any:
+        return True
+    return typing.get_origin(t) in (typing.Union, types.UnionType) and type(
+        None
+    ) in typing.get_args(t)
 
 
 def make_converter(ctx: Context):
@@ -324,8 +334,7 @@ def make_converter(ctx: Context):
         detailed_validation=False,
     )
 
-    # For types that were returned from a list we need to set
-    # their private attributes with a custom structuring function.
+    # Type objects take a Context, which cattrs can't supply.
 
     def _needs_hook(cls: type) -> bool:
         return issubclass(cls, Type) and hasattr(cls, "__slots__")

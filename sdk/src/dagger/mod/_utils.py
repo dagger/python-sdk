@@ -8,6 +8,7 @@ import importlib
 import importlib.util
 import inspect
 import operator
+import types
 import typing
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeAlias, TypeVar, cast
@@ -16,10 +17,9 @@ import anyio
 import anyio.from_thread
 import anyio.to_thread
 import typing_extensions
-from beartype.door import TypeHint, UnionTypeHint, is_subhint
 from cattrs.cols import is_sequence
-from graphql.pyutils import snake_to_camel
 
+from dagger.client._core import snake_to_camel
 from dagger.client.base import Type
 from dagger.mod._arguments import DefaultAddress, DefaultPath, Deprecated, Ignore, Name
 from dagger.mod._types import ContextPath
@@ -138,31 +138,33 @@ def get_deprecated(obj: Any) -> str | None:
     return None
 
 
-def is_union(th: TypeHint) -> bool:
+def is_union(t: Any) -> bool:
     """Check if the unsubscripted part of a type is a Union."""
-    return isinstance(th, UnionTypeHint)
+    return typing.get_origin(t) in (typing.Union, types.UnionType)
 
 
-def is_nullable(th: TypeHint) -> bool:
+def is_nullable(t: Any) -> bool:
     """Check if the annotation is SomeType | None.
 
     Does not support Annotated types. Use only on types that have been
     resolved with get_type_hints.
     """
-    return th.is_bearable(None)
+    if t is None or t is type(None) or t is Any:
+        return True
+    return is_union(t) and type(None) in typing.get_args(t)
 
 
-def non_null(th: TypeHint) -> TypeHint:
+def non_null(t: Any) -> Any:
     """Remove None from a union.
 
     Does not support Annotated types. Use only on types that have been
     resolved with get_type_hints.
     """
-    if TypeHint(None) not in th:
-        return th
+    if not is_union(t) or type(None) not in typing.get_args(t):
+        return t
 
-    args = (x for x in th.args if x is not type(None))
-    return TypeHint(functools.reduce(operator.or_, args))
+    args = (x for x in typing.get_args(t) if x is not type(None))
+    return functools.reduce(operator.or_, args)
 
 
 _T = TypeVar("_T", bound=type)
@@ -197,20 +199,19 @@ def list_of(t: typing.Any) -> type | None:
     """Retrieve a list's element type or None if not a list."""
     if not is_list_type(t):
         return None
-    th = TypeHint(t)
-    try:
-        return th.args[0]
-    except IndexError:
-        msg = (
-            "Expected sequence type to be subscripted "
-            f"with 1 subtype, got {len(th)}: {th.hint!r}"
-        )
-        raise TypeError(msg) from None
+    args = typing.get_args(t)
+    if not args:
+        msg = f"Expected sequence type to be subscripted with 1 subtype: {t!r}"
+        raise TypeError(msg)
+    return args[0]
 
 
 def is_list_of(v: Any, t: _T) -> typing.TypeGuard[typing.Sequence[_T]]:
     """Check if the annotation is a list of the given type."""
-    return is_subhint(v, typing.Sequence[t])
+    if not is_list_type(v):
+        return False
+    args = typing.get_args(v)
+    return bool(args) and is_subclass(args[0], t)
 
 
 def is_object_list_type(t: Any):

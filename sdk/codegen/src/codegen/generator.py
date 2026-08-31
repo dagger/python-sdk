@@ -50,7 +50,7 @@ from graphql import (
     get_named_type,
     is_leaf_type,
 )
-from graphql.pyutils import camel_to_snake
+from graphql.pyutils import camel_to_snake, snake_to_camel
 from graphql.type.schema import TypeMap
 
 ACRONYM_RE = re.compile(r"([A-Z\d]+)(?=[A-Z\d]|$)")
@@ -206,7 +206,7 @@ def generate(schema: GraphQLSchema, schema_version: str = "") -> Iterator[str]:
         from typing_extensions import Self
 
         from dagger.client._core import Arg
-        from dagger.client._guards import typecheck
+        from dagger.client._guards import type_error as _type_error
         from dagger.client.base import Enum, Input, Root, Scalar, Type
         """,
     )
@@ -585,6 +585,7 @@ class _InputField:
         convert_id = not (
             name == "id" and self.expected_type == self.parent_return_type
         )
+        self.convert_id = convert_id
 
         self.type = format_input_type(
             graphql.type,
@@ -660,6 +661,55 @@ class _InputField:
         if self.has_default:
             params.append(self.default_value)
         return f"Arg({', '.join(params)}),"
+
+    def check_expr(self, var: str) -> str:
+        """Expression that is true when `var` matches the type as_param declares."""
+        t = self.graphql.type
+        if self.default_is_mutable and is_required_type(t):
+            t = t.of_type
+        return self._check(var, t)
+
+    def _check(self, var: str, t: GraphQLInputType, depth: int = 0) -> str:
+        if is_required_type(t):
+            return self._check_non_null(var, t.of_type, depth)
+        inner = self._check_non_null(var, t, depth)
+        if " and " in inner:
+            inner = f"({inner})"
+        return f"{var} is None or {inner}"
+
+    def _check_non_null(self, var: str, t: GraphQLInputType, depth: int) -> str:
+        if is_list_type(t):
+            item = f"_v{depth}"
+            inner = self._check(item, t.of_type, depth + 1)
+            return f"isinstance({var}, list) and all({inner} for {item} in {var})"
+
+        if is_id_type(t):
+            if self.convert_id:
+                return f"isinstance({var}, {self.expected_type or 'Type'})"
+            if self.ctx.legacy_sdk_compat and self.expected_type is not None:
+                return f"isinstance({var}, {legacy_id_name(self.expected_type)})"
+            return f"isinstance({var}, str)"
+
+        if is_scalar_type(t):
+            return f"isinstance({var}, {Scalars.from_type(t)})"
+
+        return f"isinstance({var}, {get_named_type(t).name})"
+
+    @property
+    def expected(self) -> str:
+        """The type a rejected value is reported against."""
+        if self.is_self and self.parent_object_name:
+            return self.parent_object_name
+        return self.type
+
+    def as_check(self, method: str, var: str | None = None) -> str:
+        """As the guard a generated method runs before building its query."""
+        var = var or self.name
+        return (
+            f"if not ({self.check_expr(var)}):\n"
+            f'    raise _type_error("{method}", "{self.name}", '
+            f'{var}, "{self.expected}")'
+        )
 
 
 class _ObjectField:
@@ -785,6 +835,9 @@ class _ObjectField:
                 )\
                 """
             )
+
+        for arg in self.args:
+            yield arg.as_check(f"{self.parent_name}.{self.name}")
 
         if self.args:
             yield "_args = ["
@@ -963,27 +1016,50 @@ class ObjectHandler(Handler[_O]):
     @abstractmethod
     def fields(self, t: _O) -> Iterator[_F]: ...
 
+    def sorted_fields(self, t: _O) -> list[_F]:
+        # By graphql name rather than python name, for consistency with other SDKs.
+        return sorted(
+            self.fields(t),
+            key=lambda f: (getattr(f, "has_default", False), f.graphql_name),
+        )
+
     @joiner
     def render_body(self, t: _O) -> Iterator[str]:
         if body := super().render_body(t):
             yield body
 
-        yield from (
-            str(field)
-            # Sorting by graphql name rather than python name for
-            # consistency with other SDKs.
-            for field in sorted(
-                self.fields(t),
-                key=lambda f: (getattr(f, "has_default", False), f.graphql_name),
-            )
-        )
+        yield from (str(field) for field in self.sorted_fields(t))
 
 
 class Input(ObjectHandler[GraphQLInputObjectType]):
     predicate: ClassVar[Predicate] = staticmethod(is_input_object_type)
 
     def render_head(self, t: GraphQLInputObjectType) -> str:
-        return f"@typecheck\n@dataclass(slots=True)\n{super().render_head(t)}"
+        return f"@dataclass(slots=True)\n{super().render_head(t)}"
+
+    @joiner
+    def render_body(self, t: GraphQLInputObjectType) -> Iterator[str]:
+        yield super().render_body(t)
+        fields = self.sorted_fields(t)
+
+        yield ""
+        yield "def __post_init__(self):"
+        yield indent(
+            "\n".join(
+                f.as_check(f"{t.name}.__init__", var=f"self.{f.name}") for f in fields
+            )
+        )
+
+        # The query builder derives GraphQL names from the Python ones; record
+        # only those it can't.
+        names = {
+            f.name: f.graphql_name
+            for f in fields
+            if snake_to_camel(f.name, upper=False) != f.graphql_name
+        }
+        if names:
+            yield ""
+            yield f"_graphql_names = {tuple(names.items())!r}"
 
     def fields(self, t: GraphQLInputObjectType) -> Iterator[_InputField]:
         return (
@@ -1019,7 +1095,6 @@ class InterfaceProtocol(Handler[GraphQLInterfaceType]):
         # Second: a concrete client class for query builder instantiation
         client_name = f"_{t.name}Client"
         yield ""
-        yield "@typecheck"
         yield f"class {client_name}(Type):"
         yield indent(f'"""Concrete client for {t.name} interface."""')
         yield ""
@@ -1069,9 +1144,6 @@ class Object(ObjectHandler[GraphQLObjectType]):
             _ObjectField(self.ctx, *args, t)
             for args in cast(GraphQLFieldMap, t.fields).items()
         )
-
-    def render_head(self, t: GraphQLObjectType) -> str:
-        return f"@typecheck\n{super().render_head(t)}"
 
     @joiner
     def render_body(self, t: GraphQLObjectType) -> Iterator[str]:

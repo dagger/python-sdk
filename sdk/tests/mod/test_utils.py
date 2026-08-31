@@ -2,7 +2,6 @@ import dataclasses
 from typing import Annotated, List, Optional, Protocol  # noqa: UP035
 
 import pytest
-from beartype.door import TypeHint
 from typing_extensions import Doc, Self
 
 from dagger import Name
@@ -27,7 +26,7 @@ from dagger.mod._utils import (
     ],
 )
 def test_is_nullable(typ, expected):
-    assert is_nullable(TypeHint(typ)) == expected
+    assert is_nullable(typ) == expected
 
 
 @pytest.mark.parametrize(
@@ -41,7 +40,7 @@ def test_is_nullable(typ, expected):
     ],
 )
 def test_non_optional(typ, expected):
-    assert non_null(TypeHint(typ)) == TypeHint(expected)
+    assert non_null(typ) == expected
 
 
 @dataclasses.dataclass

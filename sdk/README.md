@@ -8,8 +8,9 @@
 > `dagger.json` modules; the two are expected to diverge from here.
 > Sphinx docs and changelog history were not carried over. Of the test suites,
 > only `tests/codegen` and `tests/mod` came along; `tests/client` and
-> `tests/provisioning` did not, so the vendored connection and provisioning
-> code is carried without its tests.
+> `tests/provisioning` did not, so the vendored provisioning code is carried
+> without its tests. `tests/client` was started again from scratch here, for the
+> query builder that replaced gql, and runs in CI along with the other two.
 
 [![PyPI Version](https://img.shields.io/pypi/v/dagger-io)](https://pypi.org/project/dagger-io/)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/dagger-io.svg)](https://anaconda.org/conda-forge/dagger-io)

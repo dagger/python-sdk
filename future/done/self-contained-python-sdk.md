@@ -458,6 +458,10 @@ StGit patch series. Each patch carries `Signed-off-by: Yves Brissaud
 
 ## What implementation changed about the plan
 
+**Since superseded.** The Go runtime this document describes was later
+rewritten in Dang (`runtime/main.dang`), which evaluates in-engine; deviation
+3 and its Go test check went with it.
+
 Three things only survived contact with a real engine in modified form.
 
 **1. A local-path runtime source resolves on load, but not through generate.**

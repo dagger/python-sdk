@@ -2,9 +2,6 @@ import dataclasses
 from typing import Any
 
 import cattrs
-import gql
-import graphql
-from gql.transport.exceptions import TransportQueryError
 
 
 class VersionMismatch(Warning):
@@ -75,14 +72,13 @@ class QueryError(ClientError):
             return super().__new__(cls)
         return super().__new__(new_type)
 
-    def __init__(self, errors: list[QueryErrorValue], request: gql.GraphQLRequest):
+    def __init__(self, errors: list[QueryErrorValue], query: str):
         if not errors:
             msg = "Errors list is empty"
             raise ValueError(msg)
         super().__init__(*errors)
         self.errors: list[QueryErrorValue] = errors
-        self.request = request
-        self.query = request.document
+        self.query = query
 
     @property
     def error(self) -> QueryErrorValue:
@@ -101,8 +97,7 @@ class QueryError(ClientError):
             except dagger.QueryError as e:
                 print(e.debug_query())
         """
-        lines = graphql.print_ast(self.query).splitlines()
-        # count number of digits from line count
+        lines = self.query.splitlines()
         pad = len(str(len(lines)))
         locations = (
             {loc.line: loc.column for loc in self.errors[0].locations}
@@ -111,21 +106,19 @@ class QueryError(ClientError):
         )
         res = []
         for nr, line in enumerate(lines, start=1):
-            # prepend line number
             res.append(f"{{:{pad}d}}: {{}}".format(nr, line))
             if nr in locations:
-                # add caret below line, pointing to start of error
+                # Caret under the error's column.
                 res.append(" " * (pad + 1 + locations[nr]) + "^")
         return "\n".join(res)
 
 
-def _query_error_from_transport(exc: TransportQueryError, request: gql.GraphQLRequest):
-    """Create instance from a gql exception."""
+def _query_error_from_response(errors: list[dict[str, Any]], query: str):
     try:
-        errors = cattrs.structure(exc.errors, list[QueryErrorValue])
+        structured = cattrs.structure(errors, list[QueryErrorValue])
     except (TypeError, KeyError, ValueError):
         return None
-    return QueryError(errors, request) if errors else None
+    return QueryError(structured, query) if structured else None
 
 
 class ExecError(QueryError):

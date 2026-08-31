@@ -8,7 +8,7 @@ from typing import Protocol, runtime_checkable
 from typing_extensions import Self
 
 from dagger.client._core import Arg
-from dagger.client._guards import typecheck
+from dagger.client._guards import type_error as _type_error
 from dagger.client.base import Enum, Input, Root, Scalar, Type
 
 
@@ -336,7 +336,6 @@ class TypeDefKind(Enum):
     """
 
 
-@typecheck
 @dataclass(slots=True)
 class BuildArg(Input):
     """Key value object that represents a build argument."""
@@ -347,8 +346,13 @@ class BuildArg(Input):
     value: str
     """The build argument value."""
 
+    def __post_init__(self):
+        if not (isinstance(self.name, str)):
+            raise _type_error("BuildArg.__init__", "name", self.name, "str")
+        if not (isinstance(self.value, str)):
+            raise _type_error("BuildArg.__init__", "value", self.value, "str")
 
-@typecheck
+
 @dataclass(slots=True)
 class LLMContentBlockInput(Input):
     """A content block within an LLM message."""
@@ -374,8 +378,23 @@ class LLMContentBlockInput(Input):
     tool_name: str | None = ''
     """The name of the tool to call (for TOOL_CALL kind)."""
 
+    def __post_init__(self):
+        if not (isinstance(self.kind, LLMContentBlockKind)):
+            raise _type_error("LLMContentBlockInput.__init__", "kind", self.kind, "LLMContentBlockKind")
+        if not (self.arguments is None or isinstance(self.arguments, JSON)):
+            raise _type_error("LLMContentBlockInput.__init__", "arguments", self.arguments, "JSON | None")
+        if not (self.call_id is None or isinstance(self.call_id, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "call_id", self.call_id, "str | None")
+        if not (self.errored is None or isinstance(self.errored, bool)):
+            raise _type_error("LLMContentBlockInput.__init__", "errored", self.errored, "bool | None")
+        if not (self.signature is None or isinstance(self.signature, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "signature", self.signature, "str | None")
+        if not (self.text is None or isinstance(self.text, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "text", self.text, "str | None")
+        if not (self.tool_name is None or isinstance(self.tool_name, str)):
+            raise _type_error("LLMContentBlockInput.__init__", "tool_name", self.tool_name, "str | None")
 
-@typecheck
+
 @dataclass(slots=True)
 class PipelineLabel(Input):
     """Key value object that represents a pipeline label."""
@@ -386,8 +405,13 @@ class PipelineLabel(Input):
     value: str
     """Label value."""
 
+    def __post_init__(self):
+        if not (isinstance(self.name, str)):
+            raise _type_error("PipelineLabel.__init__", "name", self.name, "str")
+        if not (isinstance(self.value, str)):
+            raise _type_error("PipelineLabel.__init__", "value", self.value, "str")
 
-@typecheck
+
 @dataclass(slots=True)
 class PortForward(Input):
     """Port forwarding rules for tunneling network traffic."""
@@ -401,6 +425,14 @@ class PortForward(Input):
     protocol: NetworkProtocol | None = NetworkProtocol.TCP
     """Transport layer protocol to use for traffic."""
 
+    def __post_init__(self):
+        if not (isinstance(self.backend, int)):
+            raise _type_error("PortForward.__init__", "backend", self.backend, "int")
+        if not (self.frontend is None or isinstance(self.frontend, int)):
+            raise _type_error("PortForward.__init__", "frontend", self.frontend, "int | None")
+        if not (self.protocol is None or isinstance(self.protocol, NetworkProtocol)):
+            raise _type_error("PortForward.__init__", "protocol", self.protocol, "NetworkProtocol | None")
+
 
 @runtime_checkable
 class Exportable(Protocol):
@@ -412,7 +444,6 @@ class Exportable(Protocol):
         ...
 
 
-@typecheck
 class _ExportableClient(Type):
     """Concrete client for Exportable interface."""
 
@@ -435,6 +466,8 @@ class _ExportableClient(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Exportable.export", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -473,7 +506,6 @@ class Node(Protocol):
     """An object with a globally unique ID."""
 
 
-@typecheck
 class _NodeClient(Type):
     """Concrete client for Node interface."""
 
@@ -518,7 +550,6 @@ class Syncer(Protocol):
         ...
 
 
-@typecheck
 class _SyncerClient(Type):
     """Concrete client for Syncer interface."""
 
@@ -567,7 +598,6 @@ class _SyncerClient(Type):
         return self.sync().__await__()
 
 
-@typecheck
 class Address(Type):
     """A standardized address to load containers, directories, secrets,
     and other object types. Address format depends on the type, and is
@@ -581,6 +611,14 @@ class Address(Type):
 
     def directory(self, *, exclude: list[str] | None = None, include: list[str] | None = None, gitignore: bool | None = False, no_cache: bool | None = False,) -> "Directory":
         """Load a directory from the address."""
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Address.directory", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Address.directory", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("Address.directory", "gitignore", gitignore, "bool | None")
+        if not (no_cache is None or isinstance(no_cache, bool)):
+            raise _type_error("Address.directory", "no_cache", no_cache, "bool | None")
         _args = [
             Arg("exclude", [] if exclude is None else exclude, []),
             Arg("include", [] if include is None else include, []),
@@ -592,6 +630,14 @@ class Address(Type):
 
     def file(self, *, exclude: list[str] | None = None, include: list[str] | None = None, gitignore: bool | None = False, no_cache: bool | None = False,) -> "File":
         """Load a file from the address."""
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Address.file", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Address.file", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("Address.file", "gitignore", gitignore, "bool | None")
+        if not (no_cache is None or isinstance(no_cache, bool)):
+            raise _type_error("Address.file", "no_cache", no_cache, "bool | None")
         _args = [
             Arg("exclude", [] if exclude is None else exclude, []),
             Arg("include", [] if include is None else include, []),
@@ -681,7 +727,6 @@ class Address(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Agent(Type):
 
     async def description(self) -> str:
@@ -782,7 +827,6 @@ class Agent(Type):
         return await _ctx.execute(list[str])
 
 
-@typecheck
 class AgentGroup(Type):
 
     def compose(self, *, base: "LLM | None" = None) -> "LLM":
@@ -795,6 +839,8 @@ class AgentGroup(Type):
             The base LLM to compose onto. Defaults to a fresh workspace-bound
             LLM.
         """
+        if not (base is None or isinstance(base, LLM)):
+            raise _type_error("AgentGroup.compose", "base", base, "LLM | None")
         _args = [
             Arg("base", base, None),
         ]
@@ -836,7 +882,6 @@ class AgentGroup(Type):
         return await _ctx.execute_object_list(Agent)
 
 
-@typecheck
 class CacheVolume(Type):
     """A directory whose contents persist across runs."""
 
@@ -869,7 +914,6 @@ class CacheVolume(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Changeset(Type):
     """A comparison between two directories representing changes that can
     be applied."""
@@ -943,6 +987,8 @@ class Changeset(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Changeset.export", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -1076,6 +1122,10 @@ class Changeset(Type):
         on_conflict:
             What to do on a merge conflict
         """
+        if not (isinstance(changes, Changeset)):
+            raise _type_error("Changeset.with_changeset", "changes", changes, "Changeset")
+        if not (on_conflict is None or isinstance(on_conflict, ChangesetMergeConflict)):
+            raise _type_error("Changeset.with_changeset", "on_conflict", on_conflict, "ChangesetMergeConflict | None")
         _args = [
             Arg("changes", changes),
             Arg("onConflict", on_conflict, ChangesetMergeConflict.FAIL),
@@ -1099,6 +1149,10 @@ class Changeset(Type):
         on_conflict:
             What to do on a merge conflict
         """
+        if not (isinstance(changes, list) and all(isinstance(_v0, Changeset) for _v0 in changes)):
+            raise _type_error("Changeset.with_changesets", "changes", changes, "list[Changeset]")
+        if not (on_conflict is None or isinstance(on_conflict, ChangesetsMergeConflict)):
+            raise _type_error("Changeset.with_changesets", "on_conflict", on_conflict, "ChangesetsMergeConflict | None")
         _args = [
             Arg("changes", changes),
             Arg("onConflict", on_conflict, ChangesetsMergeConflict.FAIL),
@@ -1115,7 +1169,6 @@ class Changeset(Type):
 
 
 
-@typecheck
 class Check(Type):
 
     async def check_type(self) -> str:
@@ -1317,7 +1370,6 @@ class Check(Type):
 
 
 
-@typecheck
 class CheckGroup(Type):
 
     async def id(self) -> str:
@@ -1368,6 +1420,8 @@ class CheckGroup(Type):
         fail_fast:
             If true, stop running checks as soon as any check fails.
         """
+        if not (fail_fast is None or isinstance(fail_fast, bool)):
+            raise _type_error("CheckGroup.run", "fail_fast", fail_fast, "bool | None")
         _args = [
             Arg("failFast", fail_fast, None),
         ]
@@ -1383,7 +1437,6 @@ class CheckGroup(Type):
 
 
 
-@typecheck
 class ClientFilesyncMirror(Type):
     """An internal persistent filesync mirror."""
 
@@ -1416,7 +1469,6 @@ class ClientFilesyncMirror(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Cloud(Type):
     """Dagger Cloud configuration and state"""
 
@@ -1470,7 +1522,6 @@ class Cloud(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Container(Type):
     """An OCI-compatible container, also known as a Docker container."""
 
@@ -1505,6 +1556,18 @@ class Container(Type):
             process be the pid 1 process in the container. Otherwise it may
             result in unexpected behavior.
         """
+        if not (args is None or (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args))):
+            raise _type_error("Container.as_service", "args", args, "list[str] | None")
+        if not (use_entrypoint is None or isinstance(use_entrypoint, bool)):
+            raise _type_error("Container.as_service", "use_entrypoint", use_entrypoint, "bool | None")
+        if not (experimental_privileged_nesting is None or isinstance(experimental_privileged_nesting, bool)):
+            raise _type_error("Container.as_service", "experimental_privileged_nesting", experimental_privileged_nesting, "bool | None")
+        if not (insecure_root_capabilities is None or isinstance(insecure_root_capabilities, bool)):
+            raise _type_error("Container.as_service", "insecure_root_capabilities", insecure_root_capabilities, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.as_service", "expand", expand, "bool | None")
+        if not (no_init is None or isinstance(no_init, bool)):
+            raise _type_error("Container.as_service", "no_init", no_init, "bool | None")
         _args = [
             Arg("args", [] if args is None else args, []),
             Arg("useEntrypoint", use_entrypoint, False),
@@ -1539,6 +1602,12 @@ class Container(Type):
             container runtimes, but Docker may be needed for older runtimes
             without OCI support.
         """
+        if not (platform_variants is None or (isinstance(platform_variants, list) and all(isinstance(_v0, Container) for _v0 in platform_variants))):
+            raise _type_error("Container.as_tarball", "platform_variants", platform_variants, "list[Container] | None")
+        if not (forced_compression is None or isinstance(forced_compression, ImageLayerCompression)):
+            raise _type_error("Container.as_tarball", "forced_compression", forced_compression, "ImageLayerCompression | None")
+        if not (media_types is None or isinstance(media_types, ImageMediaTypes)):
+            raise _type_error("Container.as_tarball", "media_types", media_types, "ImageMediaTypes | None")
         _args = [
             Arg("platformVariants", [] if platform_variants is None else platform_variants, []),
             Arg("forcedCompression", forced_compression, None),
@@ -1606,6 +1675,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.directory", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.directory", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -1662,6 +1735,8 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.env_variable", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -1705,6 +1780,14 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.exists", "path", path, "str")
+        if not (expected_type is None or isinstance(expected_type, ExistsType)):
+            raise _type_error("Container.exists", "expected_type", expected_type, "ExistsType | None")
+        if not (do_not_follow_symlinks is None or isinstance(do_not_follow_symlinks, bool)):
+            raise _type_error("Container.exists", "do_not_follow_symlinks", do_not_follow_symlinks, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.exists", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expectedType", expected_type, None),
@@ -1762,6 +1845,8 @@ class Container(Type):
         devices:
             List of devices to be accessible to this container.
         """
+        if not (isinstance(devices, list) and all(isinstance(_v0, str) for _v0 in devices)):
+            raise _type_error("Container.experimental_with_gpu", "devices", devices, "list[str]")
         _args = [
             Arg("devices", devices),
         ]
@@ -1814,6 +1899,16 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.export", "path", path, "str")
+        if not (platform_variants is None or (isinstance(platform_variants, list) and all(isinstance(_v0, Container) for _v0 in platform_variants))):
+            raise _type_error("Container.export", "platform_variants", platform_variants, "list[Container] | None")
+        if not (forced_compression is None or isinstance(forced_compression, ImageLayerCompression)):
+            raise _type_error("Container.export", "forced_compression", forced_compression, "ImageLayerCompression | None")
+        if not (media_types is None or isinstance(media_types, ImageMediaTypes)):
+            raise _type_error("Container.export", "media_types", media_types, "ImageMediaTypes | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.export", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("platformVariants", [] if platform_variants is None else platform_variants, []),
@@ -1861,6 +1956,14 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.export_image", "name", name, "str")
+        if not (platform_variants is None or (isinstance(platform_variants, list) and all(isinstance(_v0, Container) for _v0 in platform_variants))):
+            raise _type_error("Container.export_image", "platform_variants", platform_variants, "list[Container] | None")
+        if not (forced_compression is None or isinstance(forced_compression, ImageLayerCompression)):
+            raise _type_error("Container.export_image", "forced_compression", forced_compression, "ImageLayerCompression | None")
+        if not (media_types is None or isinstance(media_types, ImageMediaTypes)):
+            raise _type_error("Container.export_image", "media_types", media_types, "ImageMediaTypes | None")
         _args = [
             Arg("name", name),
             Arg("platformVariants", [] if platform_variants is None else platform_variants, []),
@@ -1894,6 +1997,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.file", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.file", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -1909,7 +2016,10 @@ class Container(Type):
         ----------
         address:
             Address of the container image to download, in standard OCI ref
-            format. Example:"registry.dagger.io/engine:latest"
+            format. Example: "registry.dagger.io/engine:latest".
+            An address without a tag or digest selects the greatest stable
+            release tag, falling back to the literal "latest" tag when no
+            eligible release exists.
         registry_service:
             Service to use as the registry endpoint for the image address.
             The service will be started only for this pull.
@@ -1920,6 +2030,14 @@ class Container(Type):
             Allow HTTPS registry communication without verifying the server
             certificate.
         """
+        if not (isinstance(address, str)):
+            raise _type_error("Container.from_", "address", address, "str")
+        if not (registry_service is None or isinstance(registry_service, Service)):
+            raise _type_error("Container.from_", "registry_service", registry_service, "Service | None")
+        if not (protocol is None or isinstance(protocol, RegistryProtocol)):
+            raise _type_error("Container.from_", "protocol", protocol, "RegistryProtocol | None")
+        if not (insecure_skip_tls_verify is None or isinstance(insecure_skip_tls_verify, bool)):
+            raise _type_error("Container.from_", "insecure_skip_tls_verify", insecure_skip_tls_verify, "bool | None")
         _args = [
             Arg("address", address),
             Arg("registryService", registry_service, None),
@@ -1990,6 +2108,10 @@ class Container(Type):
             Identifies the tag to import from the archive, if the archive
             bundles multiple tags.
         """
+        if not (isinstance(source, File)):
+            raise _type_error("Container.import_", "source", source, "File")
+        if not (tag is None or isinstance(tag, str)):
+            raise _type_error("Container.import_", "tag", tag, "str | None")
         _args = [
             Arg("source", source),
             Arg("tag", tag, ''),
@@ -2020,6 +2142,8 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.label", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -2052,6 +2176,12 @@ class Container(Type):
         media_types:
             Media types to use for image layers. Defaults to OCI.
         """
+        if not (isinstance(id, str)):
+            raise _type_error("Container.layer", "id", id, "str")
+        if not (forced_compression is None or isinstance(forced_compression, ImageLayerCompression)):
+            raise _type_error("Container.layer", "forced_compression", forced_compression, "ImageLayerCompression | None")
+        if not (media_types is None or isinstance(media_types, ImageMediaTypes)):
+            raise _type_error("Container.layer", "media_types", media_types, "ImageMediaTypes | None")
         _args = [
             Arg("id", id),
             Arg("forcedCompression", forced_compression, None),
@@ -2076,6 +2206,10 @@ class Container(Type):
         media_types:
             Media types to use for image layers. Defaults to OCI.
         """
+        if not (forced_compression is None or isinstance(forced_compression, ImageLayerCompression)):
+            raise _type_error("Container.manifest", "forced_compression", forced_compression, "ImageLayerCompression | None")
+        if not (media_types is None or isinstance(media_types, ImageMediaTypes)):
+            raise _type_error("Container.manifest", "media_types", media_types, "ImageMediaTypes | None")
         _args = [
             Arg("forcedCompression", forced_compression, None),
             Arg("mediaTypes", media_types, ImageMediaTypes.OCIMediaTypes),
@@ -2178,6 +2312,20 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(address, str)):
+            raise _type_error("Container.publish", "address", address, "str")
+        if not (platform_variants is None or (isinstance(platform_variants, list) and all(isinstance(_v0, Container) for _v0 in platform_variants))):
+            raise _type_error("Container.publish", "platform_variants", platform_variants, "list[Container] | None")
+        if not (forced_compression is None or isinstance(forced_compression, ImageLayerCompression)):
+            raise _type_error("Container.publish", "forced_compression", forced_compression, "ImageLayerCompression | None")
+        if not (media_types is None or isinstance(media_types, ImageMediaTypes)):
+            raise _type_error("Container.publish", "media_types", media_types, "ImageMediaTypes | None")
+        if not (registry_service is None or isinstance(registry_service, Service)):
+            raise _type_error("Container.publish", "registry_service", registry_service, "Service | None")
+        if not (protocol is None or isinstance(protocol, RegistryProtocol)):
+            raise _type_error("Container.publish", "protocol", protocol, "RegistryProtocol | None")
+        if not (insecure_skip_tls_verify is None or isinstance(insecure_skip_tls_verify, bool)):
+            raise _type_error("Container.publish", "insecure_skip_tls_verify", insecure_skip_tls_verify, "bool | None")
         _args = [
             Arg("address", address),
             Arg("platformVariants", [] if platform_variants is None else platform_variants, []),
@@ -2209,6 +2357,10 @@ class Container(Type):
         do_not_follow_symlinks:
             If specified, do not follow symlinks.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.stat", "path", path, "str")
+        if not (do_not_follow_symlinks is None or isinstance(do_not_follow_symlinks, bool)):
+            raise _type_error("Container.stat", "do_not_follow_symlinks", do_not_follow_symlinks, "bool | None")
         _args = [
             Arg("path", path),
             Arg("doNotFollowSymlinks", do_not_follow_symlinks, False),
@@ -2299,6 +2451,12 @@ class Container(Type):
             guarantees when using this option. It should only be used when
             absolutely necessary and only with trusted commands.
         """
+        if not (cmd is None or (isinstance(cmd, list) and all(isinstance(_v0, str) for _v0 in cmd))):
+            raise _type_error("Container.terminal", "cmd", cmd, "list[str] | None")
+        if not (experimental_privileged_nesting is None or isinstance(experimental_privileged_nesting, bool)):
+            raise _type_error("Container.terminal", "experimental_privileged_nesting", experimental_privileged_nesting, "bool | None")
+        if not (insecure_root_capabilities is None or isinstance(insecure_root_capabilities, bool)):
+            raise _type_error("Container.terminal", "insecure_root_capabilities", insecure_root_capabilities, "bool | None")
         _args = [
             Arg("cmd", [] if cmd is None else cmd, []),
             Arg("experimentalPrivilegedNesting", experimental_privileged_nesting, False),
@@ -2358,6 +2516,22 @@ class Container(Type):
         QueryError
             If the API returns an error.
         """
+        if not (random is None or isinstance(random, bool)):
+            raise _type_error("Container.up", "random", random, "bool | None")
+        if not (ports is None or (isinstance(ports, list) and all(isinstance(_v0, PortForward) for _v0 in ports))):
+            raise _type_error("Container.up", "ports", ports, "list[PortForward] | None")
+        if not (args is None or (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args))):
+            raise _type_error("Container.up", "args", args, "list[str] | None")
+        if not (use_entrypoint is None or isinstance(use_entrypoint, bool)):
+            raise _type_error("Container.up", "use_entrypoint", use_entrypoint, "bool | None")
+        if not (experimental_privileged_nesting is None or isinstance(experimental_privileged_nesting, bool)):
+            raise _type_error("Container.up", "experimental_privileged_nesting", experimental_privileged_nesting, "bool | None")
+        if not (insecure_root_capabilities is None or isinstance(insecure_root_capabilities, bool)):
+            raise _type_error("Container.up", "insecure_root_capabilities", insecure_root_capabilities, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.up", "expand", expand, "bool | None")
+        if not (no_init is None or isinstance(no_init, bool)):
+            raise _type_error("Container.up", "no_init", no_init, "bool | None")
         _args = [
             Arg("random", random, False),
             Arg("ports", [] if ports is None else ports, []),
@@ -2402,6 +2576,10 @@ class Container(Type):
         value:
             The value of the annotation.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.with_annotation", "name", name, "str")
+        if not (isinstance(value, str)):
+            raise _type_error("Container.with_annotation", "value", value, "str")
         _args = [
             Arg("name", name),
             Arg("value", value),
@@ -2419,6 +2597,8 @@ class Container(Type):
             Arguments to prepend to future executions (e.g., ["-v", "--no-
             cache"]).
         """
+        if not (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args)):
+            raise _type_error("Container.with_default_args", "args", args, "list[str]")
         _args = [
             Arg("args", args),
         ]
@@ -2441,6 +2621,12 @@ class Container(Type):
             guarantees when using this option. It should only be used when
             absolutely necessary and only with trusted commands.
         """
+        if not (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args)):
+            raise _type_error("Container.with_default_terminal_cmd", "args", args, "list[str]")
+        if not (experimental_privileged_nesting is None or isinstance(experimental_privileged_nesting, bool)):
+            raise _type_error("Container.with_default_terminal_cmd", "experimental_privileged_nesting", experimental_privileged_nesting, "bool | None")
+        if not (insecure_root_capabilities is None or isinstance(insecure_root_capabilities, bool)):
+            raise _type_error("Container.with_default_terminal_cmd", "insecure_root_capabilities", insecure_root_capabilities, "bool | None")
         _args = [
             Arg("args", args),
             Arg("experimentalPrivilegedNesting", experimental_privileged_nesting, False),
@@ -2480,6 +2666,24 @@ class Container(Type):
             "/$VAR/foo").
         permissions:
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_directory", "path", path, "str")
+        if not (isinstance(source, Directory)):
+            raise _type_error("Container.with_directory", "source", source, "Directory")
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Container.with_directory", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Container.with_directory", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("Container.with_directory", "gitignore", gitignore, "bool | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_directory", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_directory", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_directory", "expand", expand, "bool | None")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Container.with_directory", "permissions", permissions, "int | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -2520,6 +2724,20 @@ class Container(Type):
             The maximum number of consecutive failures before the container is
             marked as unhealthy. Example: "3"
         """
+        if not (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args)):
+            raise _type_error("Container.with_docker_healthcheck", "args", args, "list[str]")
+        if not (shell is None or isinstance(shell, bool)):
+            raise _type_error("Container.with_docker_healthcheck", "shell", shell, "bool | None")
+        if not (interval is None or isinstance(interval, str)):
+            raise _type_error("Container.with_docker_healthcheck", "interval", interval, "str | None")
+        if not (timeout is None or isinstance(timeout, str)):
+            raise _type_error("Container.with_docker_healthcheck", "timeout", timeout, "str | None")
+        if not (start_period is None or isinstance(start_period, str)):
+            raise _type_error("Container.with_docker_healthcheck", "start_period", start_period, "str | None")
+        if not (start_interval is None or isinstance(start_interval, str)):
+            raise _type_error("Container.with_docker_healthcheck", "start_interval", start_interval, "str | None")
+        if not (retries is None or isinstance(retries, int)):
+            raise _type_error("Container.with_docker_healthcheck", "retries", retries, "int | None")
         _args = [
             Arg("args", args),
             Arg("shell", shell, None),
@@ -2545,6 +2763,10 @@ class Container(Type):
             default it is reset, since entrypoint and default args are often
             tightly coupled.
         """
+        if not (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args)):
+            raise _type_error("Container.with_entrypoint", "args", args, "list[str]")
+        if not (keep_default_args is None or isinstance(keep_default_args, bool)):
+            raise _type_error("Container.with_entrypoint", "keep_default_args", keep_default_args, "bool | None")
         _args = [
             Arg("args", args),
             Arg("keepDefaultArgs", keep_default_args, False),
@@ -2560,6 +2782,8 @@ class Container(Type):
         source:
             Identifier of the envfile
         """
+        if not (isinstance(source, EnvFile)):
+            raise _type_error("Container.with_env_file_variables", "source", source, "EnvFile")
         _args = [
             Arg("source", source),
         ]
@@ -2580,6 +2804,12 @@ class Container(Type):
             environment variables defined in the container (e.g.
             "/opt/bin:$PATH").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.with_env_variable", "name", name, "str")
+        if not (isinstance(value, str)):
+            raise _type_error("Container.with_env_variable", "value", value, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_env_variable", "expand", expand, "bool | None")
         _args = [
             Arg("name", name),
             Arg("value", value),
@@ -2597,6 +2827,8 @@ class Container(Type):
             Message of the error to raise. If empty, the error will be
             ignored.
         """
+        if not (isinstance(err, str)):
+            raise _type_error("Container.with_error", "err", err, "str")
         _args = [
             Arg("err", err),
         ]
@@ -2651,6 +2883,28 @@ class Container(Type):
             the container. Otherwise it may result in unexpected behavior. If
             you're not sure, you don't need this.
         """
+        if not (isinstance(args, list) and all(isinstance(_v0, str) for _v0 in args)):
+            raise _type_error("Container.with_exec", "args", args, "list[str]")
+        if not (use_entrypoint is None or isinstance(use_entrypoint, bool)):
+            raise _type_error("Container.with_exec", "use_entrypoint", use_entrypoint, "bool | None")
+        if not (stdin is None or isinstance(stdin, str)):
+            raise _type_error("Container.with_exec", "stdin", stdin, "str | None")
+        if not (redirect_stdin is None or isinstance(redirect_stdin, str)):
+            raise _type_error("Container.with_exec", "redirect_stdin", redirect_stdin, "str | None")
+        if not (redirect_stdout is None or isinstance(redirect_stdout, str)):
+            raise _type_error("Container.with_exec", "redirect_stdout", redirect_stdout, "str | None")
+        if not (redirect_stderr is None or isinstance(redirect_stderr, str)):
+            raise _type_error("Container.with_exec", "redirect_stderr", redirect_stderr, "str | None")
+        if not (expect is None or isinstance(expect, ReturnType)):
+            raise _type_error("Container.with_exec", "expect", expect, "ReturnType | None")
+        if not (experimental_privileged_nesting is None or isinstance(experimental_privileged_nesting, bool)):
+            raise _type_error("Container.with_exec", "experimental_privileged_nesting", experimental_privileged_nesting, "bool | None")
+        if not (insecure_root_capabilities is None or isinstance(insecure_root_capabilities, bool)):
+            raise _type_error("Container.with_exec", "insecure_root_capabilities", insecure_root_capabilities, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_exec", "expand", expand, "bool | None")
+        if not (no_init is None or isinstance(no_init, bool)):
+            raise _type_error("Container.with_exec", "no_init", no_init, "bool | None")
         _args = [
             Arg("args", args),
             Arg("useEntrypoint", use_entrypoint, False),
@@ -2688,6 +2942,14 @@ class Container(Type):
         experimental_skip_healthcheck:
             Skip the health check when run as a service.
         """
+        if not (isinstance(port, int)):
+            raise _type_error("Container.with_exposed_port", "port", port, "int")
+        if not (protocol is None or isinstance(protocol, NetworkProtocol)):
+            raise _type_error("Container.with_exposed_port", "protocol", protocol, "NetworkProtocol | None")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("Container.with_exposed_port", "description", description, "str | None")
+        if not (experimental_skip_healthcheck is None or isinstance(experimental_skip_healthcheck, bool)):
+            raise _type_error("Container.with_exposed_port", "experimental_skip_healthcheck", experimental_skip_healthcheck, "bool | None")
         _args = [
             Arg("port", port),
             Arg("protocol", protocol, NetworkProtocol.TCP),
@@ -2720,6 +2982,18 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_file", "path", path, "str")
+        if not (isinstance(source, File)):
+            raise _type_error("Container.with_file", "source", source, "File")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Container.with_file", "permissions", permissions, "int | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_file", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_file", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_file", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -2755,6 +3029,18 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_files", "path", path, "str")
+        if not (isinstance(sources, list) and all(isinstance(_v0, File) for _v0 in sources)):
+            raise _type_error("Container.with_files", "sources", sources, "list[File]")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Container.with_files", "permissions", permissions, "int | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_files", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_files", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_files", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("sources", sources),
@@ -2777,6 +3063,10 @@ class Container(Type):
         value:
             The value of the label (e.g., "2023-01-01T00:00:00Z").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.with_label", "name", name, "str")
+        if not (isinstance(value, str)):
+            raise _type_error("Container.with_label", "value", value, "str")
         _args = [
             Arg("name", name),
             Arg("value", value),
@@ -2813,6 +3103,20 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_mounted_cache", "path", path, "str")
+        if not (isinstance(cache, CacheVolume)):
+            raise _type_error("Container.with_mounted_cache", "cache", cache, "CacheVolume")
+        if not (source is None or isinstance(source, Directory)):
+            raise _type_error("Container.with_mounted_cache", "source", source, "Directory | None")
+        if not (sharing is None or isinstance(sharing, CacheSharingMode)):
+            raise _type_error("Container.with_mounted_cache", "sharing", sharing, "CacheSharingMode | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_mounted_cache", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_mounted_cache", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_mounted_cache", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("cache", cache),
@@ -2848,6 +3152,18 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_mounted_directory", "path", path, "str")
+        if not (isinstance(source, Directory)):
+            raise _type_error("Container.with_mounted_directory", "source", source, "Directory")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_mounted_directory", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_mounted_directory", "inherit_owner", inherit_owner, "bool | None")
+        if not (read_only is None or isinstance(read_only, bool)):
+            raise _type_error("Container.with_mounted_directory", "read_only", read_only, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_mounted_directory", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -2880,6 +3196,16 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_mounted_file", "path", path, "str")
+        if not (isinstance(source, File)):
+            raise _type_error("Container.with_mounted_file", "source", source, "File")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_mounted_file", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_mounted_file", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_mounted_file", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -2915,6 +3241,18 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_mounted_secret", "path", path, "str")
+        if not (isinstance(source, Secret)):
+            raise _type_error("Container.with_mounted_secret", "source", source, "Secret")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_mounted_secret", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_mounted_secret", "inherit_owner", inherit_owner, "bool | None")
+        if not (mode is None or isinstance(mode, int)):
+            raise _type_error("Container.with_mounted_secret", "mode", mode, "int | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_mounted_secret", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -2942,6 +3280,12 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_mounted_temp", "path", path, "str")
+        if not (size is None or isinstance(size, int)):
+            raise _type_error("Container.with_mounted_temp", "size", size, "int | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_mounted_temp", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("size", size, None),
@@ -2966,6 +3310,14 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_mounted_volume", "path", path, "str")
+        if not (isinstance(volume, Volume)):
+            raise _type_error("Container.with_mounted_volume", "volume", volume, "Volume")
+        if not (read_only is None or isinstance(read_only, bool)):
+            raise _type_error("Container.with_mounted_volume", "read_only", read_only, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_mounted_volume", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("volume", volume),
@@ -3000,6 +3352,18 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_new_file", "path", path, "str")
+        if not (isinstance(contents, str)):
+            raise _type_error("Container.with_new_file", "contents", contents, "str")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Container.with_new_file", "permissions", permissions, "int | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_new_file", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_new_file", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_new_file", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("contents", contents),
@@ -3025,6 +3389,12 @@ class Container(Type):
         secret:
             The API key, password or token to authenticate to this registry
         """
+        if not (isinstance(address, str)):
+            raise _type_error("Container.with_registry_auth", "address", address, "str")
+        if not (isinstance(username, str)):
+            raise _type_error("Container.with_registry_auth", "username", username, "str")
+        if not (isinstance(secret, Secret)):
+            raise _type_error("Container.with_registry_auth", "secret", secret, "Secret")
         _args = [
             Arg("address", address),
             Arg("username", username),
@@ -3042,6 +3412,8 @@ class Container(Type):
         directory:
             The new root filesystem.
         """
+        if not (isinstance(directory, Directory)):
+            raise _type_error("Container.with_rootfs", "directory", directory, "Directory")
         _args = [
             Arg("directory", directory),
         ]
@@ -3058,6 +3430,10 @@ class Container(Type):
         secret:
             Identifier of the secret value.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.with_secret_variable", "name", name, "str")
+        if not (isinstance(secret, Secret)):
+            raise _type_error("Container.with_secret_variable", "secret", secret, "Secret")
         _args = [
             Arg("name", name),
             Arg("secret", secret),
@@ -3086,6 +3462,10 @@ class Container(Type):
         service:
             The target service
         """
+        if not (isinstance(alias, str)):
+            raise _type_error("Container.with_service_binding", "alias", alias, "str")
+        if not (isinstance(service, Service)):
+            raise _type_error("Container.with_service_binding", "service", service, "Service")
         _args = [
             Arg("alias", alias),
             Arg("service", service),
@@ -3109,6 +3489,12 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(target, str)):
+            raise _type_error("Container.with_symlink", "target", target, "str")
+        if not (isinstance(link_name, str)):
+            raise _type_error("Container.with_symlink", "link_name", link_name, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_symlink", "expand", expand, "bool | None")
         _args = [
             Arg("target", target),
             Arg("linkName", link_name),
@@ -3139,6 +3525,16 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_unix_socket", "path", path, "str")
+        if not (isinstance(source, Socket)):
+            raise _type_error("Container.with_unix_socket", "source", source, "Socket")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Container.with_unix_socket", "owner", owner, "str | None")
+        if not (inherit_owner is None or isinstance(inherit_owner, bool)):
+            raise _type_error("Container.with_unix_socket", "inherit_owner", inherit_owner, "bool | None")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_unix_socket", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -3157,6 +3553,8 @@ class Container(Type):
         name:
             The user to set (e.g., "root").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.with_user", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -3177,6 +3575,10 @@ class Container(Type):
         value:
             Value of the volatile variable.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.with_volatile_variable", "name", name, "str")
+        if not (isinstance(value, str)):
+            raise _type_error("Container.with_volatile_variable", "value", value, "str")
         _args = [
             Arg("name", name),
             Arg("value", value),
@@ -3196,6 +3598,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.with_workdir", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.with_workdir", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -3211,6 +3617,8 @@ class Container(Type):
         name:
             The name of the annotation.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.without_annotation", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -3236,6 +3644,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.without_directory", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.without_directory", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -3259,6 +3671,8 @@ class Container(Type):
         keep_default_args:
             Don't remove the default arguments when unsetting the entrypoint.
         """
+        if not (keep_default_args is None or isinstance(keep_default_args, bool)):
+            raise _type_error("Container.without_entrypoint", "keep_default_args", keep_default_args, "bool | None")
         _args = [
             Arg("keepDefaultArgs", keep_default_args, False),
         ]
@@ -3273,6 +3687,8 @@ class Container(Type):
         name:
             The name of the environment variable (e.g., "HOST").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.without_env_variable", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -3289,6 +3705,10 @@ class Container(Type):
         protocol:
             Port protocol to unexpose
         """
+        if not (isinstance(port, int)):
+            raise _type_error("Container.without_exposed_port", "port", port, "int")
+        if not (protocol is None or isinstance(protocol, NetworkProtocol)):
+            raise _type_error("Container.without_exposed_port", "protocol", protocol, "NetworkProtocol | None")
         _args = [
             Arg("port", port),
             Arg("protocol", protocol, NetworkProtocol.TCP),
@@ -3308,6 +3728,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.without_file", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.without_file", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -3328,6 +3752,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo.txt").
         """
+        if not (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths)):
+            raise _type_error("Container.without_files", "paths", paths, "list[str]")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.without_files", "expand", expand, "bool | None")
         _args = [
             Arg("paths", paths),
             Arg("expand", expand, False),
@@ -3344,6 +3772,8 @@ class Container(Type):
             The name of the label to remove (e.g.,
             "org.opencontainers.artifact.created").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.without_label", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -3363,6 +3793,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.without_mount", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.without_mount", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -3381,6 +3815,8 @@ class Container(Type):
             Formatted as [host]/[user]/[repo]:[tag] (e.g.
             docker.io/dagger/dagger:main).
         """
+        if not (isinstance(address, str)):
+            raise _type_error("Container.without_registry_auth", "address", address, "str")
         _args = [
             Arg("address", address),
         ]
@@ -3396,6 +3832,8 @@ class Container(Type):
         name:
             The name of the environment variable (e.g., "HOST").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.without_secret_variable", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -3414,6 +3852,10 @@ class Container(Type):
             current environment variables defined in the container (e.g.
             "/$VAR/foo").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Container.without_unix_socket", "path", path, "str")
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Container.without_unix_socket", "expand", expand, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expand", expand, False),
@@ -3439,6 +3881,8 @@ class Container(Type):
         name:
             The name of the volatile environment variable (e.g., "CI_RUN_ID").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Container.without_volatile_variable", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -3484,7 +3928,6 @@ class Container(Type):
 
 
 
-@typecheck
 class CurrentModule(Type):
     """Reflective module API provided to functions at runtime."""
 
@@ -3500,6 +3943,8 @@ class CurrentModule(Type):
         workspace:
             The workspace to resolve SDK-role data against.
         """
+        if not (isinstance(workspace, Workspace)):
+            raise _type_error("CurrentModule.as_sdk", "workspace", workspace, "Workspace")
         _args = [
             Arg("workspace", workspace),
         ]
@@ -3532,6 +3977,8 @@ class CurrentModule(Type):
         include:
             Only include generators matching the specified patterns
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("CurrentModule.generators", "include", include, "list[str] | None")
         _args = [
             Arg("include", include, None),
         ]
@@ -3613,6 +4060,14 @@ class CurrentModule(Type):
         gitignore:
             Apply .gitignore filter rules inside the directory
         """
+        if not (isinstance(path, str)):
+            raise _type_error("CurrentModule.workdir", "path", path, "str")
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("CurrentModule.workdir", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("CurrentModule.workdir", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("CurrentModule.workdir", "gitignore", gitignore, "bool | None")
         _args = [
             Arg("path", path),
             Arg("exclude", [] if exclude is None else exclude, []),
@@ -3634,6 +4089,8 @@ class CurrentModule(Type):
         path:
             Location of the file to retrieve (e.g., "README.md").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("CurrentModule.workdir_file", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -3641,7 +4098,6 @@ class CurrentModule(Type):
         return File(_ctx)
 
 
-@typecheck
 class CurrentModuleAsSDK(Type):
     """The SDK-role data for the currently executing module, as installed
     in the supplied workspace."""
@@ -3711,7 +4167,6 @@ class CurrentModuleAsSDK(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class CurrentModuleAsSDKClient(Type):
     """A generated client the current SDK produces in the workspace."""
 
@@ -3816,7 +4271,6 @@ class CurrentModuleAsSDKClient(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class CurrentModuleAsSDKModule(Type):
     """A workspace-local module managed by the current SDK."""
 
@@ -3870,7 +4324,6 @@ class CurrentModuleAsSDKModule(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class DiffStat(Type):
 
     async def added_lines(self) -> int:
@@ -4005,7 +4458,6 @@ class DiffStat(Type):
         return await _ctx.execute(int)
 
 
-@typecheck
 class Directory(Type):
     """A directory."""
 
@@ -4026,6 +4478,8 @@ class Directory(Type):
             If not set, the module source code is loaded from the root of the
             directory.
         """
+        if not (source_root_path is None or isinstance(source_root_path, str)):
+            raise _type_error("Directory.as_module", "source_root_path", source_root_path, "str | None")
         _args = [
             Arg("sourceRootPath", source_root_path, '.'),
         ]
@@ -4043,6 +4497,8 @@ class Directory(Type):
             If not set, the module source code is loaded from the root of the
             directory.
         """
+        if not (source_root_path is None or isinstance(source_root_path, str)):
+            raise _type_error("Directory.as_module_source", "source_root_path", source_root_path, "str | None")
         _args = [
             Arg("sourceRootPath", source_root_path, '.'),
         ]
@@ -4058,6 +4514,8 @@ class Directory(Type):
             Current working directory inside the workspace root. Defaults to
             the workspace root.
         """
+        if not (cwd is None or isinstance(cwd, str)):
+            raise _type_error("Directory.as_workspace", "cwd", cwd, "str | None")
         _args = [
             Arg("cwd", cwd, '/'),
         ]
@@ -4076,6 +4534,8 @@ class Directory(Type):
         from_:
             The base directory snapshot to compare against
         """
+        if not (isinstance(from_, Directory)):
+            raise _type_error("Directory.changes", "from_", from_, "Directory")
         _args = [
             Arg("from", from_),
         ]
@@ -4095,6 +4555,10 @@ class Directory(Type):
             (foo:bar).
             If the group is omitted, it defaults to the same as the user.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.chown", "path", path, "str")
+        if not (isinstance(owner, str)):
+            raise _type_error("Directory.chown", "owner", owner, "str")
         _args = [
             Arg("path", path),
             Arg("owner", owner),
@@ -4111,6 +4575,8 @@ class Directory(Type):
         other:
             The directory to compare against
         """
+        if not (isinstance(other, Directory)):
+            raise _type_error("Directory.diff", "other", other, "Directory")
         _args = [
             Arg("other", other),
         ]
@@ -4148,6 +4614,8 @@ class Directory(Type):
         path:
             Location of the directory to retrieve. Example: "/src"
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.directory", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -4185,6 +4653,20 @@ class Directory(Type):
             Typically obtained via host.unixSocket() pointing to the
             SSH_AUTH_SOCK.
         """
+        if not (dockerfile is None or isinstance(dockerfile, str)):
+            raise _type_error("Directory.docker_build", "dockerfile", dockerfile, "str | None")
+        if not (platform is None or isinstance(platform, Platform)):
+            raise _type_error("Directory.docker_build", "platform", platform, "Platform | None")
+        if not (build_args is None or (isinstance(build_args, list) and all(isinstance(_v0, BuildArg) for _v0 in build_args))):
+            raise _type_error("Directory.docker_build", "build_args", build_args, "list[BuildArg] | None")
+        if not (target is None or isinstance(target, str)):
+            raise _type_error("Directory.docker_build", "target", target, "str | None")
+        if not (secrets is None or (isinstance(secrets, list) and all(isinstance(_v0, Secret) for _v0 in secrets))):
+            raise _type_error("Directory.docker_build", "secrets", secrets, "list[Secret] | None")
+        if not (no_init is None or isinstance(no_init, bool)):
+            raise _type_error("Directory.docker_build", "no_init", no_init, "bool | None")
+        if not (ssh is None or isinstance(ssh, Socket)):
+            raise _type_error("Directory.docker_build", "ssh", ssh, "Socket | None")
         _args = [
             Arg("dockerfile", dockerfile, 'Dockerfile'),
             Arg("platform", platform, None),
@@ -4219,6 +4701,8 @@ class Directory(Type):
         QueryError
             If the API returns an error.
         """
+        if not (path is None or isinstance(path, str)):
+            raise _type_error("Directory.entries", "path", path, "str | None")
         _args = [
             Arg("path", path, None),
         ]
@@ -4250,6 +4734,12 @@ class Directory(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.exists", "path", path, "str")
+        if not (expected_type is None or isinstance(expected_type, ExistsType)):
+            raise _type_error("Directory.exists", "expected_type", expected_type, "ExistsType | None")
+        if not (do_not_follow_symlinks is None or isinstance(do_not_follow_symlinks, bool)):
+            raise _type_error("Directory.exists", "do_not_follow_symlinks", do_not_follow_symlinks, "bool | None")
         _args = [
             Arg("path", path),
             Arg("expectedType", expected_type, None),
@@ -4288,6 +4778,10 @@ class Directory(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.export", "path", path, "str")
+        if not (wipe is None or isinstance(wipe, bool)):
+            raise _type_error("Directory.export", "wipe", wipe, "bool | None")
         _args = [
             Arg("path", path),
             Arg("wipe", wipe, False),
@@ -4303,6 +4797,8 @@ class Directory(Type):
         path:
             Location of the file to retrieve (e.g., "README.md").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.file", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -4323,6 +4819,12 @@ class Directory(Type):
         gitignore:
             If set, apply .gitignore rules when filtering the directory.
         """
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Directory.filter", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Directory.filter", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("Directory.filter", "gitignore", gitignore, "bool | None")
         _args = [
             Arg("exclude", [] if exclude is None else exclude, []),
             Arg("include", [] if include is None else include, []),
@@ -4356,6 +4858,10 @@ class Directory(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Directory.find_up", "name", name, "str")
+        if not (isinstance(start, str)):
+            raise _type_error("Directory.find_up", "start", start, "str")
         _args = [
             Arg("name", name),
             Arg("start", start),
@@ -4385,6 +4891,8 @@ class Directory(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(pattern, str)):
+            raise _type_error("Directory.glob", "pattern", pattern, "str")
         _args = [
             Arg("pattern", pattern),
         ]
@@ -4473,6 +4981,28 @@ class Directory(Type):
         limit:
             Limit the number of results to return
         """
+        if not (isinstance(pattern, str)):
+            raise _type_error("Directory.search", "pattern", pattern, "str")
+        if not (paths is None or (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths))):
+            raise _type_error("Directory.search", "paths", paths, "list[str] | None")
+        if not (globs is None or (isinstance(globs, list) and all(isinstance(_v0, str) for _v0 in globs))):
+            raise _type_error("Directory.search", "globs", globs, "list[str] | None")
+        if not (literal is None or isinstance(literal, bool)):
+            raise _type_error("Directory.search", "literal", literal, "bool | None")
+        if not (multiline is None or isinstance(multiline, bool)):
+            raise _type_error("Directory.search", "multiline", multiline, "bool | None")
+        if not (dotall is None or isinstance(dotall, bool)):
+            raise _type_error("Directory.search", "dotall", dotall, "bool | None")
+        if not (insensitive is None or isinstance(insensitive, bool)):
+            raise _type_error("Directory.search", "insensitive", insensitive, "bool | None")
+        if not (skip_ignored is None or isinstance(skip_ignored, bool)):
+            raise _type_error("Directory.search", "skip_ignored", skip_ignored, "bool | None")
+        if not (skip_hidden is None or isinstance(skip_hidden, bool)):
+            raise _type_error("Directory.search", "skip_hidden", skip_hidden, "bool | None")
+        if not (files_only is None or isinstance(files_only, bool)):
+            raise _type_error("Directory.search", "files_only", files_only, "bool | None")
+        if not (limit is None or isinstance(limit, int)):
+            raise _type_error("Directory.search", "limit", limit, "int | None")
         _args = [
             Arg("pattern", pattern),
             Arg("paths", [] if paths is None else paths, []),
@@ -4499,6 +5029,10 @@ class Directory(Type):
         do_not_follow_symlinks:
             If specified, do not follow symlinks.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.stat", "path", path, "str")
+        if not (do_not_follow_symlinks is None or isinstance(do_not_follow_symlinks, bool)):
+            raise _type_error("Directory.stat", "do_not_follow_symlinks", do_not_follow_symlinks, "bool | None")
         _args = [
             Arg("path", path),
             Arg("doNotFollowSymlinks", do_not_follow_symlinks, False),
@@ -4542,6 +5076,14 @@ class Directory(Type):
             guarantees when using this option. It should only be used when
             absolutely necessary and only with trusted commands.
         """
+        if not (container is None or isinstance(container, Container)):
+            raise _type_error("Directory.terminal", "container", container, "Container | None")
+        if not (cmd is None or (isinstance(cmd, list) and all(isinstance(_v0, str) for _v0 in cmd))):
+            raise _type_error("Directory.terminal", "cmd", cmd, "list[str] | None")
+        if not (experimental_privileged_nesting is None or isinstance(experimental_privileged_nesting, bool)):
+            raise _type_error("Directory.terminal", "experimental_privileged_nesting", experimental_privileged_nesting, "bool | None")
+        if not (insecure_root_capabilities is None or isinstance(insecure_root_capabilities, bool)):
+            raise _type_error("Directory.terminal", "insecure_root_capabilities", insecure_root_capabilities, "bool | None")
         _args = [
             Arg("container", container, None),
             Arg("cmd", [] if cmd is None else cmd, []),
@@ -4559,6 +5101,8 @@ class Directory(Type):
         changes:
             Changes to apply to the directory
         """
+        if not (isinstance(changes, Changeset)):
+            raise _type_error("Directory.with_changes", "changes", changes, "Changeset")
         _args = [
             Arg("changes", changes),
         ]
@@ -4591,6 +5135,20 @@ class Directory(Type):
             Permission given to the copied directory and contents (e.g.,
             0755).
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.with_directory", "path", path, "str")
+        if not (isinstance(source, Directory)):
+            raise _type_error("Directory.with_directory", "source", source, "Directory")
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Directory.with_directory", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Directory.with_directory", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("Directory.with_directory", "gitignore", gitignore, "bool | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Directory.with_directory", "owner", owner, "str | None")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Directory.with_directory", "permissions", permissions, "int | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -4612,6 +5170,8 @@ class Directory(Type):
             Message of the error to raise. If empty, the error will be
             ignored.
         """
+        if not (isinstance(err, str)):
+            raise _type_error("Directory.with_error", "err", err, "str")
         _args = [
             Arg("err", err),
         ]
@@ -4636,6 +5196,14 @@ class Directory(Type):
             (foo:bar).
             If the group is omitted, it defaults to the same as the user.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.with_file", "path", path, "str")
+        if not (isinstance(source, File)):
+            raise _type_error("Directory.with_file", "source", source, "File")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Directory.with_file", "permissions", permissions, "int | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Directory.with_file", "owner", owner, "str | None")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -4658,6 +5226,12 @@ class Directory(Type):
         permissions:
             Permission given to the copied files (e.g., 0600).
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.with_files", "path", path, "str")
+        if not (isinstance(sources, list) and all(isinstance(_v0, File) for _v0 in sources)):
+            raise _type_error("Directory.with_files", "sources", sources, "list[File]")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Directory.with_files", "permissions", permissions, "int | None")
         _args = [
             Arg("path", path),
             Arg("sources", sources),
@@ -4677,6 +5251,10 @@ class Directory(Type):
         permissions:
             Permission granted to the created directory (e.g., 0777).
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.with_new_directory", "path", path, "str")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Directory.with_new_directory", "permissions", permissions, "int | None")
         _args = [
             Arg("path", path),
             Arg("permissions", permissions, 420),
@@ -4696,6 +5274,12 @@ class Directory(Type):
         permissions:
             Permissions of the new file. Example: 0600
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.with_new_file", "path", path, "str")
+        if not (isinstance(contents, str)):
+            raise _type_error("Directory.with_new_file", "contents", contents, "str")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Directory.with_new_file", "permissions", permissions, "int | None")
         _args = [
             Arg("path", path),
             Arg("contents", contents),
@@ -4722,6 +5306,10 @@ class Directory(Type):
             fail (default), or apply what fits and leave git-style conflict
             markers where it doesn't.
         """
+        if not (isinstance(patch, str)):
+            raise _type_error("Directory.with_patch", "patch", patch, "str")
+        if not (on_conflict is None or isinstance(on_conflict, PatchConflict)):
+            raise _type_error("Directory.with_patch", "on_conflict", on_conflict, "PatchConflict | None")
         _args = [
             Arg("patch", patch),
             Arg("onConflict", on_conflict, PatchConflict.FAIL),
@@ -4746,6 +5334,10 @@ class Directory(Type):
             fail (default), or apply what fits and leave git-style conflict
             markers where it doesn't.
         """
+        if not (isinstance(patch, File)):
+            raise _type_error("Directory.with_patch_file", "patch", patch, "File")
+        if not (on_conflict is None or isinstance(on_conflict, PatchConflict)):
+            raise _type_error("Directory.with_patch_file", "on_conflict", on_conflict, "PatchConflict | None")
         _args = [
             Arg("patch", patch),
             Arg("onConflict", on_conflict, PatchConflict.FAIL),
@@ -4765,6 +5357,10 @@ class Directory(Type):
             Location where the symbolic link will be created (e.g., "/new-
             file-link").
         """
+        if not (isinstance(target, str)):
+            raise _type_error("Directory.with_symlink", "target", target, "str")
+        if not (isinstance(link_name, str)):
+            raise _type_error("Directory.with_symlink", "link_name", link_name, "str")
         _args = [
             Arg("target", target),
             Arg("linkName", link_name),
@@ -4782,6 +5378,8 @@ class Directory(Type):
             Timestamp to set dir/files in.
             Formatted in seconds following Unix epoch (e.g., 1672531199).
         """
+        if not (isinstance(timestamp, int)):
+            raise _type_error("Directory.with_timestamps", "timestamp", timestamp, "int")
         _args = [
             Arg("timestamp", timestamp),
         ]
@@ -4796,6 +5394,8 @@ class Directory(Type):
         path:
             Path of the subdirectory to remove. Example: ".github/workflows"
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.without_directory", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -4810,6 +5410,8 @@ class Directory(Type):
         path:
             Path of the file to remove (e.g., "/file.txt").
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Directory.without_file", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -4824,6 +5426,8 @@ class Directory(Type):
         paths:
             Paths of the files to remove (e.g., ["/file.txt"]).
         """
+        if not (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths)):
+            raise _type_error("Directory.without_files", "paths", paths, "list[str]")
         _args = [
             Arg("paths", paths),
         ]
@@ -4839,7 +5443,6 @@ class Directory(Type):
 
 
 
-@typecheck
 class EnumTypeDef(Type):
     """A definition of a custom enum defined in a Module."""
 
@@ -4963,7 +5566,6 @@ class EnumTypeDef(Type):
         return await _ctx.execute_object_list(EnumValueTypeDef)
 
 
-@typecheck
 class EnumValueTypeDef(Type):
     """A definition of a value in a custom enum defined in a Module."""
 
@@ -5086,7 +5688,6 @@ class EnumValueTypeDef(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class EnvFile(Type):
     """A collection of environment variables."""
 
@@ -5116,6 +5717,8 @@ class EnvFile(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("EnvFile.exists", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -5148,6 +5751,10 @@ class EnvFile(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("EnvFile.get", "name", name, "str")
+        if not (raw is None or isinstance(raw, bool)):
+            raise _type_error("EnvFile.get", "raw", raw, "bool | None")
         _args = [
             Arg("name", name),
             Arg("raw", raw, None),
@@ -5195,6 +5802,8 @@ class EnvFile(Type):
         prefix:
             The prefix to filter by
         """
+        if not (isinstance(prefix, str)):
+            raise _type_error("EnvFile.namespace", "prefix", prefix, "str")
         _args = [
             Arg("prefix", prefix),
         ]
@@ -5210,6 +5819,8 @@ class EnvFile(Type):
             Return values exactly as written to the file. No quote removal or
             variable expansion
         """
+        if not (raw is None or isinstance(raw, bool)):
+            raise _type_error("EnvFile.variables", "raw", raw, "bool | None")
         _args = [
             Arg("raw", raw, None),
         ]
@@ -5226,6 +5837,10 @@ class EnvFile(Type):
         value:
             Variable value
         """
+        if not (isinstance(name, str)):
+            raise _type_error("EnvFile.with_variable", "name", name, "str")
+        if not (isinstance(value, str)):
+            raise _type_error("EnvFile.with_variable", "value", value, "str")
         _args = [
             Arg("name", name),
             Arg("value", value),
@@ -5241,6 +5856,8 @@ class EnvFile(Type):
         name:
             Variable name
         """
+        if not (isinstance(name, str)):
+            raise _type_error("EnvFile.without_variable", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -5256,7 +5873,6 @@ class EnvFile(Type):
 
 
 
-@typecheck
 class EnvVariable(Type):
     """An environment variable name and value."""
 
@@ -5331,7 +5947,6 @@ class EnvVariable(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Error(Type):
 
     async def id(self) -> str:
@@ -5399,6 +6014,10 @@ class Error(Type):
         value:
             The value to store on the error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Error.with_value", "name", name, "str")
+        if not (isinstance(value, JSON)):
+            raise _type_error("Error.with_value", "value", value, "JSON")
         _args = [
             Arg("name", name),
             Arg("value", value),
@@ -5415,7 +6034,6 @@ class Error(Type):
 
 
 
-@typecheck
 class ErrorValue(Type):
 
     async def id(self) -> str:
@@ -5487,7 +6105,6 @@ class ErrorValue(Type):
         return await _ctx.execute(JSON)
 
 
-@typecheck
 class FieldTypeDef(Type):
     """A definition of a field on a custom object defined in a Module.  A
     field on an object has a static value, as opposed to a function on an
@@ -5598,7 +6215,6 @@ class FieldTypeDef(Type):
         return TypeDef(_ctx)
 
 
-@typecheck
 class File(Type):
     """A file."""
 
@@ -5611,6 +6227,8 @@ class File(Type):
             Replace "${VAR}" or "$VAR" with the value of other vars
             .. deprecated:: Variable expansion is now enabled by default
         """
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("File.as_env_file", "expand", expand, "bool | None")
         _args = [
             Arg("expand", expand, None),
         ]
@@ -5634,6 +6252,8 @@ class File(Type):
             (foo:bar).
             If the group is omitted, it defaults to the same as the user.
         """
+        if not (isinstance(owner, str)):
+            raise _type_error("File.chown", "owner", owner, "str")
         _args = [
             Arg("owner", owner),
         ]
@@ -5664,6 +6284,10 @@ class File(Type):
         QueryError
             If the API returns an error.
         """
+        if not (offset_lines is None or isinstance(offset_lines, int)):
+            raise _type_error("File.contents", "offset_lines", offset_lines, "int | None")
+        if not (limit_lines is None or isinstance(limit_lines, int)):
+            raise _type_error("File.contents", "limit_lines", limit_lines, "int | None")
         _args = [
             Arg("offsetLines", offset_lines, None),
             Arg("limitLines", limit_lines, None),
@@ -5695,6 +6319,8 @@ class File(Type):
         QueryError
             If the API returns an error.
         """
+        if not (exclude_metadata is None or isinstance(exclude_metadata, bool)):
+            raise _type_error("File.digest", "exclude_metadata", exclude_metadata, "bool | None")
         _args = [
             Arg("excludeMetadata", exclude_metadata, False),
         ]
@@ -5727,6 +6353,10 @@ class File(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("File.export", "path", path, "str")
+        if not (allow_parent_dir_path is None or isinstance(allow_parent_dir_path, bool)):
+            raise _type_error("File.export", "allow_parent_dir_path", allow_parent_dir_path, "bool | None")
         _args = [
             Arg("path", path),
             Arg("allowParentDirPath", allow_parent_dir_path, False),
@@ -5814,6 +6444,28 @@ class File(Type):
         paths:
         globs:
         """
+        if not (isinstance(pattern, str)):
+            raise _type_error("File.search", "pattern", pattern, "str")
+        if not (literal is None or isinstance(literal, bool)):
+            raise _type_error("File.search", "literal", literal, "bool | None")
+        if not (multiline is None or isinstance(multiline, bool)):
+            raise _type_error("File.search", "multiline", multiline, "bool | None")
+        if not (dotall is None or isinstance(dotall, bool)):
+            raise _type_error("File.search", "dotall", dotall, "bool | None")
+        if not (insensitive is None or isinstance(insensitive, bool)):
+            raise _type_error("File.search", "insensitive", insensitive, "bool | None")
+        if not (skip_ignored is None or isinstance(skip_ignored, bool)):
+            raise _type_error("File.search", "skip_ignored", skip_ignored, "bool | None")
+        if not (skip_hidden is None or isinstance(skip_hidden, bool)):
+            raise _type_error("File.search", "skip_hidden", skip_hidden, "bool | None")
+        if not (files_only is None or isinstance(files_only, bool)):
+            raise _type_error("File.search", "files_only", files_only, "bool | None")
+        if not (limit is None or isinstance(limit, int)):
+            raise _type_error("File.search", "limit", limit, "int | None")
+        if not (paths is None or (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths))):
+            raise _type_error("File.search", "paths", paths, "list[str] | None")
+        if not (globs is None or (isinstance(globs, list) and all(isinstance(_v0, str) for _v0 in globs))):
+            raise _type_error("File.search", "globs", globs, "list[str] | None")
         _args = [
             Arg("pattern", pattern),
             Arg("literal", literal, False),
@@ -5881,6 +6533,8 @@ class File(Type):
         name:
             Name to set file to.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("File.with_name", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -5911,6 +6565,14 @@ class File(Type):
         first_from:
             Replace the first match starting from the specified line.
         """
+        if not (isinstance(search, str)):
+            raise _type_error("File.with_replaced", "search", search, "str")
+        if not (isinstance(replacement, str)):
+            raise _type_error("File.with_replaced", "replacement", replacement, "str")
+        if not (all is None or isinstance(all, bool)):
+            raise _type_error("File.with_replaced", "all", all, "bool | None")
+        if not (first_from is None or isinstance(first_from, int)):
+            raise _type_error("File.with_replaced", "first_from", first_from, "int | None")
         _args = [
             Arg("search", search),
             Arg("replacement", replacement),
@@ -5930,6 +6592,8 @@ class File(Type):
             Timestamp to set dir/files in.
             Formatted in seconds following Unix epoch (e.g., 1672531199).
         """
+        if not (isinstance(timestamp, int)):
+            raise _type_error("File.with_timestamps", "timestamp", timestamp, "int")
         _args = [
             Arg("timestamp", timestamp),
         ]
@@ -5945,7 +6609,6 @@ class File(Type):
 
 
 
-@typecheck
 class Function(Type):
     """Function represents a resolver provided by a Module.  A function
     always evaluates against a parent object and is given a set of named
@@ -6113,6 +6776,24 @@ class Function(Type):
             If deprecated, the reason or migration path.
         default_address:
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Function.with_arg", "name", name, "str")
+        if not (isinstance(type_def, TypeDef)):
+            raise _type_error("Function.with_arg", "type_def", type_def, "TypeDef")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("Function.with_arg", "description", description, "str | None")
+        if not (default_value is None or isinstance(default_value, JSON)):
+            raise _type_error("Function.with_arg", "default_value", default_value, "JSON | None")
+        if not (default_path is None or isinstance(default_path, str)):
+            raise _type_error("Function.with_arg", "default_path", default_path, "str | None")
+        if not (ignore is None or (isinstance(ignore, list) and all(isinstance(_v0, str) for _v0 in ignore))):
+            raise _type_error("Function.with_arg", "ignore", ignore, "list[str] | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("Function.with_arg", "source_map", source_map, "SourceMap | None")
+        if not (deprecated is None or isinstance(deprecated, str)):
+            raise _type_error("Function.with_arg", "deprecated", deprecated, "str | None")
+        if not (default_address is None or isinstance(default_address, str)):
+            raise _type_error("Function.with_arg", "default_address", default_address, "str | None")
         _args = [
             Arg("name", name),
             Arg("typeDef", type_def),
@@ -6138,6 +6819,10 @@ class Function(Type):
             The TTL for the cache policy, if applicable. Provided as a
             duration string, e.g. "5m", "1h30s".
         """
+        if not (isinstance(policy, FunctionCachePolicy)):
+            raise _type_error("Function.with_cache_policy", "policy", policy, "FunctionCachePolicy")
+        if not (time_to_live is None or isinstance(time_to_live, str)):
+            raise _type_error("Function.with_cache_policy", "time_to_live", time_to_live, "str | None")
         _args = [
             Arg("policy", policy),
             Arg("timeToLive", time_to_live, None),
@@ -6159,6 +6844,8 @@ class Function(Type):
         reason:
             Reason or migration path describing the deprecation.
         """
+        if not (reason is None or isinstance(reason, str)):
+            raise _type_error("Function.with_deprecated", "reason", reason, "str | None")
         _args = [
             Arg("reason", reason, None),
         ]
@@ -6173,6 +6860,8 @@ class Function(Type):
         description:
             The doc string to set.
         """
+        if not (isinstance(description, str)):
+            raise _type_error("Function.with_description", "description", description, "str")
         _args = [
             Arg("description", description),
         ]
@@ -6193,6 +6882,8 @@ class Function(Type):
         source_map:
             The source map for the function definition.
         """
+        if not (isinstance(source_map, SourceMap)):
+            raise _type_error("Function.with_source_map", "source_map", source_map, "SourceMap")
         _args = [
             Arg("sourceMap", source_map),
         ]
@@ -6216,7 +6907,6 @@ class Function(Type):
 
 
 
-@typecheck
 class FunctionArg(Type):
     """An argument accepted by a function.  This is a specification for an
     argument at function definition time, not an argument passed at
@@ -6413,7 +7103,6 @@ class FunctionArg(Type):
         return TypeDef(_ctx)
 
 
-@typecheck
 class FunctionCall(Type):
     """An active function call."""
 
@@ -6535,6 +7224,8 @@ class FunctionCall(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(error, Error)):
+            raise _type_error("FunctionCall.return_error", "error", error, "Error")
         _args = [
             Arg("error", error),
         ]
@@ -6562,6 +7253,8 @@ class FunctionCall(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(value, JSON)):
+            raise _type_error("FunctionCall.return_value", "value", value, "JSON")
         _args = [
             Arg("value", value),
         ]
@@ -6569,7 +7262,6 @@ class FunctionCall(Type):
         await _ctx.execute()
 
 
-@typecheck
 class FunctionCallArgValue(Type):
     """A value passed as a named argument to a function call."""
 
@@ -6642,7 +7334,6 @@ class FunctionCallArgValue(Type):
         return await _ctx.execute(JSON)
 
 
-@typecheck
 class GeneratedCode(Type):
     """The result of running an SDK's codegen."""
 
@@ -6725,6 +7416,8 @@ class GeneratedCode(Type):
 
     def with_vcs_generated_paths(self, paths: list[str]) -> Self:
         """Set the list of paths to mark generated in version control."""
+        if not (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths)):
+            raise _type_error("GeneratedCode.with_vcs_generated_paths", "paths", paths, "list[str]")
         _args = [
             Arg("paths", paths),
         ]
@@ -6733,6 +7426,8 @@ class GeneratedCode(Type):
 
     def with_vcs_ignored_paths(self, paths: list[str]) -> Self:
         """Set the list of paths to ignore in version control."""
+        if not (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths)):
+            raise _type_error("GeneratedCode.with_vcs_ignored_paths", "paths", paths, "list[str]")
         _args = [
             Arg("paths", paths),
         ]
@@ -6748,7 +7443,6 @@ class GeneratedCode(Type):
 
 
 
-@typecheck
 class Generator(Type):
 
     def changes(self) -> Changeset:
@@ -6907,7 +7601,6 @@ class Generator(Type):
 
 
 
-@typecheck
 class GeneratorGroup(Type):
 
     def changes(self, *, on_conflict: ChangesetsMergeConflict | None = ChangesetsMergeConflict.FAIL_EARLY,) -> Changeset:
@@ -6925,6 +7618,8 @@ class GeneratorGroup(Type):
         on_conflict:
             Strategy to apply on conflicts between generators
         """
+        if not (on_conflict is None or isinstance(on_conflict, ChangesetsMergeConflict)):
+            raise _type_error("GeneratorGroup.changes", "on_conflict", on_conflict, "ChangesetsMergeConflict | None")
         _args = [
             Arg("onConflict", on_conflict, ChangesetsMergeConflict.FAIL_EARLY),
         ]
@@ -7026,7 +7721,6 @@ class GeneratorGroup(Type):
 
 
 
-@typecheck
 class GitCommit(Type):
     """An immutable git commit."""
 
@@ -7038,6 +7732,8 @@ class GitCommit(Type):
         include_pre_release:
             Include pre-release tags when choosing the latest tag.
         """
+        if not (include_pre_release is None or isinstance(include_pre_release, bool)):
+            raise _type_error("GitCommit.ancestor_release_tag", "include_pre_release", include_pre_release, "bool | None")
         _args = [
             Arg("includePreRelease", include_pre_release, False),
         ]
@@ -7290,6 +7986,8 @@ class GitCommit(Type):
         include_pre_release:
             Include pre-release tags when choosing the latest tag.
         """
+        if not (include_pre_release is None or isinstance(include_pre_release, bool)):
+            raise _type_error("GitCommit.release_tag", "include_pre_release", include_pre_release, "bool | None")
         _args = [
             Arg("includePreRelease", include_pre_release, False),
         ]
@@ -7350,6 +8048,12 @@ class GitCommit(Type):
         include_tags:
             Set to true to populate tag refs in the local checkout .git.
         """
+        if not (discard_git_dir is None or isinstance(discard_git_dir, bool)):
+            raise _type_error("GitCommit.tree", "discard_git_dir", discard_git_dir, "bool | None")
+        if not (depth is None or isinstance(depth, int)):
+            raise _type_error("GitCommit.tree", "depth", depth, "int | None")
+        if not (include_tags is None or isinstance(include_tags, bool)):
+            raise _type_error("GitCommit.tree", "include_tags", include_tags, "bool | None")
         _args = [
             Arg("discardGitDir", discard_git_dir, False),
             Arg("depth", depth, 1),
@@ -7359,7 +8063,6 @@ class GitCommit(Type):
         return Directory(_ctx)
 
 
-@typecheck
 class GitRef(Type):
     """A git ref (tag, branch, or commit)."""
 
@@ -7372,6 +8075,8 @@ class GitRef(Type):
             Current working directory inside the workspace root. Defaults to
             the workspace root.
         """
+        if not (cwd is None or isinstance(cwd, str)):
+            raise _type_error("GitRef.as_workspace", "cwd", cwd, "str | None")
         _args = [
             Arg("cwd", cwd, '/'),
         ]
@@ -7436,6 +8141,8 @@ class GitRef(Type):
         other:
             The other ref to compare against.
         """
+        if not (isinstance(other, GitRef)):
+            raise _type_error("GitRef.common_ancestor", "other", other, "GitRef")
         _args = [
             Arg("other", other),
         ]
@@ -7485,6 +8192,12 @@ class GitRef(Type):
             Exclude commits reachable from this ref, i.e. only list commits
             added on top of it.
         """
+        if not (limit is None or isinstance(limit, int)):
+            raise _type_error("GitRef.log", "limit", limit, "int | None")
+        if not (paths is None or (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths))):
+            raise _type_error("GitRef.log", "paths", paths, "list[str] | None")
+        if not (base is None or isinstance(base, GitRef)):
+            raise _type_error("GitRef.log", "base", base, "GitRef | None")
         _args = [
             Arg("limit", limit, 10),
             Arg("paths", paths, None),
@@ -7561,6 +8274,12 @@ class GitRef(Type):
         include_tags:
             Set to true to populate tag refs in the local checkout .git.
         """
+        if not (discard_git_dir is None or isinstance(discard_git_dir, bool)):
+            raise _type_error("GitRef.tree", "discard_git_dir", discard_git_dir, "bool | None")
+        if not (depth is None or isinstance(depth, int)):
+            raise _type_error("GitRef.tree", "depth", depth, "int | None")
+        if not (include_tags is None or isinstance(include_tags, bool)):
+            raise _type_error("GitRef.tree", "include_tags", include_tags, "bool | None")
         _args = [
             Arg("discardGitDir", discard_git_dir, False),
             Arg("depth", depth, 1),
@@ -7578,7 +8297,6 @@ class GitRef(Type):
 
 
 
-@typecheck
 class GitRepository(Type):
     """A git repository."""
 
@@ -7591,6 +8309,8 @@ class GitRepository(Type):
             Current working directory inside the workspace root. Defaults to
             the workspace root.
         """
+        if not (cwd is None or isinstance(cwd, str)):
+            raise _type_error("GitRepository.as_workspace", "cwd", cwd, "str | None")
         _args = [
             Arg("cwd", cwd, '/'),
         ]
@@ -7605,6 +8325,8 @@ class GitRepository(Type):
         name:
             Branch's name (e.g., "main").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("GitRepository.branch", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -7633,6 +8355,8 @@ class GitRepository(Type):
         QueryError
             If the API returns an error.
         """
+        if not (patterns is None or (isinstance(patterns, list) and all(isinstance(_v0, str) for _v0 in patterns))):
+            raise _type_error("GitRepository.branches", "patterns", patterns, "list[str] | None")
         _args = [
             Arg("patterns", patterns, None),
         ]
@@ -7648,6 +8372,8 @@ class GitRepository(Type):
             Identifier of the commit (e.g.,
             "b6315d8f2810962c601af73f86831f6866ea798b").
         """
+        if not (isinstance(id, str)):
+            raise _type_error("GitRepository.commit", "id", id, "str")
         _args = [
             Arg("id", id),
         ]
@@ -7688,10 +8414,15 @@ class GitRepository(Type):
         _ctx = self._select("id", _args)
         return await _ctx.execute(str)
 
-    def latest_version(self) -> GitRef:
-        """Returns details for the latest semver tag."""
+    def latest(self) -> GitRef:
+        """Return the latest stable release tag, falling back to HEAD when no
+        release exists.
+
+        Release selection accepts an optional "v" prefix, incomplete versions,
+        and zero-padded numeric components. This operation is pinned.
+        """
         _args: list[Arg] = []
-        _ctx = self._select("latestVersion", _args)
+        _ctx = self._select("latest", _args)
         return GitRef(_ctx)
 
     def ref(self, name: str) -> GitRef:
@@ -7703,6 +8434,8 @@ class GitRepository(Type):
             Ref's name (can be a commit identifier, a tag name, a branch name,
             or a fully-qualified ref).
         """
+        if not (isinstance(name, str)):
+            raise _type_error("GitRepository.ref", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -7717,6 +8450,8 @@ class GitRepository(Type):
         name:
             Tag's name (e.g., "v0.3.9").
         """
+        if not (isinstance(name, str)):
+            raise _type_error("GitRepository.tag", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -7745,6 +8480,8 @@ class GitRepository(Type):
         QueryError
             If the API returns an error.
         """
+        if not (patterns is None or (isinstance(patterns, list) and all(isinstance(_v0, str) for _v0 in patterns))):
+            raise _type_error("GitRepository.tags", "patterns", patterns, "list[str] | None")
         _args = [
             Arg("patterns", patterns, None),
         ]
@@ -7779,7 +8516,6 @@ class GitRepository(Type):
         return await _ctx.execute(str | None)
 
 
-@typecheck
 class HTTPState(Type):
     """An internal persistent HTTP state."""
 
@@ -7812,7 +8548,6 @@ class HTTPState(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class HealthcheckConfig(Type):
     """Image healthcheck configuration."""
 
@@ -7993,7 +8728,6 @@ class HealthcheckConfig(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class InputTypeDef(Type):
     """A graphql input type, which is essentially just a group of named
     args. This is currently only used to represent pre-existing usage of
@@ -8057,7 +8791,6 @@ class InputTypeDef(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class InterfaceTypeDef(Type):
     """A definition of a custom interface defined in a Module."""
 
@@ -8166,7 +8899,6 @@ class InterfaceTypeDef(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class JSONValue(Type):
 
     async def as_array(self) -> list["JSONValue"]:
@@ -8258,6 +8990,10 @@ class JSONValue(Type):
         QueryError
             If the API returns an error.
         """
+        if not (pretty is None or isinstance(pretty, bool)):
+            raise _type_error("JSONValue.contents", "pretty", pretty, "bool | None")
+        if not (indent is None or isinstance(indent, str)):
+            raise _type_error("JSONValue.contents", "indent", indent, "str | None")
         _args = [
             Arg("pretty", pretty, False),
             Arg("indent", indent, '  '),
@@ -8273,6 +9009,8 @@ class JSONValue(Type):
         path:
             Path of the field to lookup, encoded as an array of field names
         """
+        if not (isinstance(path, list) and all(isinstance(_v0, str) for _v0 in path)):
+            raise _type_error("JSONValue.field", "path", path, "list[str]")
         _args = [
             Arg("path", path),
         ]
@@ -8336,6 +9074,8 @@ class JSONValue(Type):
         value:
             New boolean value
         """
+        if not (isinstance(value, bool)):
+            raise _type_error("JSONValue.new_boolean", "value", value, "bool")
         _args = [
             Arg("value", value),
         ]
@@ -8350,6 +9090,8 @@ class JSONValue(Type):
         value:
             New integer value
         """
+        if not (isinstance(value, int)):
+            raise _type_error("JSONValue.new_integer", "value", value, "int")
         _args = [
             Arg("value", value),
         ]
@@ -8364,6 +9106,8 @@ class JSONValue(Type):
         value:
             New string value
         """
+        if not (isinstance(value, str)):
+            raise _type_error("JSONValue.new_string", "value", value, "str")
         _args = [
             Arg("value", value),
         ]
@@ -8378,6 +9122,8 @@ class JSONValue(Type):
         contents:
             New JSON-encoded contents
         """
+        if not (isinstance(contents, JSON)):
+            raise _type_error("JSONValue.with_contents", "contents", contents, "JSON")
         _args = [
             Arg("contents", contents),
         ]
@@ -8394,6 +9140,10 @@ class JSONValue(Type):
         value:
             The new value of the field
         """
+        if not (isinstance(path, list) and all(isinstance(_v0, str) for _v0 in path)):
+            raise _type_error("JSONValue.with_field", "path", path, "list[str]")
+        if not (isinstance(value, JSONValue)):
+            raise _type_error("JSONValue.with_field", "value", value, "JSONValue")
         _args = [
             Arg("path", path),
             Arg("value", value),
@@ -8410,7 +9160,6 @@ class JSONValue(Type):
 
 
 
-@typecheck
 class LLM(Type):
     """A conversation with a large language model (LLM): queue prompts,
     expose tools, and step the model until it completes its turn."""
@@ -8469,6 +9218,8 @@ class LLM(Type):
             A label distinguishing this fork from its siblings, e.g.
             "attempt-2" when retrying a flaky evaluation.
         """
+        if not (isinstance(label, str)):
+            raise _type_error("LLM.fork", "label", label, "str")
         _args = [
             Arg("label", label),
         ]
@@ -8559,6 +9310,10 @@ class LLM(Type):
             Cap the model's output tokens on each step. Defaults to the
             model's maximum.
         """
+        if not (max_steps is None or isinstance(max_steps, int)):
+            raise _type_error("LLM.loop", "max_steps", max_steps, "int | None")
+        if not (max_tokens is None or isinstance(max_tokens, int)):
+            raise _type_error("LLM.loop", "max_tokens", max_tokens, "int | None")
         _args = [
             Arg("maxSteps", max_steps, None),
             Arg("maxTokens", max_tokens, None),
@@ -8703,6 +9458,8 @@ class LLM(Type):
             Cap the model's output tokens for this step. Defaults to the
             model's maximum.
         """
+        if not (max_tokens is None or isinstance(max_tokens, int)):
+            raise _type_error("LLM.step", "max_tokens", max_tokens, "int | None")
         _args = [
             Arg("maxTokens", max_tokens, None),
         ]
@@ -8787,6 +9544,10 @@ class LLM(Type):
         service:
             The MCP service to run and communicate with over stdio
         """
+        if not (isinstance(name, str)):
+            raise _type_error("LLM.with_mcp_server", "name", name, "str")
+        if not (isinstance(service, Service)):
+            raise _type_error("LLM.with_mcp_server", "service", service, "Service")
         _args = [
             Arg("name", name),
             Arg("service", service),
@@ -8808,6 +9569,10 @@ class LLM(Type):
             name matches no known pattern (e.g. a fine-tune), or matches the
             wrong one.
         """
+        if not (isinstance(model, str)):
+            raise _type_error("LLM.with_model", "model", model, "str")
+        if not (provider is None or isinstance(provider, str)):
+            raise _type_error("LLM.with_model", "provider", provider, "str | None")
         _args = [
             Arg("model", model),
             Arg("provider", provider, None),
@@ -8823,6 +9588,8 @@ class LLM(Type):
         prompt:
             The prompt to send
         """
+        if not (isinstance(prompt, str)):
+            raise _type_error("LLM.with_prompt", "prompt", prompt, "str")
         _args = [
             Arg("prompt", prompt),
         ]
@@ -8837,6 +9604,8 @@ class LLM(Type):
         file:
             The file to read the prompt from
         """
+        if not (isinstance(file, File)):
+            raise _type_error("LLM.with_prompt_file", "file", file, "File")
         _args = [
             Arg("file", file),
         ]
@@ -8855,6 +9624,8 @@ class LLM(Type):
             disables reasoning. Supported levels are model-specific — some
             models also accept e.g. "minimal", "xhigh", or "max".
         """
+        if not (isinstance(effort, str)):
+            raise _type_error("LLM.with_reasoning_effort", "effort", effort, "str")
         _args = [
             Arg("effort", effort),
         ]
@@ -8880,6 +9651,18 @@ class LLM(Type):
         total_tokens:
             Total tokens consumed by this response
         """
+        if not (isinstance(content, list) and all(isinstance(_v0, LLMContentBlockInput) for _v0 in content)):
+            raise _type_error("LLM.with_response", "content", content, "list[LLMContentBlockInput]")
+        if not (input_tokens is None or isinstance(input_tokens, int)):
+            raise _type_error("LLM.with_response", "input_tokens", input_tokens, "int | None")
+        if not (output_tokens is None or isinstance(output_tokens, int)):
+            raise _type_error("LLM.with_response", "output_tokens", output_tokens, "int | None")
+        if not (cached_token_reads is None or isinstance(cached_token_reads, int)):
+            raise _type_error("LLM.with_response", "cached_token_reads", cached_token_reads, "int | None")
+        if not (cached_token_writes is None or isinstance(cached_token_writes, int)):
+            raise _type_error("LLM.with_response", "cached_token_writes", cached_token_writes, "int | None")
+        if not (total_tokens is None or isinstance(total_tokens, int)):
+            raise _type_error("LLM.with_response", "total_tokens", total_tokens, "int | None")
         _args = [
             Arg("content", content),
             Arg("inputTokens", input_tokens, 0),
@@ -8905,6 +9688,8 @@ class LLM(Type):
             A directory containing skills, each a subdirectory holding a
             SKILL.md.
         """
+        if not (isinstance(directory, Directory)):
+            raise _type_error("LLM.with_skills", "directory", directory, "Directory")
         _args = [
             Arg("directory", directory),
         ]
@@ -8920,6 +9705,8 @@ class LLM(Type):
         prompt:
             The system prompt to send
         """
+        if not (isinstance(prompt, str)):
+            raise _type_error("LLM.with_system_prompt", "prompt", prompt, "str")
         _args = [
             Arg("prompt", prompt),
         ]
@@ -8938,6 +9725,12 @@ class LLM(Type):
         errored:
             Whether the tool call resulted in an error
         """
+        if not (isinstance(call_id, str)):
+            raise _type_error("LLM.with_tool_result", "call_id", call_id, "str")
+        if not (isinstance(content, str)):
+            raise _type_error("LLM.with_tool_result", "content", content, "str")
+        if not (isinstance(errored, bool)):
+            raise _type_error("LLM.with_tool_result", "errored", errored, "bool")
         _args = [
             Arg("callId", call_id),
             Arg("content", content),
@@ -8959,6 +9752,10 @@ class LLM(Type):
             Method names to exclude from the toolset (e.g. constructors,
             entrypoints).
         """
+        if not (isinstance(object, Node)):
+            raise _type_error("LLM.with_tools", "object", object, "Node")
+        if not (except_ is None or (isinstance(except_, list) and all(isinstance(_v0, str) for _v0 in except_))):
+            raise _type_error("LLM.with_tools", "except_", except_, "list[str] | None")
         _args = [
             Arg("object", object),
             Arg("except", [] if except_ is None else except_, []),
@@ -8975,6 +9772,8 @@ class LLM(Type):
         workspace:
             The workspace to work in.
         """
+        if not (isinstance(workspace, Workspace)):
+            raise _type_error("LLM.with_workspace", "workspace", workspace, "Workspace")
         _args = [
             Arg("workspace", workspace),
         ]
@@ -9016,7 +9815,6 @@ class LLM(Type):
 
 
 
-@typecheck
 class LLMContentBlock(Type):
     """A single piece of content within an LLM message."""
 
@@ -9192,7 +9990,6 @@ class LLMContentBlock(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class LLMMessage(Type):
     """A single message in an LLM conversation."""
 
@@ -9258,7 +10055,6 @@ class LLMMessage(Type):
         return LLMTokenUsage(_ctx)
 
 
-@typecheck
 class LLMSkill(Type):
     """A skill available to a model: task-specific guidance discovered
     with ListSkills and read with ReadSkill."""
@@ -9334,7 +10130,6 @@ class LLMSkill(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class LLMTokenUsage(Type):
     """A count of tokens consumed by LLM API calls."""
 
@@ -9472,7 +10267,6 @@ class LLMTokenUsage(Type):
         return await _ctx.execute(int)
 
 
-@typecheck
 class Label(Type):
     """A simple key value object that represents a label."""
 
@@ -9547,7 +10341,6 @@ class Label(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class ListTypeDef(Type):
     """A definition of a list type in a Module."""
 
@@ -9586,7 +10379,6 @@ class ListTypeDef(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Module(Type):
     """A Dagger module."""
 
@@ -9603,6 +10395,8 @@ class Module(Type):
         name:
             The name of the check to retrieve
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Module.check", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -9624,6 +10418,10 @@ class Module(Type):
             When true, only return annotated check functions; exclude
             generate-as-checks
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Module.checks", "include", include, "list[str] | None")
+        if not (no_generate is None or isinstance(no_generate, bool)):
+            raise _type_error("Module.checks", "no_generate", no_generate, "bool | None")
         _args = [
             Arg("include", include, None),
             Arg("noGenerate", no_generate, None),
@@ -9685,6 +10483,8 @@ class Module(Type):
         name:
             The name of the generator to retrieve
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Module.generator", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -9703,6 +10503,8 @@ class Module(Type):
         include:
             Only include generators matching the specified patterns
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Module.generators", "include", include, "list[str] | None")
         _args = [
             Arg("include", include, None),
         ]
@@ -9824,6 +10626,10 @@ class Module(Type):
         QueryError
             If the API returns an error.
         """
+        if not (include_dependencies is None or isinstance(include_dependencies, bool)):
+            raise _type_error("Module.serve", "include_dependencies", include_dependencies, "bool | None")
+        if not (entrypoint is None or isinstance(entrypoint, bool)):
+            raise _type_error("Module.serve", "entrypoint", entrypoint, "bool | None")
         _args = [
             Arg("includeDependencies", include_dependencies, None),
             Arg("entrypoint", entrypoint, None),
@@ -9843,6 +10649,8 @@ class Module(Type):
         include:
             Only include services matching the specified patterns
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Module.services", "include", include, "list[str] | None")
         _args = [
             Arg("include", include, None),
         ]
@@ -9886,6 +10694,8 @@ class Module(Type):
         description:
             The description to set
         """
+        if not (isinstance(description, str)):
+            raise _type_error("Module.with_description", "description", description, "str")
         _args = [
             Arg("description", description),
         ]
@@ -9894,6 +10704,8 @@ class Module(Type):
 
     def with_enum(self, enum: "TypeDef") -> Self:
         """This module plus the given Enum type and associated values"""
+        if not (isinstance(enum, TypeDef)):
+            raise _type_error("Module.with_enum", "enum", enum, "TypeDef")
         _args = [
             Arg("enum", enum),
         ]
@@ -9902,6 +10714,8 @@ class Module(Type):
 
     def with_interface(self, iface: "TypeDef") -> Self:
         """This module plus the given Interface type and associated functions"""
+        if not (isinstance(iface, TypeDef)):
+            raise _type_error("Module.with_interface", "iface", iface, "TypeDef")
         _args = [
             Arg("iface", iface),
         ]
@@ -9910,6 +10724,8 @@ class Module(Type):
 
     def with_object(self, object: "TypeDef") -> Self:
         """This module plus the given Object type and associated functions."""
+        if not (isinstance(object, TypeDef)):
+            raise _type_error("Module.with_object", "object", object, "TypeDef")
         _args = [
             Arg("object", object),
         ]
@@ -9925,7 +10741,6 @@ class Module(Type):
 
 
 
-@typecheck
 class ModuleConfigClient(Type):
     """The client generated for the module."""
 
@@ -10000,7 +10815,6 @@ class ModuleConfigClient(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class ModuleSource(Type):
     """The source needed to load and run a module, along with any metadata
     about the source such as versions/urls/etc."""
@@ -10179,6 +10993,8 @@ class ModuleSource(Type):
         path:
             A subpath from the source directory to select.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("ModuleSource.directory", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -10219,6 +11035,8 @@ class ModuleSource(Type):
         workspace:
             The workspace to apply generated files to.
         """
+        if not (isinstance(workspace, Workspace)):
+            raise _type_error("ModuleSource.generate", "workspace", workspace, "Workspace")
         _args = [
             Arg("workspace", workspace),
         ]
@@ -10241,6 +11059,8 @@ class ModuleSource(Type):
         workspace:
             The workspace to generate the local dependencies against.
         """
+        if not (isinstance(workspace, Workspace)):
+            raise _type_error("ModuleSource.generate_local_dependencies", "workspace", workspace, "Workspace")
         _args = [
             Arg("workspace", workspace),
         ]
@@ -10639,6 +11459,8 @@ class ModuleSource(Type):
             DeprecationWarning,
             stacklevel=4,
         )                
+        if not (isinstance(blueprint, ModuleSource)):
+            raise _type_error("ModuleSource.with_blueprint", "blueprint", blueprint, "ModuleSource")
         _args = [
             Arg("blueprint", blueprint),
         ]
@@ -10655,6 +11477,10 @@ class ModuleSource(Type):
         output_dir:
             The output directory for the generated client.
         """
+        if not (isinstance(generator, str)):
+            raise _type_error("ModuleSource.with_client", "generator", generator, "str")
+        if not (isinstance(output_dir, str)):
+            raise _type_error("ModuleSource.with_client", "output_dir", output_dir, "str")
         _args = [
             Arg("generator", generator),
             Arg("outputDir", output_dir),
@@ -10671,6 +11497,8 @@ class ModuleSource(Type):
         dependencies:
             The dependencies to append.
         """
+        if not (isinstance(dependencies, list) and all(isinstance(_v0, ModuleSource) for _v0 in dependencies)):
+            raise _type_error("ModuleSource.with_dependencies", "dependencies", dependencies, "list[ModuleSource]")
         _args = [
             Arg("dependencies", dependencies),
         ]
@@ -10685,6 +11513,8 @@ class ModuleSource(Type):
         version:
             The engine version to upgrade to.
         """
+        if not (isinstance(version, str)):
+            raise _type_error("ModuleSource.with_engine_version", "version", version, "str")
         _args = [
             Arg("version", version),
         ]
@@ -10699,6 +11529,8 @@ class ModuleSource(Type):
         features:
             The experimental features to enable.
         """
+        if not (isinstance(features, list) and all(isinstance(_v0, ModuleSourceExperimentalFeature) for _v0 in features)):
+            raise _type_error("ModuleSource.with_experimental_features", "features", features, "list[ModuleSourceExperimentalFeature]")
         _args = [
             Arg("features", features),
         ]
@@ -10714,6 +11546,8 @@ class ModuleSource(Type):
         patterns:
             The new additional include patterns.
         """
+        if not (isinstance(patterns, list) and all(isinstance(_v0, str) for _v0 in patterns)):
+            raise _type_error("ModuleSource.with_includes", "patterns", patterns, "list[str]")
         _args = [
             Arg("patterns", patterns),
         ]
@@ -10728,6 +11562,8 @@ class ModuleSource(Type):
         name:
             The name to set.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("ModuleSource.with_name", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -10742,6 +11578,8 @@ class ModuleSource(Type):
         source:
             The SDK source to set.
         """
+        if not (isinstance(source, str)):
+            raise _type_error("ModuleSource.with_sdk", "source", source, "str")
         _args = [
             Arg("source", source),
         ]
@@ -10757,6 +11595,8 @@ class ModuleSource(Type):
             The path to set as the source subpath. Must be relative to the
             module source's source root directory.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("ModuleSource.with_source_subpath", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -10780,6 +11620,8 @@ class ModuleSource(Type):
             DeprecationWarning,
             stacklevel=4,
         )                
+        if not (isinstance(toolchains, list) and all(isinstance(_v0, ModuleSource) for _v0 in toolchains)):
+            raise _type_error("ModuleSource.with_toolchains", "toolchains", toolchains, "list[ModuleSource]")
         _args = [
             Arg("toolchains", toolchains),
         ]
@@ -10810,6 +11652,8 @@ class ModuleSource(Type):
         dependencies:
             The dependencies to update.
         """
+        if not (isinstance(dependencies, list) and all(isinstance(_v0, str) for _v0 in dependencies)):
+            raise _type_error("ModuleSource.with_update_dependencies", "dependencies", dependencies, "list[str]")
         _args = [
             Arg("dependencies", dependencies),
         ]
@@ -10833,6 +11677,8 @@ class ModuleSource(Type):
             DeprecationWarning,
             stacklevel=4,
         )                
+        if not (isinstance(toolchains, list) and all(isinstance(_v0, str) for _v0 in toolchains)):
+            raise _type_error("ModuleSource.with_update_toolchains", "toolchains", toolchains, "list[str]")
         _args = [
             Arg("toolchains", toolchains),
         ]
@@ -10847,6 +11693,8 @@ class ModuleSource(Type):
         clients:
             The clients to update
         """
+        if not (isinstance(clients, list) and all(isinstance(_v0, str) for _v0 in clients)):
+            raise _type_error("ModuleSource.with_updated_clients", "clients", clients, "list[str]")
         _args = [
             Arg("clients", clients),
         ]
@@ -10877,6 +11725,8 @@ class ModuleSource(Type):
         path:
             The path of the client to remove.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("ModuleSource.without_client", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -10892,6 +11742,8 @@ class ModuleSource(Type):
         dependencies:
             The dependencies to remove.
         """
+        if not (isinstance(dependencies, list) and all(isinstance(_v0, str) for _v0 in dependencies)):
+            raise _type_error("ModuleSource.without_dependencies", "dependencies", dependencies, "list[str]")
         _args = [
             Arg("dependencies", dependencies),
         ]
@@ -10906,6 +11758,8 @@ class ModuleSource(Type):
         features:
             The experimental features to disable.
         """
+        if not (isinstance(features, list) and all(isinstance(_v0, ModuleSourceExperimentalFeature) for _v0 in features)):
+            raise _type_error("ModuleSource.without_experimental_features", "features", features, "list[ModuleSourceExperimentalFeature]")
         _args = [
             Arg("features", features),
         ]
@@ -10929,6 +11783,8 @@ class ModuleSource(Type):
             DeprecationWarning,
             stacklevel=4,
         )                
+        if not (isinstance(toolchains, list) and all(isinstance(_v0, str) for _v0 in toolchains)):
+            raise _type_error("ModuleSource.without_toolchains", "toolchains", toolchains, "list[str]")
         _args = [
             Arg("toolchains", toolchains),
         ]
@@ -10944,7 +11800,6 @@ class ModuleSource(Type):
 
 
 
-@typecheck
 class ObjectTypeDef(Type):
     """A definition of a custom object defined in a Module."""
 
@@ -11086,7 +11941,6 @@ class ObjectTypeDef(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Port(Type):
     """A port exposed by a container."""
 
@@ -11199,7 +12053,6 @@ class Port(Type):
         return await _ctx.execute(NetworkProtocol)
 
 
-@typecheck
 class Query(Root):
     """The root of the DAG."""
 
@@ -11207,6 +12060,8 @@ class Query(Root):
         """initialize an address to load directories, containers, secrets or
         other object types.
         """
+        if not (isinstance(value, str)):
+            raise _type_error("Query.address", "value", value, "str")
         _args = [
             Arg("value", value),
         ]
@@ -11231,6 +12086,14 @@ class Query(Root):
             (foo:bar).
             If the group is omitted, it defaults to the same as the user.
         """
+        if not (isinstance(key, str)):
+            raise _type_error("Query.cache_volume", "key", key, "str")
+        if not (source is None or isinstance(source, Directory)):
+            raise _type_error("Query.cache_volume", "source", source, "Directory | None")
+        if not (sharing is None or isinstance(sharing, CacheSharingMode)):
+            raise _type_error("Query.cache_volume", "sharing", sharing, "CacheSharingMode | None")
+        if not (owner is None or isinstance(owner, str)):
+            raise _type_error("Query.cache_volume", "owner", owner, "str | None")
         _args = [
             Arg("key", key),
             Arg("source", source, None),
@@ -11263,6 +12126,8 @@ class Query(Root):
             Platform to initialize the container with. Defaults to the native
             platform of the current engine
         """
+        if not (platform is None or isinstance(platform, Platform)):
+            raise _type_error("Query.container", "platform", platform, "Platform | None")
         _args = [
             Arg("platform", platform, None),
         ]
@@ -11310,6 +12175,10 @@ class Query(Root):
             Core types (Container, Directory, etc.) are kept so return types
             and method chaining still work.
         """
+        if not (return_all_types is None or isinstance(return_all_types, bool)):
+            raise _type_error("Query.current_type_defs", "return_all_types", return_all_types, "bool | None")
+        if not (hide_core is None or isinstance(hide_core, bool)):
+            raise _type_error("Query.current_type_defs", "hide_core", hide_core, "bool | None")
         _args = [
             Arg("returnAllTypes", return_all_types, False),
             Arg("hideCore", hide_core, None),
@@ -11353,6 +12222,8 @@ class Query(Root):
             Replace "${VAR}" or "$VAR" with the value of other vars
             .. deprecated:: Variable expansion is now enabled by default
         """
+        if not (expand is None or isinstance(expand, bool)):
+            raise _type_error("Query.env_file", "expand", expand, "bool | None")
         _args = [
             Arg("expand", expand, None),
         ]
@@ -11367,6 +12238,8 @@ class Query(Root):
         message:
             A brief description of the error.
         """
+        if not (isinstance(message, str)):
+            raise _type_error("Query.error", "message", message, "str")
         _args = [
             Arg("message", message),
         ]
@@ -11385,6 +12258,12 @@ class Query(Root):
         permissions:
             Permissions of the new file. Example: 0600
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Query.file", "name", name, "str")
+        if not (isinstance(contents, str)):
+            raise _type_error("Query.file", "contents", contents, "str")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Query.file", "permissions", permissions, "int | None")
         _args = [
             Arg("name", name),
             Arg("contents", contents),
@@ -11404,6 +12283,10 @@ class Query(Root):
         return_type:
             Return type of the function.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Query.function", "name", name, "str")
+        if not (isinstance(return_type, TypeDef)):
+            raise _type_error("Query.function", "return_type", return_type, "TypeDef")
         _args = [
             Arg("name", name),
             Arg("returnType", return_type),
@@ -11415,6 +12298,8 @@ class Query(Root):
         """Create a code generation result, given a directory containing the
         generated code.
         """
+        if not (isinstance(code, Directory)):
+            raise _type_error("Query.generated_code", "code", code, "Directory")
         _args = [
             Arg("code", code),
         ]
@@ -11449,6 +12334,22 @@ class Query(Root):
         experimental_service_host:
             A service which must be started before the repo is fetched.
         """
+        if not (isinstance(url, str)):
+            raise _type_error("Query.git", "url", url, "str")
+        if not (keep_git_dir is None or isinstance(keep_git_dir, bool)):
+            raise _type_error("Query.git", "keep_git_dir", keep_git_dir, "bool | None")
+        if not (ssh_known_hosts is None or isinstance(ssh_known_hosts, str)):
+            raise _type_error("Query.git", "ssh_known_hosts", ssh_known_hosts, "str | None")
+        if not (ssh_auth_socket is None or isinstance(ssh_auth_socket, Socket)):
+            raise _type_error("Query.git", "ssh_auth_socket", ssh_auth_socket, "Socket | None")
+        if not (http_auth_username is None or isinstance(http_auth_username, str)):
+            raise _type_error("Query.git", "http_auth_username", http_auth_username, "str | None")
+        if not (http_auth_token is None or isinstance(http_auth_token, Secret)):
+            raise _type_error("Query.git", "http_auth_token", http_auth_token, "Secret | None")
+        if not (http_auth_header is None or isinstance(http_auth_header, Secret)):
+            raise _type_error("Query.git", "http_auth_header", http_auth_header, "Secret | None")
+        if not (experimental_service_host is None or isinstance(experimental_service_host, Service)):
+            raise _type_error("Query.git", "experimental_service_host", experimental_service_host, "Service | None")
         _args = [
             Arg("url", url),
             Arg("keepGitDir", keep_git_dir, True),
@@ -11481,6 +12382,18 @@ class Query(Root):
         experimental_service_host:
             A service which must be started before the URL is fetched.
         """
+        if not (isinstance(url, str)):
+            raise _type_error("Query.http", "url", url, "str")
+        if not (name is None or isinstance(name, str)):
+            raise _type_error("Query.http", "name", name, "str | None")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Query.http", "permissions", permissions, "int | None")
+        if not (checksum is None or isinstance(checksum, str)):
+            raise _type_error("Query.http", "checksum", checksum, "str | None")
+        if not (auth_header is None or isinstance(auth_header, Secret)):
+            raise _type_error("Query.http", "auth_header", auth_header, "Secret | None")
+        if not (experimental_service_host is None or isinstance(experimental_service_host, Service)):
+            raise _type_error("Query.http", "experimental_service_host", experimental_service_host, "Service | None")
         _args = [
             Arg("url", url),
             Arg("name", name, None),
@@ -11543,6 +12456,10 @@ class Query(Root):
             name matches no known pattern (e.g. a fine-tune), or matches the
             wrong one.
         """
+        if not (model is None or isinstance(model, str)):
+            raise _type_error("Query.llm", "model", model, "str | None")
+        if not (provider is None or isinstance(provider, str)):
+            raise _type_error("Query.llm", "provider", provider, "str | None")
         _args = [
             Arg("model", model, None),
             Arg("provider", provider, None),
@@ -11577,6 +12494,16 @@ class Query(Root):
             If set, error out if the ref string is not of the provided
             requireKind.
         """
+        if not (isinstance(ref_string, str)):
+            raise _type_error("Query.module_source", "ref_string", ref_string, "str")
+        if not (ref_pin is None or isinstance(ref_pin, str)):
+            raise _type_error("Query.module_source", "ref_pin", ref_pin, "str | None")
+        if not (disable_find_up is None or isinstance(disable_find_up, bool)):
+            raise _type_error("Query.module_source", "disable_find_up", disable_find_up, "bool | None")
+        if not (allow_not_exists is None or isinstance(allow_not_exists, bool)):
+            raise _type_error("Query.module_source", "allow_not_exists", allow_not_exists, "bool | None")
+        if not (require_kind is None or isinstance(require_kind, ModuleSourceKind)):
+            raise _type_error("Query.module_source", "require_kind", require_kind, "ModuleSourceKind | None")
         _args = [
             Arg("refString", ref_string),
             Arg("refPin", ref_pin, ''),
@@ -11589,6 +12516,8 @@ class Query(Root):
 
     def node(self, id: Type) -> Node:
         """Load any object by its ID."""
+        if not (isinstance(id, Type)):
+            raise _type_error("Query.node", "id", id, "Type")
         _args = [
             Arg("id", id),
         ]
@@ -11603,6 +12532,8 @@ class Query(Root):
         json:
             The introspection schema JSON to load.
         """
+        if not (isinstance(json, JSON)):
+            raise _type_error("Query.schema", "json", json, "JSON")
         _args = [
             Arg("json", json),
         ]
@@ -11627,6 +12558,10 @@ class Query(Root):
             If not set, the cache key for the secret will be derived from its
             plaintext value as looked up when the secret is constructed.
         """
+        if not (isinstance(uri, str)):
+            raise _type_error("Query.secret", "uri", uri, "str")
+        if not (cache_key is None or isinstance(cache_key, str)):
+            raise _type_error("Query.secret", "cache_key", cache_key, "str | None")
         _args = [
             Arg("uri", uri),
             Arg("cacheKey", cache_key, None),
@@ -11647,6 +12582,10 @@ class Query(Root):
         plaintext:
             The plaintext of the secret
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Query.set_secret", "name", name, "str")
+        if not (isinstance(plaintext, str)):
+            raise _type_error("Query.set_secret", "plaintext", plaintext, "str")
         _args = [
             Arg("name", name),
             Arg("plaintext", plaintext),
@@ -11666,6 +12605,12 @@ class Query(Root):
         column:
             The column number within the line.
         """
+        if not (isinstance(filename, str)):
+            raise _type_error("Query.source_map", "filename", filename, "str")
+        if not (isinstance(line, int)):
+            raise _type_error("Query.source_map", "line", line, "int")
+        if not (isinstance(column, int)):
+            raise _type_error("Query.source_map", "column", column, "int")
         _args = [
             Arg("filename", filename),
             Arg("line", line),
@@ -11702,7 +12647,6 @@ class Query(Root):
         return await _ctx.execute(str)
 
 
-@typecheck
 class RemoteGitMirror(Type):
     """An internal persistent bare git mirror."""
 
@@ -11735,7 +12679,6 @@ class RemoteGitMirror(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class SDKConfig(Type):
     """The SDK config of the module."""
 
@@ -11810,7 +12753,6 @@ class SDKConfig(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class ScalarTypeDef(Type):
     """A definition of a custom scalar defined in a Module."""
 
@@ -11907,7 +12849,6 @@ class ScalarTypeDef(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Schema(Type):
     """A GraphQL introspection schema that can be inspected and merged."""
 
@@ -11973,6 +12914,10 @@ class Schema(Type):
             the @sourceMap directive and to derive the module's constructor
             field.
         """
+        if not (isinstance(module_types, JSON)):
+            raise _type_error("Schema.merge", "module_types", module_types, "JSON")
+        if not (isinstance(module_name, str)):
+            raise _type_error("Schema.merge", "module_name", module_name, "str")
         _args = [
             Arg("moduleTypes", module_types),
             Arg("moduleName", module_name),
@@ -11989,7 +12934,6 @@ class Schema(Type):
 
 
 
-@typecheck
 class SearchResult(Type):
 
     async def absolute_offset(self) -> int:
@@ -12111,7 +13055,6 @@ class SearchResult(Type):
         return await _ctx.execute_object_list(SearchSubmatch)
 
 
-@typecheck
 class SearchSubmatch(Type):
 
     async def end(self) -> int:
@@ -12206,7 +13149,6 @@ class SearchSubmatch(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Secret(Type):
     """A reference to a secret value, which can be handled more safely
     than the value itself."""
@@ -12303,7 +13245,6 @@ class Secret(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Service(Type):
     """A content-addressed service providing TCP connectivity."""
 
@@ -12337,6 +13278,10 @@ class Service(Type):
         QueryError
             If the API returns an error.
         """
+        if not (port is None or isinstance(port, int)):
+            raise _type_error("Service.endpoint", "port", port, "int | None")
+        if not (scheme is None or isinstance(scheme, str)):
+            raise _type_error("Service.endpoint", "scheme", scheme, "str | None")
         _args = [
             Arg("port", port, None),
             Arg("scheme", scheme, ''),
@@ -12430,6 +13375,8 @@ class Service(Type):
         QueryError
             If the API returns an error.
         """
+        if not (kill is None or isinstance(kill, bool)):
+            raise _type_error("Service.stop", "kill", kill, "bool | None")
         _args = [
             Arg("kill", kill, False),
         ]
@@ -12452,6 +13399,8 @@ class Service(Type):
         return self.sync().__await__()
 
     def terminal(self, *, cmd: list[str] | None = None) -> Self:
+        if not (cmd is None or (isinstance(cmd, list) and all(isinstance(_v0, str) for _v0 in cmd))):
+            raise _type_error("Service.terminal", "cmd", cmd, "list[str] | None")
         _args = [
             Arg("cmd", [] if cmd is None else cmd, []),
         ]
@@ -12484,6 +13433,10 @@ class Service(Type):
         QueryError
             If the API returns an error.
         """
+        if not (ports is None or (isinstance(ports, list) and all(isinstance(_v0, PortForward) for _v0 in ports))):
+            raise _type_error("Service.up", "ports", ports, "list[PortForward] | None")
+        if not (random is None or isinstance(random, bool)):
+            raise _type_error("Service.up", "random", random, "bool | None")
         _args = [
             Arg("ports", [] if ports is None else ports, []),
             Arg("random", random, False),
@@ -12500,6 +13453,8 @@ class Service(Type):
         hostname:
             The hostname to use.
         """
+        if not (isinstance(hostname, str)):
+            raise _type_error("Service.with_hostname", "hostname", hostname, "str")
         _args = [
             Arg("hostname", hostname),
         ]
@@ -12515,7 +13470,6 @@ class Service(Type):
 
 
 
-@typecheck
 class Socket(Type):
     """A Unix or TCP/IP socket that can be mounted into a container."""
 
@@ -12548,7 +13502,6 @@ class Socket(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class SourceMap(Type):
     """Source location information."""
 
@@ -12687,7 +13640,6 @@ class SourceMap(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Stat(Type):
     """A file or directory status object."""
 
@@ -12802,7 +13754,6 @@ class Stat(Type):
         return await _ctx.execute(int)
 
 
-@typecheck
 class Terminal(Type):
     """An interactive terminal that clients can connect to."""
 
@@ -12853,7 +13804,6 @@ class Terminal(Type):
         return self.sync().__await__()
 
 
-@typecheck
 class TypeDef(Type):
     """A definition of a parameter or return type in a Module."""
 
@@ -12996,6 +13946,8 @@ class TypeDef(Type):
         """Adds a function for constructing a new instance of an Object TypeDef,
         failing if the type is not an object.
         """
+        if not (isinstance(function, Function)):
+            raise _type_error("TypeDef.with_constructor", "function", function, "Function")
         _args = [
             Arg("function", function),
         ]
@@ -13018,6 +13970,12 @@ class TypeDef(Type):
         source_map:
             The source map for the enum definition.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("TypeDef.with_enum", "name", name, "str")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_enum", "description", description, "str | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("TypeDef.with_enum", "source_map", source_map, "SourceMap | None")
         _args = [
             Arg("name", name),
             Arg("description", description, ''),
@@ -13043,6 +14001,16 @@ class TypeDef(Type):
         deprecated:
             If deprecated, the reason or migration path.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("TypeDef.with_enum_member", "name", name, "str")
+        if not (value is None or isinstance(value, str)):
+            raise _type_error("TypeDef.with_enum_member", "value", value, "str | None")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_enum_member", "description", description, "str | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("TypeDef.with_enum_member", "source_map", source_map, "SourceMap | None")
+        if not (deprecated is None or isinstance(deprecated, str)):
+            raise _type_error("TypeDef.with_enum_member", "deprecated", deprecated, "str | None")
         _args = [
             Arg("name", name),
             Arg("value", value, ''),
@@ -13076,6 +14044,14 @@ class TypeDef(Type):
             DeprecationWarning,
             stacklevel=4,
         )                
+        if not (isinstance(value, str)):
+            raise _type_error("TypeDef.with_enum_value", "value", value, "str")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_enum_value", "description", description, "str | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("TypeDef.with_enum_value", "source_map", source_map, "SourceMap | None")
+        if not (deprecated is None or isinstance(deprecated, str)):
+            raise _type_error("TypeDef.with_enum_value", "deprecated", deprecated, "str | None")
         _args = [
             Arg("value", value),
             Arg("description", description, ''),
@@ -13102,6 +14078,16 @@ class TypeDef(Type):
         deprecated:
             If deprecated, the reason or migration path.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("TypeDef.with_field", "name", name, "str")
+        if not (isinstance(type_def, TypeDef)):
+            raise _type_error("TypeDef.with_field", "type_def", type_def, "TypeDef")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_field", "description", description, "str | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("TypeDef.with_field", "source_map", source_map, "SourceMap | None")
+        if not (deprecated is None or isinstance(deprecated, str)):
+            raise _type_error("TypeDef.with_field", "deprecated", deprecated, "str | None")
         _args = [
             Arg("name", name),
             Arg("typeDef", type_def),
@@ -13116,6 +14102,8 @@ class TypeDef(Type):
         """Adds a function for an Object or Interface TypeDef, failing if the
         type is not one of those kinds.
         """
+        if not (isinstance(function, Function)):
+            raise _type_error("TypeDef.with_function", "function", function, "Function")
         _args = [
             Arg("function", function),
         ]
@@ -13124,6 +14112,12 @@ class TypeDef(Type):
 
     def with_interface(self, name: str, *, description: str | None = '', source_map: SourceMap | None = None,) -> Self:
         """Returns a TypeDef of kind Interface with the provided name."""
+        if not (isinstance(name, str)):
+            raise _type_error("TypeDef.with_interface", "name", name, "str")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_interface", "description", description, "str | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("TypeDef.with_interface", "source_map", source_map, "SourceMap | None")
         _args = [
             Arg("name", name),
             Arg("description", description, ''),
@@ -13134,6 +14128,8 @@ class TypeDef(Type):
 
     def with_kind(self, kind: TypeDefKind) -> Self:
         """Sets the kind of the type."""
+        if not (isinstance(kind, TypeDefKind)):
+            raise _type_error("TypeDef.with_kind", "kind", kind, "TypeDefKind")
         _args = [
             Arg("kind", kind),
         ]
@@ -13144,6 +14140,8 @@ class TypeDef(Type):
         """Returns a TypeDef of kind List with the provided type for its
         elements.
         """
+        if not (isinstance(element_type, TypeDef)):
+            raise _type_error("TypeDef.with_list_of", "element_type", element_type, "TypeDef")
         _args = [
             Arg("elementType", element_type),
         ]
@@ -13157,6 +14155,14 @@ class TypeDef(Type):
         intent is only to refer to an object. This is how functions are able
         to return their own object, or any other circular reference.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("TypeDef.with_object", "name", name, "str")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_object", "description", description, "str | None")
+        if not (source_map is None or isinstance(source_map, SourceMap)):
+            raise _type_error("TypeDef.with_object", "source_map", source_map, "SourceMap | None")
+        if not (deprecated is None or isinstance(deprecated, str)):
+            raise _type_error("TypeDef.with_object", "deprecated", deprecated, "str | None")
         _args = [
             Arg("name", name),
             Arg("description", description, ''),
@@ -13168,6 +14174,8 @@ class TypeDef(Type):
 
     def with_optional(self, optional: bool) -> Self:
         """Sets whether this type can be set to null."""
+        if not (isinstance(optional, bool)):
+            raise _type_error("TypeDef.with_optional", "optional", optional, "bool")
         _args = [
             Arg("optional", optional),
         ]
@@ -13176,6 +14184,10 @@ class TypeDef(Type):
 
     def with_scalar(self, name: str, *, description: str | None = '',) -> Self:
         """Returns a TypeDef of kind Scalar with the provided name."""
+        if not (isinstance(name, str)):
+            raise _type_error("TypeDef.with_scalar", "name", name, "str")
+        if not (description is None or isinstance(description, str)):
+            raise _type_error("TypeDef.with_scalar", "description", description, "str | None")
         _args = [
             Arg("name", name),
             Arg("description", description, ''),
@@ -13192,7 +14204,6 @@ class TypeDef(Type):
 
 
 
-@typecheck
 class Up(Type):
 
     async def description(self) -> str:
@@ -13307,7 +14318,6 @@ class Up(Type):
 
 
 
-@typecheck
 class UpGroup(Type):
 
     async def id(self) -> str:
@@ -13359,7 +14369,6 @@ class UpGroup(Type):
 
 
 
-@typecheck
 class Volume(Type):
     """A filesystem volume that can be mounted into containers."""
 
@@ -13392,7 +14401,6 @@ class Volume(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class Workspace(Type):
     """A Dagger workspace detected from the current working directory or
     constructed from a Directory."""
@@ -13427,6 +14435,8 @@ class Workspace(Type):
         include:
             Only include agents matching the specified patterns
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Workspace.agents", "include", include, "list[str] | None")
         _args = [
             Arg("include", include, None),
         ]
@@ -13446,6 +14456,8 @@ class Workspace(Type):
         from_:
             An earlier workspace state to compare against.
         """
+        if not (from_ is None or isinstance(from_, Workspace)):
+            raise _type_error("Workspace.changes", "from_", from_, "Workspace | None")
         _args = [
             Arg("from", from_, None),
         ]
@@ -13468,6 +14480,14 @@ class Workspace(Type):
             When true, only return generate-as-checks; exclude annotated check
             functions
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Workspace.checks", "include", include, "list[str] | None")
+        if not (skip is None or (isinstance(skip, list) and all(isinstance(_v0, str) for _v0 in skip))):
+            raise _type_error("Workspace.checks", "skip", skip, "list[str] | None")
+        if not (no_generate is None or isinstance(no_generate, bool)):
+            raise _type_error("Workspace.checks", "no_generate", no_generate, "bool | None")
+        if not (only_generate is None or isinstance(only_generate, bool)):
+            raise _type_error("Workspace.checks", "only_generate", only_generate, "bool | None")
         _args = [
             Arg("include", include, None),
             Arg("skip", skip, None),
@@ -13528,6 +14548,8 @@ class Workspace(Type):
         QueryError
             If the API returns an error.
         """
+        if not (key is None or isinstance(key, str)):
+            raise _type_error("Workspace.config_read", "key", key, "str | None")
         _args = [
             Arg("key", key, ''),
         ]
@@ -13580,6 +14602,14 @@ class Workspace(Type):
         gitignore:
             Apply .gitignore filter rules inside the directory.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.directory", "path", path, "str")
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Workspace.directory", "exclude", exclude, "list[str] | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Workspace.directory", "include", include, "list[str] | None")
+        if not (gitignore is None or isinstance(gitignore, bool)):
+            raise _type_error("Workspace.directory", "gitignore", gitignore, "bool | None")
         _args = [
             Arg("path", path),
             Arg("exclude", [] if exclude is None else exclude, []),
@@ -13643,6 +14673,8 @@ class Workspace(Type):
             resolve from the workspace cwd; absolute paths (e.g., "/go.mod")
             resolve from the workspace root.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.file", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -13686,6 +14718,12 @@ class Workspace(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(markers, list) and all(isinstance(_v0, str) for _v0 in markers)):
+            raise _type_error("Workspace.find_roots", "markers", markers, "list[str]")
+        if not (start is None or isinstance(start, str)):
+            raise _type_error("Workspace.find_roots", "start", start, "str | None")
+        if not (exclude is None or (isinstance(exclude, list) and all(isinstance(_v0, str) for _v0 in exclude))):
+            raise _type_error("Workspace.find_roots", "exclude", exclude, "list[str] | None")
         _args = [
             Arg("markers", markers),
             Arg("start", start, '.'),
@@ -13726,6 +14764,10 @@ class Workspace(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.find_up", "name", name, "str")
+        if not (from_ is None or isinstance(from_, str)):
+            raise _type_error("Workspace.find_up", "from_", from_, "str | None")
         _args = [
             Arg("name", name),
             Arg("from", from_, '.'),
@@ -13741,6 +14783,8 @@ class Workspace(Type):
         include:
             Only include generators matching the specified patterns
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Workspace.generators", "include", include, "list[str] | None")
         _args = [
             Arg("include", include, None),
         ]
@@ -13779,6 +14823,8 @@ class Workspace(Type):
         QueryError
             If the API returns an error.
         """
+        if not (isinstance(pattern, str)):
+            raise _type_error("Workspace.glob", "pattern", pattern, "str")
         _args = [
             Arg("pattern", pattern),
         ]
@@ -13833,6 +14879,8 @@ class Workspace(Type):
         name:
             Module name to inspect.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.module", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -13853,6 +14901,8 @@ class Workspace(Type):
             Location of the module source to load, relative to the workspace
             cwd or absolute from the workspace root.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.module_source", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -13885,6 +14935,8 @@ class Workspace(Type):
         name:
             SDK name to look up.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.sdk", "name", name, "str")
         _args = [
             Arg("name", name),
         ]
@@ -13932,6 +14984,28 @@ class Workspace(Type):
         limit:
             Limit the number of results to return
         """
+        if not (isinstance(pattern, str)):
+            raise _type_error("Workspace.search", "pattern", pattern, "str")
+        if not (paths is None or (isinstance(paths, list) and all(isinstance(_v0, str) for _v0 in paths))):
+            raise _type_error("Workspace.search", "paths", paths, "list[str] | None")
+        if not (globs is None or (isinstance(globs, list) and all(isinstance(_v0, str) for _v0 in globs))):
+            raise _type_error("Workspace.search", "globs", globs, "list[str] | None")
+        if not (literal is None or isinstance(literal, bool)):
+            raise _type_error("Workspace.search", "literal", literal, "bool | None")
+        if not (multiline is None or isinstance(multiline, bool)):
+            raise _type_error("Workspace.search", "multiline", multiline, "bool | None")
+        if not (dotall is None or isinstance(dotall, bool)):
+            raise _type_error("Workspace.search", "dotall", dotall, "bool | None")
+        if not (insensitive is None or isinstance(insensitive, bool)):
+            raise _type_error("Workspace.search", "insensitive", insensitive, "bool | None")
+        if not (skip_ignored is None or isinstance(skip_ignored, bool)):
+            raise _type_error("Workspace.search", "skip_ignored", skip_ignored, "bool | None")
+        if not (skip_hidden is None or isinstance(skip_hidden, bool)):
+            raise _type_error("Workspace.search", "skip_hidden", skip_hidden, "bool | None")
+        if not (files_only is None or isinstance(files_only, bool)):
+            raise _type_error("Workspace.search", "files_only", files_only, "bool | None")
+        if not (limit is None or isinstance(limit, int)):
+            raise _type_error("Workspace.search", "limit", limit, "int | None")
         _args = [
             Arg("pattern", pattern),
             Arg("paths", [] if paths is None else paths, []),
@@ -13956,6 +15030,8 @@ class Workspace(Type):
         include:
             Only include services matching the specified patterns
         """
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Workspace.services", "include", include, "list[str] | None")
         _args = [
             Arg("include", include, None),
         ]
@@ -13971,6 +15047,8 @@ class Workspace(Type):
         changes:
             Changes to apply.
         """
+        if not (isinstance(changes, Changeset)):
+            raise _type_error("Workspace.with_changes", "changes", changes, "Changeset")
         _args = [
             Arg("changes", changes),
         ]
@@ -13987,6 +15065,10 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.with_config_env", "name", name, "str")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.with_config_env", "here", here, "bool | None")
         _args = [
             Arg("name", name),
             Arg("here", here, False),
@@ -14013,6 +15095,14 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(key, str)):
+            raise _type_error("Workspace.with_config_value", "key", key, "str")
+        if not (isinstance(value, str)):
+            raise _type_error("Workspace.with_config_value", "value", value, "str")
+        if not (values is None or (isinstance(values, list) and all(isinstance(_v0, str) for _v0 in values))):
+            raise _type_error("Workspace.with_config_value", "values", values, "list[str] | None")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.with_config_value", "here", here, "bool | None")
         _args = [
             Arg("key", key),
             Arg("value", value),
@@ -14020,6 +15110,32 @@ class Workspace(Type):
             Arg("here", here, False),
         ]
         _ctx = self._select("withConfigValue", _args)
+        return Workspace(_ctx)
+
+    def with_directory(self, path: str, source: Directory) -> Self:
+        """Return this workspace with a directory merged into the given path,
+        without mutating the source.
+
+        Anything already at the path stays, and files the source carries win,
+        as with Directory.withDirectory. Use withNewDirectory to replace the
+        path instead.
+
+        Parameters
+        ----------
+        path:
+            Path to merge into. Relative paths resolve from the workspace cwd.
+        source:
+            Directory to merge there.
+        """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_directory", "path", path, "str")
+        if not (isinstance(source, Directory)):
+            raise _type_error("Workspace.with_directory", "source", source, "Directory")
+        _args = [
+            Arg("path", path),
+            Arg("source", source),
+        ]
+        _ctx = self._select("withDirectory", _args)
         return Workspace(_ctx)
 
     def with_init_client(self, path: str, sdk: str, module: str, *, args: JSON | None = None, here: bool | None = False, no_generate: bool | None = False,) -> Self:
@@ -14045,6 +15161,18 @@ class Workspace(Type):
         no_generate:
             Skip running the SDK's generators for the new client.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_init_client", "path", path, "str")
+        if not (isinstance(sdk, str)):
+            raise _type_error("Workspace.with_init_client", "sdk", sdk, "str")
+        if not (isinstance(module, str)):
+            raise _type_error("Workspace.with_init_client", "module", module, "str")
+        if not (args is None or isinstance(args, JSON)):
+            raise _type_error("Workspace.with_init_client", "args", args, "JSON | None")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.with_init_client", "here", here, "bool | None")
+        if not (no_generate is None or isinstance(no_generate, bool)):
+            raise _type_error("Workspace.with_init_client", "no_generate", no_generate, "bool | None")
         _args = [
             Arg("path", path),
             Arg("sdk", sdk),
@@ -14083,6 +15211,22 @@ class Workspace(Type):
         no_generate:
             Skip running the SDK's generators for the new module.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.with_init_module", "name", name, "str")
+        if not (isinstance(sdk, str)):
+            raise _type_error("Workspace.with_init_module", "sdk", sdk, "str")
+        if not (path is None or isinstance(path, str)):
+            raise _type_error("Workspace.with_init_module", "path", path, "str | None")
+        if not (source is None or isinstance(source, str)):
+            raise _type_error("Workspace.with_init_module", "source", source, "str | None")
+        if not (include is None or (isinstance(include, list) and all(isinstance(_v0, str) for _v0 in include))):
+            raise _type_error("Workspace.with_init_module", "include", include, "list[str] | None")
+        if not (args is None or isinstance(args, JSON)):
+            raise _type_error("Workspace.with_init_module", "args", args, "JSON | None")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.with_init_module", "here", here, "bool | None")
+        if not (no_generate is None or isinstance(no_generate, bool)):
+            raise _type_error("Workspace.with_init_module", "no_generate", no_generate, "bool | None")
         _args = [
             Arg("name", name),
             Arg("sdk", sdk),
@@ -14111,6 +15255,12 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(ref, str)):
+            raise _type_error("Workspace.with_module", "ref", ref, "str")
+        if not (name is None or isinstance(name, str)):
+            raise _type_error("Workspace.with_module", "name", name, "str | None")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.with_module", "here", here, "bool | None")
         _args = [
             Arg("ref", ref),
             Arg("name", name, ''),
@@ -14136,6 +15286,10 @@ class Workspace(Type):
         source:
             Directory to mount.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_mounted_directory", "path", path, "str")
+        if not (isinstance(source, Directory)):
+            raise _type_error("Workspace.with_mounted_directory", "source", source, "Directory")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -14160,6 +15314,10 @@ class Workspace(Type):
         source:
             File to mount.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_mounted_file", "path", path, "str")
+        if not (isinstance(source, File)):
+            raise _type_error("Workspace.with_mounted_file", "source", source, "File")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -14168,17 +15326,24 @@ class Workspace(Type):
         return Workspace(_ctx)
 
     def with_new_directory(self, path: str, source: Directory) -> Self:
-        """Return this workspace with a directory added, without mutating the
-        source.
+        """Return this workspace with the given path replaced by a directory,
+        without mutating the source.
+
+        The source becomes the entire contents of the path: anything already
+        there that the source does not carry is removed. Use withDirectory to
+        keep it instead.
 
         Parameters
         ----------
         path:
-            Path of the added directory. Relative paths resolve from the
-            workspace cwd.
+            Path to replace. Relative paths resolve from the workspace cwd.
         source:
-            Directory to add.
+            Directory to write there.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_new_directory", "path", path, "str")
+        if not (isinstance(source, Directory)):
+            raise _type_error("Workspace.with_new_directory", "source", source, "Directory")
         _args = [
             Arg("path", path),
             Arg("source", source),
@@ -14200,6 +15365,12 @@ class Workspace(Type):
         permissions:
             Permissions of the new file.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_new_file", "path", path, "str")
+        if not (isinstance(contents, str)):
+            raise _type_error("Workspace.with_new_file", "contents", contents, "str")
+        if not (permissions is None or isinstance(permissions, int)):
+            raise _type_error("Workspace.with_new_file", "permissions", permissions, "int | None")
         _args = [
             Arg("path", path),
             Arg("contents", contents),
@@ -14223,6 +15394,14 @@ class Workspace(Type):
             User-facing SDK name to persist under `[modules.<name>.as-sdk]
             name = ...`.
         """
+        if not (isinstance(ref, str)):
+            raise _type_error("Workspace.with_sdk", "ref", ref, "str")
+        if not (name is None or isinstance(name, str)):
+            raise _type_error("Workspace.with_sdk", "name", name, "str | None")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.with_sdk", "here", here, "bool | None")
+        if not (as_sdk_name is None or isinstance(as_sdk_name, str)):
+            raise _type_error("Workspace.with_sdk", "as_sdk_name", as_sdk_name, "str | None")
         _args = [
             Arg("ref", ref),
             Arg("name", name, ''),
@@ -14247,6 +15426,8 @@ class Workspace(Type):
         path:
             Workspace-relative path to use as the working directory.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.with_workdir", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -14263,6 +15444,10 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.without_config_env", "name", name, "str")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.without_config_env", "here", here, "bool | None")
         _args = [
             Arg("name", name),
             Arg("here", here, False),
@@ -14285,6 +15470,10 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(key, str)):
+            raise _type_error("Workspace.without_config_value", "key", key, "str")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.without_config_value", "here", here, "bool | None")
         _args = [
             Arg("key", key),
             Arg("here", here, False),
@@ -14302,6 +15491,8 @@ class Workspace(Type):
             Path of the directory to remove. Relative paths resolve from the
             workspace cwd.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.without_directory", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -14318,6 +15509,8 @@ class Workspace(Type):
             Path of the file to remove. Relative paths resolve from the
             workspace cwd.
         """
+        if not (isinstance(path, str)):
+            raise _type_error("Workspace.without_file", "path", path, "str")
         _args = [
             Arg("path", path),
         ]
@@ -14337,6 +15530,10 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.without_module", "name", name, "str")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.without_module", "here", here, "bool | None")
         _args = [
             Arg("name", name),
             Arg("here", here, False),
@@ -14354,6 +15551,10 @@ class Workspace(Type):
         here:
             Write to the workspace config directory at the workspace cwd.
         """
+        if not (isinstance(name, str)):
+            raise _type_error("Workspace.without_sdk", "name", name, "str")
+        if not (here is None or isinstance(here, bool)):
+            raise _type_error("Workspace.without_sdk", "here", here, "bool | None")
         _args = [
             Arg("name", name),
             Arg("here", here, False),
@@ -14370,7 +15571,6 @@ class Workspace(Type):
 
 
 
-@typecheck
 class WorkspaceGit(Type):
     """Local git state for a workspace."""
 
@@ -14417,7 +15617,6 @@ class WorkspaceGit(Type):
         return Changeset(_ctx)
 
 
-@typecheck
 class WorkspaceMigration(Type):
     """A planned workspace migration."""
 
@@ -14462,7 +15661,6 @@ class WorkspaceMigration(Type):
         return await _ctx.execute_object_list(WorkspaceMigrationStep)
 
 
-@typecheck
 class WorkspaceMigrationStep(Type):
     """A single logical part of a workspace migration."""
 
@@ -14564,7 +15762,6 @@ class WorkspaceMigrationStep(Type):
         return await _ctx.execute(list[str])
 
 
-@typecheck
 class WorkspaceModule(Type):
     """A module entry in the workspace configuration."""
 
@@ -14665,7 +15862,6 @@ class WorkspaceModule(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class WorkspaceModuleSetting(Type):
     """A constructor-backed module setting."""
 
@@ -14781,7 +15977,6 @@ class WorkspaceModuleSetting(Type):
         return await _ctx.execute(str)
 
 
-@typecheck
 class WorkspaceSDK(Type):
     """An installed SDK: a module marked for scaffolding other modules and
     clients."""

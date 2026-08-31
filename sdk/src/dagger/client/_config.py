@@ -1,19 +1,26 @@
 import dataclasses
-from collections.abc import Callable
-from typing import Any, TypeVar
 
 import httpx
-
-_CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
-_Decorator = Callable[[_CallableT], _CallableT]
 
 
 @dataclasses.dataclass(slots=True, kw_only=True)
 class Retry:
-    """Retry parameters for connecting to the Dagger API server."""
+    """Retry policy for talking to the Dagger API server.
 
-    connect: bool | _Decorator = True
-    execute: bool | _Decorator = True
+    Parameters
+    ----------
+    connect:
+        Let the HTTP transport retry failures to connect to the server,
+        up to ``MAX_ATTEMPTS`` times.
+    execute:
+        Re-send requests that fail with a transport error, up to
+        ``MAX_ATTEMPTS`` times, with an exponential backoff capped at
+        ``MAX_BACKOFF_SECONDS``. Every API call is cached on its inputs,
+        so re-sending is safe.
+    """
+
+    connect: bool = True
+    execute: bool = True
 
 
 class Timeout(httpx.Timeout):
