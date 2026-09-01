@@ -323,12 +323,12 @@ type E2e {
   }
 
   """
-  New modules still target the engine's builtin runtime: they move to this
-  repository's own only once `runtime/` is on the default branch, where the
-  recorded ref resolves.
+  New modules embed this repository's runtime: generate writes runtime.dang
+  next to dagger-module.toml and the engine evaluates it in-process, so no
+  runtime module is resolved at load.
   """
   pub targetRuntimeCheck: Void @check {
-    assert(pythonSdk.targetRuntime == "python", "targetRuntime should be the python builtin runtime")
+    assert(pythonSdk.targetRuntime == "embed:runtime.dang", "targetRuntime should embed the generated runtime.dang")
 
     null
   }

@@ -8,9 +8,10 @@ type PythonSdk {
   pub skipGenerateFilename: String! = ".dagger-python-sdk-skip-generate"
 
   """
-  Runtime source to write into modules created by this SDK.
+  Runtime source to write into modules created by this SDK: the engine reads
+  the named file from the module root and evaluates it in-process.
   """
-  pub targetRuntime: String! { "python" }
+  pub targetRuntime: String! { "embed:runtime.dang" }
 
   """
   Return every managed Python SDK module in the client's cwd scope: every module
