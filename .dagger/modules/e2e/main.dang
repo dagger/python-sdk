@@ -291,6 +291,15 @@ type E2e {
       "generate",
     )
 
+    let runtimeDangPath = tomlGenerateModulePath + "/runtime.dang"
+    assertAdded(changes, runtimeDangPath)
+    let runtimeDang = changes.layer.file(runtimeDangPath).contents
+    assertContains(runtimeDang, generatedMarkerContents, "the embedded runtime is missing the generated-file marker")
+    assertContains(runtimeDang, "pub moduleRuntime(", "the embedded runtime does not declare moduleRuntime")
+    assertContains(runtimeDang, "@sha256:", "the embedded runtime lost its pinned images")
+    assertContains(runtimeDang, "dagger.mod.cli", "the embedded runtime lost its inlined entrypoint script")
+    assertNotContains(runtimeDang, "currentModule", "the embedded runtime must not read a module source")
+
     null
   }
 
@@ -323,12 +332,12 @@ type E2e {
   }
 
   """
-  New modules still target the engine's builtin runtime: they move to this
-  repository's own only once `runtime/` is on the default branch, where the
-  recorded ref resolves.
+  New modules embed this repository's runtime: generate writes runtime.dang
+  next to dagger-module.toml and the engine evaluates it in-process, so no
+  runtime module is resolved at load.
   """
   pub targetRuntimeCheck: Void @check {
-    assert(pythonSdk.targetRuntime == "python", "targetRuntime should be the python builtin runtime")
+    assert(pythonSdk.targetRuntime == "embed:runtime.dang", "targetRuntime should embed the generated runtime.dang")
 
     null
   }
@@ -362,6 +371,36 @@ type E2e {
       .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
     run.assertFailure
     assertContains(run.stderr, "run `dagger generate` and commit", "the runtime did not report the missing generated file")
+
+    null
+  }
+
+  """
+  A module whose runtime source is embed:runtime.dang builds and runs: the
+  runtime fixture is rebased onto the embed form with a freshly generated
+  runtime.dang, then driven through a released CLI. Known red until a released
+  engine understands the embed runtime source.
+  """
+  pub embedRuntimeCallCheck(ws: Workspace!): Void @check {
+    let embedded = pythonSdk
+      .mod(ws, path: tomlGenerateModulePath)
+      .generate
+      .layer
+      .file(tomlGenerateModulePath + "/runtime.dang")
+
+    let tree = ws
+      .directory("/")
+      .withNewFile(
+        runtimeModulePath + "/dagger-module.toml",
+        "name = \"runtime-app\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"embed:runtime.dang\"\n",
+      )
+      .withFile(runtimeModulePath + "/runtime.dang", embedded)
+
+    let run = sdkSdk
+      .target(tree, ".")
+      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
+    run.assertSuccess
+    assertContains(run.stdout, runtimeGreeting, "the module did not run on the embedded runtime")
 
     null
   }

@@ -16,9 +16,24 @@ type PythonSdkRuntime {
   let uvCacheVolume: String! = "modpython-uv"
   let pipCacheVolume: String! = "modpython-pip"
 
+  #<externals>
+  # Everything between these markers reads this runtime's own module source;
+  # Mod.generate replaces the whole block with literals when it embeds this
+  # file into a generated module, so the copy is fully self-contained.
   # Committed single-FROM Dockerfiles so Dependabot keeps the digests fresh.
   let defaultBaseImage: String! { imageFrom("images/base/Dockerfile") }
   let defaultUvImage: String! { imageFrom("images/uv/Dockerfile") }
+  let runtimeScriptContents: String! { currentModule.source.file("runtime.py").contents }
+
+  let imageFrom(path: String!): String! {
+    let line = currentModule.source.file(path).contents.match("(?m)^FROM\\s+(\\S+)")
+    if (line == null) {
+      raise "no FROM line in " + path
+    } else {
+      line.captures[0] ?? ""
+    }
+  }
+  #</externals>
 
   """
   Container for executing the Python module runtime. introspectionJson is
@@ -46,7 +61,7 @@ type PythonSdkRuntime {
       let packageName = packageNameFor(modName, cfg)
 
       let built = base(baseImage, uvImage, cfg)
-        .withFile(runtimeExecutablePath, currentModule.source.file("runtime.py"), permissions: 493)
+        .withNewFile(runtimeExecutablePath, runtimeScriptContents, permissions: 493)
         .withEntrypoint([runtimeExecutablePath])
         .withWorkdir(join(contextDirPath, subPath))
         .withMountedDirectory(contextDirPath, withoutVenv(contextDir, source, subPath))
@@ -258,15 +273,6 @@ type PythonSdkRuntime {
 
   let join(base: String!, rel: String!): String! {
     if (rel == "" or rel == ".") { base } else { base + "/" + rel }
-  }
-
-  let imageFrom(path: String!): String! {
-    let line = currentModule.source.file(path).contents.match("(?m)^FROM\\s+(\\S+)")
-    if (line == null) {
-      raise "no FROM line in " + path
-    } else {
-      line.captures[0] ?? ""
-    }
   }
 
   let imageTag(ref: String!): String! {
