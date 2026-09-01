@@ -5,7 +5,6 @@
     "source": "dang"
   },
   "include": [
-    "!runtime",
     "!.dagger",
     "!future",
     "!docs"
