@@ -8,21 +8,195 @@ type PythonSdk {
   pub skipGenerateFilename: String! = ".dagger-python-sdk-skip-generate"
 
   """
-  Runtime source to write into modules created by this SDK.
+  Starter under templates/<template> for a module generated without source.
   """
-  pub targetRuntime: String! { "python" }
+  pub template: String! = "default"
 
   """
-  Return every managed Python SDK module in the client's cwd scope: every module
-  at or below the cwd, plus the nearest enclosing module when the cwd itself is
-  not managed. The engine selects this directly from the workspace's registered
-  SDK modules; no filesystem discovery is required.
+  Python version written to a new module's pyproject.toml; empty keeps the template's.
   """
-  pub modules(ws: Workspace!): [Mod!]! {
-    currentModule
-      .asSDK(workspace: ws)
-      .modules.{{path}}
-      .map { module => Mod(rootPath: module.path, ws: ws, skipGenerateFilename: skipGenerateFilename) }
+  pub pythonVersion: String! = ""
+
+  """
+  Whether a new module builds with uv instead of pip.
+  """
+  pub useUv: Boolean! = true
+
+  """
+  Base container image written to a new module's pyproject.toml; empty keeps the SDK default.
+  """
+  pub baseImage: String! = ""
+
+  """
+  Detect the Python SDK scope containing the workspace cwd: the directory of
+  the nearest pyproject.toml, relative to the workspace root. A module's
+  vendored client library carries its own pyproject.toml, so the Python module
+  owning it answers instead; a directory with a module config of its own is a
+  module, never a vendored library. Empty when there is none.
+  """
+  pub detectScope(ws: Workspace!): String! {
+    let found = ws.findUp("pyproject.toml")
+    if (found == null) {
+      ""
+    } else {
+      let scope = normalizePath(found.trimSuffix("pyproject.toml"))
+      let vendorParent = if (scope == vendorDirName) {
+        "."
+      } else if (scope.trimSuffix("/" + vendorDirName) != scope) {
+        scope.trimSuffix("/" + vendorDirName)
+      } else {
+        ""
+      }
+
+      if (vendorParent == "" or hasModuleConfig(ws, scope)) {
+        scope
+      } else if (hasModuleConfig(ws, vendorParent) and scopeHasFile(ws, vendorParent, "pyproject.toml")) {
+        vendorParent
+      } else {
+        scope
+      }
+    }
+  }
+
+  """
+  Directory a module's generated client library is vendored into.
+  """
+  let vendorDirName: String! = "sdk"
+
+  """
+  Whether a module config, dagger-module.toml or the pre-1.0 dagger.json,
+  exists at a workspace-root-relative scope.
+  """
+  let hasModuleConfig(ws: Workspace!, scope: String!): Boolean! {
+    scopeHasFile(ws, scope, "dagger-module.toml") or scopeHasFile(ws, scope, "dagger.json")
+  }
+
+  let scopeHasFile(ws: Workspace!, scope: String!, filename: String!): Boolean! {
+    let path = if (scope == ".") { filename } else { scope + "/" + filename }
+    ws.directory("/", include: [path]).exists(path)
+  }
+
+  """
+  Generate one SDK scope: the module at the workspace cwd, when the scope has
+  one. A module without a config file is initialized from the configured
+  template and a dagger-module.toml from the engine's manifest builder first,
+  then generated; an existing module, dagger-module.toml or pre-1.0
+  dagger.json, is generated in place. The scope's module clients become the
+  module's dependencies, so the generated bindings include their types.
+  Standalone clients, in a scope without a module, are not generated yet.
+  """
+  pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
+    if (isModule == false) {
+      if (clients.length > 0) {
+        raise "python-sdk does not generate standalone module clients yet"
+      } else {
+        ws
+      }
+    } else {
+      let scope = normalizePath(ws.cwd)
+      let hadConfig = hasModuleConfig(ws, scope)
+      # The rest works with the cwd at the workspace root: the engine resolves
+      # a module's local dependencies to workspace-root-relative paths and then
+      # reads them relative to Workspace.cwd (dagger/dagger ResolveDepToSource),
+      # so at the scope's cwd a dependency is looked up under the module itself.
+      let rooted = ws.withWorkdir(".")
+      let initialized = if (hadConfig) {
+        rooted
+      } else {
+        rooted
+          .withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
+          .withFile("/" + scope + "/dagger-module.toml", moduleManifest.withName(name: name).withLegacyPythonRuntime.tomlFile)
+      }
+      let configured = withClientDependencies(initialized, scope, clients)
+      let module = mod(configured, path: scope, findUp: false)
+
+      # A new module always gets its generated files; the skip marker only
+      # holds an existing module still.
+      let generated = if (hadConfig and module.skipGenerate) {
+        configured
+      } else {
+        module.generated
+      }
+      generated.withWorkdir(scope)
+    }
+  }
+
+  """
+  Replace the module's dependencies with the complete client set, in the
+  manifest file the module has: dagger-module.toml, or the pre-1.0
+  dagger.json of a module that has nothing else. A module with neither
+  clients nor dependencies is left untouched, so a hand-written manifest is
+  not reformatted for nothing.
+  """
+  let withClientDependencies(ws: Workspace!, scope: String!, clients: [ModuleSource!]!): Workspace! {
+    let root = "/" + scope
+    let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
+    let current = ws.moduleSource(root).dependencies.{{moduleName}}.map { dependency => dependency.moduleName }
+
+    if (clients.length == 0 and current.length == 0) {
+      ws
+    } else {
+      let loaded = if (hasToml) {
+        moduleManifest(loadTOML: ws.file(root + "/dagger-module.toml"))
+      } else {
+        moduleManifest(loadJSON: ws.file(root + "/dagger.json"))
+      }
+      let cleared = current.reduce(loaded) { manifest, name => manifest.withoutDependency(name: name) }
+      let configured = clients.{{moduleName, kind, sourceRootSubpath, asString, pin}}
+        .reduce(cleared) { manifest, client =>
+          manifest.withDependency(
+            source: dependencySource(scope, client.kind, client.sourceRootSubpath, client.asString),
+            name: client.moduleName,
+            pin: client.pin,
+          )
+        }
+
+      if (hasToml) {
+        ws.withFile(root + "/dagger-module.toml", configured.tomlFile)
+      } else {
+        ws.withFile(root + "/dagger.json", configured.legacyJSONFile)
+      }
+    }
+  }
+
+  """
+  The dependency source a client is recorded as: a git ref as is, a local
+  module by its path relative to the module.
+  """
+  let dependencySource(scope: String!, kind: ModuleSourceKind!, sourceRootSubpath: String!, ref: String!): String! {
+    if (kind == ModuleSourceKind.GIT_SOURCE) {
+      ref
+    } else {
+      relativePath(pathParts(scope), pathParts(normalizePath(sourceRootSubpath)))
+    }
+  }
+
+  let pathParts(path: String!): [String!]! {
+    if (path == ".") { [] } else { path.split("/") }
+  }
+
+  let relativePath(from: [String!]!, to: [String!]!): String! {
+    if (!from.isEmpty and !to.isEmpty and from.takeFirst.join("") == to.takeFirst.join("")) {
+      relativePath(from.dropFirst, to.dropFirst)
+    } else {
+      let relative = (from.map { segment => ".." } + to).join("/")
+      if (relative == "") { "." } else { relative }
+    }
+  }
+
+  """
+  Workspace-root-relative roots of the modules registered to this SDK.
+  """
+  let managedRoots(ws: Workspace!): [String!]! {
+    ws.sdk(name: currentModule.name)
+      .modules.{{source}}
+      .map { module => normalizePath(module.source) }
+  }
+
+  let nearestRoot(roots: [String!]!): String {
+    roots.reduce(null) { best, root =>
+      if (pathDepth(root) > pathDepth(best)) { root } else { best }
+    }
   }
 
   let normalizePath(path: String!): String! {
@@ -39,10 +213,10 @@ type PythonSdk {
   }
 
   """
-  Return init templates tracked by this module.
+  Return the starter templates tracked by this module.
 
-  Templates live under templates/<name> and are materialized into the new
-  module before generation. Passing an empty template to init uses the module
+  Templates live under templates/<name> and are materialized into a new module
+  before generation. The `template` setting selects one; empty selects the
   default.
   """
   pub templates: [Template!]! {
@@ -88,21 +262,11 @@ type PythonSdk {
   """
   Root of the nearest managed Python SDK module containing `path`.
 
-  Re-anchoring the workspace at `path` makes the engine scope its SDK module
-  list to that directory, which is the same selection `modules` reads. Nothing
-  here parses module config: registration is what makes a module ours.
+  Nothing here parses module config: registration is what makes a module ours.
   """
   let managedModuleAtOrAbove(ws: Workspace!, path: String!): String! {
-    let scopedWs = ws.withWorkdir(path)
-    let requested = normalizePath(scopedWs.cwd)
-    let found = currentModule
-      .asSDK(workspace: scopedWs)
-      .modules.{{path}}
-      .map { module => normalizePath(module.path) }
-      .filter { root => pathContains(root, requested) }
-      .reduce(null) { best, root =>
-        if (pathDepth(root) > pathDepth(best)) { root } else { best }
-      }
+    let requested = normalizePath(ws.withWorkdir(path).cwd)
+    let found = nearestRoot(managedRoots(ws).filter { root => pathContains(root, requested) })
 
     if (found == null) {
       raise "no managed Python SDK module found containing path: " + path
@@ -112,41 +276,19 @@ type PythonSdk {
   }
 
   """
-  Initialize Python-owned files for a new Dagger module.
-
-  Returns a Changeset with only the SDK-owned template files layered onto the
-  new module's `path`. Engine-owned files (dagger-module.toml, workspace config
-  updates) are produced by the engine and merged with this changeset.
-
-  Pass `template` to pick a starter under templates/<template>. It defaults to
-  `default` (a small working module). Use `empty` for a bare object class. An
-  explicitly empty template also selects `default` for compatibility.
-
-  Pass `pythonVersion`, `useUv`, or `baseImage` to customize the generated
-  pyproject.toml. Defaults leave the template untouched: the template's Python
-  version is used, uv is enabled, and no base image override is written.
+  The files of a new module: the named template rendered for the module name,
+  with the pyproject.toml settings applied. An empty template name selects the
+  default.
   """
-  pub initModule(ws: Workspace!, name: String!, path: String!, template: String! = "default", pythonVersion: String! = "", useUv: Boolean! = true, baseImage: String! = ""): Changeset! {
-    let rawPath = path.trimPrefix("./").trimPrefix("/")
-
-    let modPath = if (rawPath == "" or rawPath == ".") {
-      "."
-    } else if (rawPath == ".." or rawPath.trimPrefix("../") != rawPath) {
-      raise "path escapes workspace: " + rawPath
-    } else {
-      rawPath.trimSuffix("/")
-    }
-
+  let moduleTemplate(name: String!, template: String!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
     let selectedTemplate = if (template == "") { "default" } else { template }
 
-    if (currentModule.source.exists("templates/" + selectedTemplate) == false) {
+    let known = currentModule.source.directory("templates").entries.map { entry => entry.trimSuffix("/") }
+
+    if (known.filter { entry => entry == selectedTemplate }.length == 0) {
       raise "unknown init template: " + template
     } else {
-      let templateSource = configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
-
-      # Init may target a directory a user already has files in, and must not
-      # remove them.
-      ws.withDirectory("/" + modPath, templateSource).changes(ws)
+      configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
     }
   }
 
@@ -193,18 +335,5 @@ type PythonSdk {
       let withImg = if (baseImage == "") { withUv } else { withUv.withExec(["pyproject", "set-base-image", pyproj, baseImage]) }
       withImg.directory("/rendered")
     }
-  }
-
-  """
-  Generate every managed Python SDK module visible from the client's cwd.
-
-  Modules with the generate skip marker are skipped.
-  """
-  pub generateAll(ws: Workspace!): Changeset! @generate {
-    changeset.withChangesets(
-      modules(ws)
-        .filter { mod => mod.skipGenerate == false }
-        .map { mod => mod.generate },
-    )
   }
 }
