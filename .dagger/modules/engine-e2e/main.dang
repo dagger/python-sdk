@@ -1,0 +1,50 @@
+"""
+Checks the Python SDK against an engine built from dagger/dagger#13992
+(branch sdk-ux-module-max), at the commit engine-dev is pinned to in
+dagger-module.toml.
+"""
+type EngineE2e {
+  let engineCommit: String! = "055def6f7794b9d0dfdcc4252f0695ea92257536"
+  let modulePath: String! = ".dagger/modules/sdk-smoke"
+
+  let assert(condition: Boolean!, message: String!): Void {
+    if (condition == false) {
+      raise message
+    }
+    null
+  }
+
+  """
+  The module-max engine should list this checkout as the python SDK,
+  initialize a Python module from it, and run the module.
+  """
+  pub devSdkCheck(ws: Workspace!): Void @check {
+    let sdkSource = ws.directory("/", exclude: [".git", ".remember", "**/.venv", "**/__pycache__", ".dagger/modules/e2e/out"])
+    let engineSource = git("https://github.com/dagger/dagger")
+      .ref(engineCommit)
+      .asWorkspace
+    let client = engineDev(ws: engineSource)
+      .playground
+      .withMountedDirectory("./python-sdk", sdkSource)
+      .withWorkdir("./python-sdk")
+      .withExec(["git", "init", "--quiet"])
+
+    let listed = client.withExec(["dagger", "sdk", "list"])
+    assert(listed.stdout.contains("python"), "the development Python SDK was not listed")
+
+    let initialized = listed
+      .withExec(["dagger", "--auto-apply", "module", "init", "python", "--name", "sdk-smoke", "--path", modulePath])
+      .withExec(["test", "-f", modulePath + "/dagger-module.toml"])
+      .withExec(["test", "!", "-e", modulePath + "/dagger.json"])
+      .withExec(["test", "-f", modulePath + "/pyproject.toml"])
+      .withExec(["test", "-f", modulePath + "/src/sdk_smoke/__init__.py"])
+      .withExec(["test", "-f", modulePath + "/sdk/src/dagger/client/gen.py"])
+
+    let release = initialized
+      .withExec(["dagger", "-m", modulePath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
+      .stdout
+    assert(release.trimSpace != "", "the generated module did not run")
+
+    null
+  }
+}
