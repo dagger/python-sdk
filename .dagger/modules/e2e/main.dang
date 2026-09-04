@@ -10,12 +10,12 @@ type E2e {
   let nonPythonModulePath: String! = fixtureRoot + "/lookup/not-python"
   let skipModulePath: String! = fixtureRoot + "/skip/app"
   let generateModulePath: String! = fixtureRoot + "/generate/app"
-  let depsModulePath: String! = fixtureRoot + "/deps/app"
   let configModulePath: String! = fixtureRoot + "/config/app"
   let configuredModulePath: String! = fixtureRoot + "/config/configured"
   let tomlModulePath: String! = fixtureRoot + "/toml/app"
   let runtimeModulePath: String! = fixtureRoot + "/runtime/app"
   let tomlGenerateModulePath: String! = fixtureRoot + "/toml-generate/app"
+  let clientDepPath: String! = fixtureRoot + "/clients/dep"
   let runtimeGreeting: String! = "served by the python-sdk runtime"
   let mixedDiscoveryModulePath: String! = fixtureRoot + "/mixed-discovery/ancestor/work/app"
   let mixedDiscoveryNestedPath: String! = mixedDiscoveryModulePath + "/nested/deeper"
@@ -70,10 +70,6 @@ type E2e {
     null
   }
 
-  let initSource(changes: Changeset!, path: String!, package: String!): String! {
-    changes.layer.file(path + "/src/" + package + "/__init__.py").contents
-  }
-
   """
   The helper should expose the generate skip marker used by callers.
   """
@@ -109,126 +105,151 @@ type E2e {
   }
 
   """
-  Lookup must choose the nearest module config even when its filename differs
-  from an ancestor config, and modern TOML modules must be supported.
+  Lookup must choose the nearest registered module even when an ancestor holds
+  a module config of the other format.
   """
   pub mixedConfigLookupCheck(ws: Workspace!): Void @check {
-    let mod = pythonSdk.mod(ws, path: tomlModulePath + "/nested")
-    assert(mod.rootPath == tomlModulePath, "lookup chose an outer dagger.json instead of the nearer dagger-module.toml")
+    let mixed = pythonSdk.mod(ws, path: mixedDiscoveryNestedPath)
+    assert(mixed.rootPath == mixedDiscoveryModulePath, "lookup chose the ancestor dagger-module.toml instead of the nearer registered module")
+
+    let toml = pythonSdk.mod(ws, path: tomlModulePath + "/nested")
+    assert(toml.rootPath == tomlModulePath, "lookup from inside a registered dagger-module.toml module returned the wrong root")
     null
   }
 
   """
-  Managed-module discovery is cwd-aware and supports both config formats.
+  detectScope answers with the directory of the nearest pyproject.toml as a
+  workspace-root-relative path, with the module rather than its vendored client
+  library, and with nothing where there is none.
   """
-  pub moduleDiscoveryCheck(ws: Workspace!): Void @check {
-    let roots = pythonSdk.modules(ws).{{rootPath}}.map { mod => mod.rootPath }
-    assert(contains(roots, generateModulePath), "root discovery missed a legacy Python module")
-    assert(contains(roots, tomlModulePath), "root discovery missed a TOML Python module")
-    assert(contains(roots, nonPythonModulePath) == false, "discovery included a non-Python module")
+  pub detectScopeCheck(ws: Workspace!): Void @check {
+    assert(pythonSdk.detectScope(ws.withWorkdir(lookupNestedPath)) == lookupModulePath, "detectScope should find the module owning a nested path")
+    assert(pythonSdk.detectScope(ws.withWorkdir(lookupModulePath)) == lookupModulePath, "detectScope should answer with the module root itself")
+    assert(pythonSdk.detectScope(ws.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath, "detectScope should answer with the module owning a vendored sdk/, not the sdk/ itself")
+    assert(pythonSdk.detectScope(ws.withWorkdir("sdk/src/dagger/client")) == "sdk", "detectScope should not lift a standalone sdk/ project into a parent that is not a Python module")
 
-    let nestedWs = ws.directory("/").asWorkspace(cwd: lookupNestedPath)
-    let scoped = pythonSdk.modules(nestedWs).{{rootPath, path}}
-    let scopedRoots = scoped.map { mod => mod.rootPath }
-    let scopedPaths = scoped.map { mod => mod.path }
-    assert(scoped.length == 1, "nested cwd should see only its nearest managed module")
-    assert(contains(scopedRoots, lookupModulePath), "nested cwd resolved the wrong managed module")
-    assert(contains(scopedPaths, ".."), "module path should be relative to the nested cwd")
-
-    let mixedWs = ws.directory("/").asWorkspace(cwd: mixedDiscoveryNestedPath)
-    let mixed = pythonSdk.modules(mixedWs).{{rootPath, path}}
-    assert(mixed.length == 1, "mixed-config cwd should see only its nearest managed module")
-    assert(contains(mixed.map { mod => mod.rootPath }, mixedDiscoveryModulePath), "mixed-config discovery chose the farther dagger-module.toml")
-    assert(contains(mixed.map { mod => mod.path }, "../.."), "mixed-config module path should be relative to the nested cwd")
-    null
-  }
-
-  """
-  initModule seeds the template files only: no codegen, no engine-owned config
-  (dagger.json / dagger-module.toml).
-  """
-  pub initCheck(ws: Workspace!): Void @check {
-    let defaultPath = outputRoot + "/init-default"
-    let legacyPath = outputRoot + "/init-legacy"
-
-    let defaultChanges = pythonSdk.initModule(ws, name: "init-default", path: defaultPath)
-    let legacyChanges = pythonSdk.initModule(ws, name: "init-legacy", path: legacyPath, template: "legacy")
-
-    assertAdded(defaultChanges, defaultPath + "/pyproject.toml")
-    assert(contains(defaultChanges.addedPaths, defaultPath + "/dagger.json") == false, "initModule should not write the engine-owned dagger.json")
-    assert(contains(defaultChanges.addedPaths, defaultPath + "/" + generatedMarkerPath) == false, "init should not produce SDK-generated files")
-    assert(defaultChanges.modifiedPaths.length == 0, "init unexpectedly modified existing files")
-    assert(defaultChanges.removedPaths.length == 0, "init unexpectedly removed files")
-    assertContains(defaultChanges.layer.file(defaultPath + "/src/init_default/__init__.py").contents, "class InitDefault:", "default template did not render the module type")
-
-    assertContains(legacyChanges.layer.file(legacyPath + "/src/init_legacy/main.py").contents, "class InitLegacy:", "legacy template did not render the module type")
+    let nestedSdkWs = ws.withNewFile("/" + runtimeModulePath + "/sdk/dagger-module.toml", "name = \"nested\"\n\n[runtime]\nsource = \"python\"\n")
+    assert(pythonSdk.detectScope(nestedSdkWs.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath + "/sdk", "detectScope should answer with a nested module named sdk, not lift it into its parent")
+    assert(pythonSdk.detectScope(ws) == "", "detectScope should find no scope at the workspace root")
 
     null
   }
 
   """
-  Init layers the template onto an existing directory; the user's files survive.
+  generateScope initializes a module that has no config: the template, a
+  dagger-module.toml from the engine's builder and no dagger.json, and the
+  generated client library, all under the scope, with the workspace cwd and
+  existing files untouched. SDK settings select the template and its
+  pyproject.toml values.
   """
-  pub initOverExistingCheck(ws: Workspace!): Void @check {
-    let changes = pythonSdk.initModule(ws, name: "init-over-existing", path: lookupModulePath)
+  pub generateScopeInitCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/scope-init"
+    let scoped = ws
+      .withNewDirectory("/" + scope, directory)
+      .withNewFile("/" + scope + "/keep.txt", "keep\n")
+      .withWorkdir(scope)
+    let generated = pythonSdk.generateScope(scoped, isModule: true, name: "scope-init", clients: [])
+    let changes = generated.withWorkdir(".").changes(scoped.withWorkdir("."))
 
-    assert(
-      changes.removedPaths.length == 0,
-      "init removed existing files: " + changes.removedPaths.join(", "),
-    )
-    assertContains(
-      changes.after.file(lookupModulePath + "/src/lookup_app/__init__.py").contents,
-      "class LookupApp:",
-      "init must leave the existing module source in place",
-    )
-    assertContains(
-      changes.after.file(lookupModulePath + "/src/init_over_existing/__init__.py").contents,
-      "class InitOverExisting:",
-      "init did not render the template into the existing directory",
-    )
-
-    null
-  }
-
-  """
-  The default template renders a working module that reads source from the
-  workspace and returns a ready-to-build container; the empty template stays a
-  bare object class.
-  """
-  pub templateCheck(ws: Workspace!): Void @check {
-    let defaultPath = outputRoot + "/template-default"
-    let emptyPath = outputRoot + "/template-empty"
-
-    let defaultSource = initSource(
-      pythonSdk.initModule(ws, name: "template-default", path: defaultPath),
-      defaultPath,
-      "template_default",
-    )
+    assert(generated.cwd == scoped.cwd, "generateScope must not change the workspace cwd")
+    assertAdded(changes, scope + "/dagger-module.toml")
+    assert(contains(changes.addedPaths, scope + "/dagger.json") == false, "initializing a scope must not write a dagger.json")
+    assertAdded(changes, scope + "/pyproject.toml")
+    assertAdded(changes, scope + "/src/scope_init/__init__.py")
+    assertAdded(changes, scope + "/" + generatedMarkerPath)
+    assert(changes.modifiedPaths.length == 0, "initializing a scope modified existing files: " + changes.modifiedPaths.join(", "))
+    assert(changes.removedPaths.length == 0, "initializing a scope removed existing files: " + changes.removedPaths.join(", "))
+    assertContainsAll(changes.layer.file(scope + "/dagger-module.toml").contents, [
+      "name = \"scope-init\"",
+      "engineVersion = \"",
+      "[runtime]",
+      "source = \"python\"",
+    ])
+    let defaultSource = changes.layer.file(scope + "/src/scope_init/__init__.py").contents
     assertContainsAll(defaultSource, [
-      "class TemplateDefault:",
-      "@classmethod\n    def create(",
+      "class ScopeInit:",
       "ws: dagger.Workspace",
-      "base_image_address: str = \"alpine:3.24\"",
-      "return cls(",
       "def container(self) -> dagger.Container:",
-      ".with_directory(\"/src\", self.source)",
     ])
     assertContainsNone(defaultSource, ["def __init__", "{{"])
+    let defaultPyproject = changes.layer.file(scope + "/pyproject.toml").contents
+    assertContains(defaultPyproject, ">=3.14", "default settings should keep the template python version")
+    assertNotContains(defaultPyproject, "[tool.dagger]", "default settings should not write a [tool.dagger] table")
+    assertContains(changes.layer.file(scope + "/" + generatedMarkerPath).contents, generatedMarkerContents, "generateScope did not generate the client library")
 
-    let compatibleDefaultSource = initSource(
-      pythonSdk.initModule(ws, name: "template-default", path: defaultPath, template: ""),
-      defaultPath,
-      "template_default",
-    )
-    assert(compatibleDefaultSource == defaultSource, "an explicitly empty template should select the default template")
+    let configuredScope = outputRoot + "/scope-init-configured"
+    let configuredScoped = ws.withNewDirectory("/" + configuredScope, directory).withWorkdir(configuredScope)
+    let configuredChanges = pythonSdk(template: "empty", pythonVersion: "3.13", useUv: false, baseImage: "python:3.13-slim")
+      .generateScope(configuredScoped, isModule: true, name: "scope-init-configured", clients: [])
+      .withWorkdir(".")
+      .changes(ws)
+    assertContainsAll(configuredChanges.layer.file(configuredScope + "/src/scope_init_configured/__init__.py").contents, ["class ScopeInitConfigured:", "    pass"])
+    assertContainsAll(configuredChanges.layer.file(configuredScope + "/pyproject.toml").contents, [
+      ">=3.13",
+      "use-uv = false",
+      "python:3.13-slim",
+      "dagger-io",
+    ])
 
-    let emptySource = initSource(
-      pythonSdk.initModule(ws, name: "template-empty", path: emptyPath, template: "empty"),
-      emptyPath,
-      "template_empty",
-    )
-    assertContainsAll(emptySource, ["class TemplateEmpty:", "    pass"])
-    assertContainsNone(emptySource, ["def container", "{{"])
+    null
+  }
+
+  """
+  generateScope regenerates a module that already has a config, whether a
+  dagger-module.toml or a pre-1.0 dagger.json: only the generated client
+  library is added, and nothing else changes.
+  """
+  pub generateScopeExistingCheck(ws: Workspace!): Void @check {
+    [
+      [tomlGenerateModulePath, "toml-generate-app"],
+      [generateModulePath, "generate-app"],
+    ].each { pair =>
+      let path = pair[0] ?? ""
+      let name = pair[1] ?? ""
+      let changes = pythonSdk
+        .generateScope(ws.withWorkdir(path), isModule: true, name: name, clients: [])
+        .withWorkdir(".")
+        .changes(ws)
+
+      assertAdded(changes, path + "/" + generatedMarkerPath)
+      assert(changes.modifiedPaths.length == 0, name + ": regenerating modified existing files: " + changes.modifiedPaths.join(", "))
+      assert(contains(changes.addedPaths, path + "/dagger-module.toml") == false, name + ": regenerating must not write a manifest")
+      null
+    }
+
+    null
+  }
+
+  """
+  In a module scope the client set becomes the module's dependency set: the
+  manifest lists each client, the generated bindings include its types, and a
+  client that is no longer requested is dropped again. A scope without a
+  module is left alone, and standalone clients are refused rather than
+  silently skipped.
+  """
+  pub generateScopeClientsCheck(ws: Workspace!): Void @check {
+    let scoped = ws.withWorkdir(tomlGenerateModulePath)
+    let manifestPath = tomlGenerateModulePath + "/dagger-module.toml"
+    let bindingsPath = tomlGenerateModulePath + "/" + generatedMarkerPath
+    let client = ws.moduleSource("/" + clientDepPath)
+
+    let untouched = pythonSdk.generateScope(scoped, isModule: false, name: "toml-generate-app", clients: []).withWorkdir(".").changes(ws)
+    assert(untouched.isEmpty, "a scope without a module should not be generated")
+
+    let refused = pythonSdk.generateScope(scoped, isModule: false, name: "toml-generate-app", clients: [client]).cwd rescue "raised"
+    assert(refused == "raised", "generateScope should refuse standalone clients")
+
+    let withClient = pythonSdk.generateScope(scoped, isModule: true, name: "toml-generate-app", clients: [client])
+    let added = withClient.withWorkdir(".").changes(ws)
+    assert(contains(added.modifiedPaths, manifestPath), "adding a client should record it in the manifest")
+    assertContainsAll(added.after.file(manifestPath).contents, ["[[dependencies]]", "name = \"client-dep\"", "source = \"../../clients/dep\""])
+    assert(contains(added.addedPaths, tomlGenerateModulePath + "/dagger.json") == false, "adding a client should not add a manifest the module did not have")
+    assertContains(added.after.file(bindingsPath).contents, "class ClientDep", "the generated bindings should include the client's types")
+
+    let withoutClient = pythonSdk.generateScope(withClient, isModule: true, name: "toml-generate-app", clients: [])
+    let removed = withoutClient.withWorkdir(".").changes(ws)
+    assertNotContains(removed.after.file(manifestPath).contents, "client-dep", "removing the last client should drop the dependency")
+    assertNotContains(removed.after.file(bindingsPath).contents, "class ClientDep", "removing the client should drop its types from the bindings")
 
     null
   }
@@ -245,7 +266,6 @@ type E2e {
     ]
 
     assertNoneAdded(pythonSdk.mod(ws, path: generateModulePath).generate, existing, "generate")
-    assertNoneAdded(pythonSdk.generateAll(ws), existing, "generateAll")
 
     null
   }
@@ -295,21 +315,6 @@ type E2e {
   }
 
   """
-  Generating all modules should discover Python SDK modules and ignore skipped ones.
-  """
-  pub generateAllCheck(ws: Workspace!): Void @check {
-    let changes = pythonSdk.generateAll(ws)
-
-    assertAdded(changes, generateModulePath + "/" + generatedMarkerPath)
-    assert(contains(changes.addedPaths, lookupModulePath + "/" + generatedMarkerPath) == false, "generateAll generated a lookup fixture that should be skipped")
-    assert(contains(changes.addedPaths, depsModulePath + "/" + generatedMarkerPath) == false, "generateAll generated dependency fixtures that should be skipped")
-    assert(contains(changes.addedPaths, skipModulePath + "/" + generatedMarkerPath) == false, "generateAll generated a skipped module")
-    assert(contains(changes.addedPaths, nonPythonModulePath + "/" + generatedMarkerPath) == false, "generateAll generated a non-Python SDK module")
-
-    null
-  }
-
-  """
   A skip marker above a module should make generate return an empty changeset.
   """
   pub skipGenerateCheck(ws: Workspace!): Void @check {
@@ -318,17 +323,6 @@ type E2e {
 
     assert(mod.skipGenerate, "skip marker was not detected")
     assert(changes.isEmpty, "generate returned changes for a skipped module")
-
-    null
-  }
-
-  """
-  New modules still target the engine's builtin runtime: they move to this
-  repository's own only once `runtime/` is on the default branch, where the
-  recorded ref resolves.
-  """
-  pub targetRuntimeCheck: Void @check {
-    assert(pythonSdk.targetRuntime == "python", "targetRuntime should be the python builtin runtime")
 
     null
   }
@@ -462,30 +456,4 @@ type E2e {
     null
   }
 
-  """
-  Init flags should write configuration into the generated pyproject.toml, and
-  defaults should leave it unconfigured.
-  """
-  pub initConfigCheck(ws: Workspace!): Void @check {
-    let configuredPath = outputRoot + "/init-configured"
-    let defaultPath = outputRoot + "/init-config-default"
-
-    let configured = pythonSdk.initModule(ws, name: "init-configured", path: configuredPath, pythonVersion: "3.13", useUv: false, baseImage: "python:3.13-slim")
-    let pyproj = configuredPath + "/pyproject.toml"
-    assertAdded(configured, pyproj)
-    assert(configured.modifiedPaths.length == 0, "configured init should not modify existing files")
-    assert(configured.removedPaths.length == 0, "configured init should not remove files")
-    assertContains(configured.layer.file(pyproj).contents, ">=3.13", "init --python-version not written")
-    assertContains(configured.layer.file(pyproj).contents, "use-uv = false", "init --use-uv=false not written")
-    assertContains(configured.layer.file(pyproj).contents, "python:3.13-slim", "init --base-image not written")
-    assertContains(configured.layer.file(pyproj).contents, "dagger-io", "init config dropped template data")
-
-    let default = pythonSdk.initModule(ws, name: "init-config-default", path: defaultPath)
-    let defaultPyproj = defaultPath + "/pyproject.toml"
-    assertContains(default.layer.file(defaultPyproj).contents, ">=3.14", "default init should keep the template python version")
-    assertNotContains(default.layer.file(defaultPyproj).contents, "use-uv", "default init should not write use-uv")
-    assertNotContains(default.layer.file(defaultPyproj).contents, "[tool.dagger]", "default init should not write a [tool.dagger] table")
-
-    null
-  }
 }

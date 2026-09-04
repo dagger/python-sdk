@@ -1,0 +1,6 @@
+"""
+A module the e2e checks add as a client.
+"""
+type ClientDep {
+  pub greeting: String! { "hello from the client dependency" }
+}

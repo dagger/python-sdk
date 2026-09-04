@@ -1,7 +1,7 @@
 # Dagger workspace configuration
-# Install modules with: dagger install <module>
+# Install modules with: dagger module install <module>
 # Example:
-#   dagger install github.com/dagger/dagger/modules/wolfi
+#   dagger module install github.com/dagger/dagger/modules/wolfi
 
 # Marker filename that skips generate when found at or above a Python SDK module root.
 # settings.skipGenerateFilename = ""
@@ -9,39 +9,44 @@
 [modules.e2e]
 source = ".dagger/modules/e2e"
 
+[modules.engine-e2e]
+source = ".dagger/modules/engine-e2e"
+
 [modules.python-sdk]
 source = "."
 check.skip = ["*"]
 
-[modules.sdk-sdk]
-source = "github.com/dagger/sdk-sdk"
+[sdks.python]
+module = "python-sdk"
 
-[modules.python-sdk.as-sdk]
-name = "python"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/generate/app"]
+is-module = true
+name = "generate-app"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/generate/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/lookup/app"]
+is-module = true
+name = "lookup-app"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/lookup/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/skip/app"]
+is-module = true
+name = "skip-app"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/deps/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/toml/app"]
+is-module = true
+name = "toml-app"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/skip/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/mixed-discovery/ancestor/work/app"]
+is-module = true
+name = "mixed-discovery-app"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/toml/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/config/app"]
+is-module = true
+name = "config-app"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/mixed-discovery/ancestor/work/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/config/configured"]
+is-module = true
+name = "config-configured"
 
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/config/app"
-
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/config/configured"
-
-[[modules.python-sdk.as-sdk.modules]]
-path = ".dagger/modules/e2e/fixtures/toml-generate/app"
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/toml-generate/app"]
+is-module = true
+name = "toml-generate-app"
