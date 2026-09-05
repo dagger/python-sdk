@@ -110,7 +110,7 @@ type E2e {
   """
   findClientRoot answers with the directory of the nearest pyproject.toml as a
   workspace-root-relative path, with the module rather than its vendored client
-  library, and with nothing where there is none.
+  library, and with null where there is none.
   """
   pub findClientRootCheck(ws: Workspace!): Void @check {
     assert(pythonSdk.findClientRoot(ws.withWorkdir(lookupNestedPath)) == lookupModulePath, "findClientRoot should find the module owning a nested path")
@@ -120,7 +120,7 @@ type E2e {
 
     let nestedSdkWs = ws.withNewFile("/" + runtimeModulePath + "/sdk/dagger-module.toml", "name = \"nested\"\n\n[runtime]\nsource = \"python\"\n")
     assert(pythonSdk.findClientRoot(nestedSdkWs.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath + "/sdk", "findClientRoot should answer with a nested module named sdk, not lift it into its parent")
-    assert(pythonSdk.findClientRoot(ws) == "", "findClientRoot should find no scope at the workspace root")
+    assert(pythonSdk.findClientRoot(ws) == null, "findClientRoot should return null when it finds no client root")
 
     null
   }

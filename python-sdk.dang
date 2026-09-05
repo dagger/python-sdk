@@ -27,12 +27,12 @@ type PythonSdk {
   the nearest pyproject.toml, relative to the workspace root. A module's
   vendored client library carries its own pyproject.toml, so the Python module
   owning it answers instead; a directory with a module config of its own is a
-  module, never a vendored library. Empty when there is none.
+  module, never a vendored library. Null when there is none.
   """
-  pub findClientRoot(ws: Workspace!): String! {
+  pub findClientRoot(ws: Workspace!): String {
     let found = ws.findUp("pyproject.toml")
     if (found == null) {
-      ""
+      null
     } else {
       let scope = normalizePath(found.trimSuffix("pyproject.toml"))
       let vendorParent = if (scope == vendorDirName) {
@@ -74,8 +74,8 @@ type PythonSdk {
   """
   Generate one SDK scope: the module at the workspace cwd, when the scope has
   one. A module without a config file is initialized from the configured
-  template. Every module receives a dagger-module.toml from the engine's
-  manifest builder and is then generated. A pre-1.0 dagger.json is migrated
+  template. Every module receives a dagger-module.toml from the manifest
+  builder module and is then generated. A pre-1.0 dagger.json is migrated
   and removed. The scope's module clients become the module's dependencies,
   so the generated bindings include their types.
   Standalone clients, in a scope without a module, are not generated yet.
