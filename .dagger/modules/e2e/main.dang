@@ -8,7 +8,6 @@ type E2e {
   let lookupModulePath: String! = fixtureRoot + "/lookup/app"
   let lookupNestedPath: String! = lookupModulePath + "/nested"
   let nonPythonModulePath: String! = fixtureRoot + "/lookup/not-python"
-  let skipModulePath: String! = fixtureRoot + "/skip/app"
   let generateModulePath: String! = fixtureRoot + "/generate/app"
   let configModulePath: String! = fixtureRoot + "/config/app"
   let configuredModulePath: String! = fixtureRoot + "/config/configured"
@@ -71,15 +70,6 @@ type E2e {
   }
 
   """
-  The helper should expose the generate skip marker used by callers.
-  """
-  pub skipGenerateFilenameCheck: Void @check {
-    assert(pythonSdk.skipGenerateFilename == ".dagger-python-sdk-skip-generate", "skip marker filename changed")
-
-    null
-  }
-
-  """
   Mod lookup should find the owning Python SDK module when called from a nested path.
   """
   pub moduleLookupCheck(ws: Workspace!): Void @check {
@@ -118,19 +108,19 @@ type E2e {
   }
 
   """
-  detectScope answers with the directory of the nearest pyproject.toml as a
+  findClientRoot answers with the directory of the nearest pyproject.toml as a
   workspace-root-relative path, with the module rather than its vendored client
   library, and with nothing where there is none.
   """
-  pub detectScopeCheck(ws: Workspace!): Void @check {
-    assert(pythonSdk.detectScope(ws.withWorkdir(lookupNestedPath)) == lookupModulePath, "detectScope should find the module owning a nested path")
-    assert(pythonSdk.detectScope(ws.withWorkdir(lookupModulePath)) == lookupModulePath, "detectScope should answer with the module root itself")
-    assert(pythonSdk.detectScope(ws.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath, "detectScope should answer with the module owning a vendored sdk/, not the sdk/ itself")
-    assert(pythonSdk.detectScope(ws.withWorkdir("sdk/src/dagger/client")) == "sdk", "detectScope should not lift a standalone sdk/ project into a parent that is not a Python module")
+  pub findClientRootCheck(ws: Workspace!): Void @check {
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(lookupNestedPath)) == lookupModulePath, "findClientRoot should find the module owning a nested path")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(lookupModulePath)) == lookupModulePath, "findClientRoot should answer with the module root itself")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath, "findClientRoot should answer with the module owning a vendored sdk/, not the sdk/ itself")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir("sdk/src/dagger/client")) == "sdk", "findClientRoot should not lift a standalone sdk/ project into a parent that is not a Python module")
 
     let nestedSdkWs = ws.withNewFile("/" + runtimeModulePath + "/sdk/dagger-module.toml", "name = \"nested\"\n\n[runtime]\nsource = \"python\"\n")
-    assert(pythonSdk.detectScope(nestedSdkWs.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath + "/sdk", "detectScope should answer with a nested module named sdk, not lift it into its parent")
-    assert(pythonSdk.detectScope(ws) == "", "detectScope should find no scope at the workspace root")
+    assert(pythonSdk.findClientRoot(nestedSdkWs.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath + "/sdk", "findClientRoot should answer with a nested module named sdk, not lift it into its parent")
+    assert(pythonSdk.findClientRoot(ws) == "", "findClientRoot should find no scope at the workspace root")
 
     null
   }
@@ -195,27 +185,29 @@ type E2e {
   }
 
   """
-  generateScope regenerates a module that already has a config, whether a
-  dagger-module.toml or a pre-1.0 dagger.json: only the generated client
-  library is added, and nothing else changes.
+  generateScope preserves a current manifest. It migrates a pre-1.0
+  dagger.json to dagger-module.toml. Both cases generate the client library.
   """
   pub generateScopeExistingCheck(ws: Workspace!): Void @check {
-    [
-      [tomlGenerateModulePath, "toml-generate-app"],
-      [generateModulePath, "generate-app"],
-    ].each { pair =>
-      let path = pair[0] ?? ""
-      let name = pair[1] ?? ""
-      let changes = pythonSdk
-        .generateScope(ws.withWorkdir(path), isModule: true, name: name, clients: [])
-        .withWorkdir(".")
-        .changes(ws)
+    let current = pythonSdk
+      .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+      .changes(ws)
+    assertAdded(current, tomlGenerateModulePath + "/" + generatedMarkerPath)
+    assert(contains(current.addedPaths, tomlGenerateModulePath + "/dagger-module.toml") == false, "regenerating added an existing manifest")
+    assert(contains(current.removedPaths, tomlGenerateModulePath + "/dagger-module.toml") == false, "regenerating removed the current manifest")
 
-      assertAdded(changes, path + "/" + generatedMarkerPath)
-      assert(changes.modifiedPaths.length == 0, name + ": regenerating modified existing files: " + changes.modifiedPaths.join(", "))
-      assert(contains(changes.addedPaths, path + "/dagger-module.toml") == false, name + ": regenerating must not write a manifest")
-      null
-    }
+    let legacy = pythonSdk
+      .generateScope(ws.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])
+      .withWorkdir(".")
+      .changes(ws)
+    assertAdded(legacy, generateModulePath + "/" + generatedMarkerPath)
+    assertAdded(legacy, generateModulePath + "/dagger-module.toml")
+    assert(contains(legacy.removedPaths, generateModulePath + "/dagger.json"), "migration did not remove dagger.json")
+    assertContainsAll(legacy.after.file(generateModulePath + "/dagger-module.toml").contents, [
+      "name = \"generate-app\"",
+      "source = \"python\"",
+    ])
 
     null
   }
@@ -310,19 +302,6 @@ type E2e {
       ],
       "generate",
     )
-
-    null
-  }
-
-  """
-  A skip marker above a module should make generate return an empty changeset.
-  """
-  pub skipGenerateCheck(ws: Workspace!): Void @check {
-    let mod = pythonSdk.mod(ws, path: skipModulePath)
-    let changes = mod.generate
-
-    assert(mod.skipGenerate, "skip marker was not detected")
-    assert(changes.isEmpty, "generate returned changes for a skipped module")
 
     null
   }

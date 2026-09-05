@@ -3,11 +3,6 @@ Manage Dagger modules that use the Python SDK.
 """
 type PythonSdk {
   """
-  Marker filename that skips generate when found at or above a Python SDK module root.
-  """
-  pub skipGenerateFilename: String! = ".dagger-python-sdk-skip-generate"
-
-  """
   Starter under templates/<template> for a module generated without source.
   """
   pub template: String! = "default"
@@ -28,13 +23,13 @@ type PythonSdk {
   pub baseImage: String! = ""
 
   """
-  Detect the Python SDK scope containing the workspace cwd: the directory of
+  Find the Python client root containing the workspace cwd: the directory of
   the nearest pyproject.toml, relative to the workspace root. A module's
   vendored client library carries its own pyproject.toml, so the Python module
   owning it answers instead; a directory with a module config of its own is a
   module, never a vendored library. Empty when there is none.
   """
-  pub detectScope(ws: Workspace!): String! {
+  pub findClientRoot(ws: Workspace!): String! {
     let found = ws.findUp("pyproject.toml")
     if (found == null) {
       ""
@@ -79,10 +74,10 @@ type PythonSdk {
   """
   Generate one SDK scope: the module at the workspace cwd, when the scope has
   one. A module without a config file is initialized from the configured
-  template and a dagger-module.toml from the engine's manifest builder first,
-  then generated; an existing module, dagger-module.toml or pre-1.0
-  dagger.json, is generated in place. The scope's module clients become the
-  module's dependencies, so the generated bindings include their types.
+  template. Every module receives a dagger-module.toml from the engine's
+  manifest builder and is then generated. A pre-1.0 dagger.json is migrated
+  and removed. The scope's module clients become the module's dependencies,
+  so the generated bindings include their types.
   Standalone clients, in a scope without a module, are not generated yet.
   """
   pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
@@ -103,59 +98,44 @@ type PythonSdk {
       let initialized = if (hadConfig) {
         rooted
       } else {
-        rooted
-          .withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
-          .withFile("/" + scope + "/dagger-module.toml", moduleManifest.withName(name: name).withLegacyPythonRuntime.tomlFile)
+        rooted.withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
       }
-      let configured = withClientDependencies(initialized, scope, clients)
+      let configured = generateScopeManifest(initialized, scope, name, clients)
       let module = mod(configured, path: scope, findUp: false)
-
-      # A new module always gets its generated files; the skip marker only
-      # holds an existing module still.
-      let generated = if (hadConfig and module.skipGenerate) {
-        configured
-      } else {
-        module.generated
-      }
-      generated.withWorkdir(scope)
+      module.generated.withWorkdir(scope)
     }
   }
 
   """
-  Replace the module's dependencies with the complete client set, in the
-  manifest file the module has: dagger-module.toml, or the pre-1.0
-  dagger.json of a module that has nothing else. A module with neither
-  clients nor dependencies is left untouched, so a hand-written manifest is
-  not reformatted for nothing.
+  Generate dagger-module.toml from the existing manifest and complete client
+  set. Preserve fields that the SDK does not own. Remove dagger.json so two
+  manifest files cannot contain different state.
   """
-  let withClientDependencies(ws: Workspace!, scope: String!, clients: [ModuleSource!]!): Workspace! {
+  let generateScopeManifest(ws: Workspace!, scope: String!, name: String!, clients: [ModuleSource!]!): Workspace! {
     let root = "/" + scope
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
-    let current = ws.moduleSource(root).dependencies.{{moduleName}}.map { dependency => dependency.moduleName }
-
-    if (clients.length == 0 and current.length == 0) {
-      ws
+    let hasJson = scopeHasFile(ws, scope, "dagger.json")
+    let base = if (hasToml) {
+      moduleManifest(loadTOML: ws.file(root + "/dagger-module.toml"))
+    } else if (hasJson) {
+      moduleManifest(loadJSON: ws.file(root + "/dagger.json"))
     } else {
-      let loaded = if (hasToml) {
-        moduleManifest(loadTOML: ws.file(root + "/dagger-module.toml"))
-      } else {
-        moduleManifest(loadJSON: ws.file(root + "/dagger.json"))
+      moduleManifest.withLegacyPythonRuntime
+    }
+    let configured = clients.{{moduleName, kind, sourceRootSubpath, asString, pin}}
+      .reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>
+        manifest.withLegacyRuntimeDependency(
+          source: dependencySource(scope, client.kind, client.sourceRootSubpath, client.asString),
+          name: client.moduleName,
+          pin: client.pin,
+        )
       }
-      let cleared = current.reduce(loaded) { manifest, name => manifest.withoutDependency(name: name) }
-      let configured = clients.{{moduleName, kind, sourceRootSubpath, asString, pin}}
-        .reduce(cleared) { manifest, client =>
-          manifest.withDependency(
-            source: dependencySource(scope, client.kind, client.sourceRootSubpath, client.asString),
-            name: client.moduleName,
-            pin: client.pin,
-          )
-        }
+    let generated = ws.withFile(root + "/dagger-module.toml", configured.tomlFile)
 
-      if (hasToml) {
-        ws.withFile(root + "/dagger-module.toml", configured.tomlFile)
-      } else {
-        ws.withFile(root + "/dagger.json", configured.legacyJSONFile)
-      }
+    if (hasJson) {
+      generated.withoutFile(root + "/dagger.json")
+    } else {
+      generated
     }
   }
 
@@ -255,7 +235,6 @@ type PythonSdk {
     Mod(
       rootPath: modPath,
       ws: ws,
-      skipGenerateFilename: skipGenerateFilename,
     )
   }
 
