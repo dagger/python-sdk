@@ -9,7 +9,8 @@ workspace cwd to it, and asks this module to generate the complete scope
 through `findClientRoot` and `generateScope`. The module writes the manifest and
 its own files; the engine owns the workspace bookkeeping.
 
-It uses the engine's native `Workspace` and `ModuleSource` APIs directly.
+It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
+`moduleManifest` from `dagger/sdk-helpers`.
 
 ## What lives here
 

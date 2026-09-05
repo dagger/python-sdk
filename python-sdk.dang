@@ -116,9 +116,9 @@ type PythonSdk {
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
     let hasJson = scopeHasFile(ws, scope, "dagger.json")
     let base = if (hasToml) {
-      moduleManifest(loadTOML: ws.file(root + "/dagger-module.toml"))
+      moduleManifest(loadToml: ws.file(root + "/dagger-module.toml"))
     } else if (hasJson) {
-      moduleManifest(loadJSON: ws.file(root + "/dagger.json"))
+      moduleManifest(loadJson: ws.file(root + "/dagger.json"))
     } else {
       moduleManifest.withLegacyPythonRuntime
     }

@@ -9,5 +9,12 @@
     "!.dagger",
     "!future",
     "!docs"
+  ],
+  "dependencies": [
+    {
+      "name": "module-manifest",
+      "source": "github.com/dagger/sdk-helpers@a2addef1ad0b6ba99db46e68d15148683a4dd6a6",
+      "pin": "a2addef1ad0b6ba99db46e68d15148683a4dd6a6"
+    }
   ]
 }
