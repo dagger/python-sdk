@@ -10,7 +10,7 @@ through `findClientRoot` and `generateScope`. The module writes the manifest and
 its own files; the engine owns the workspace bookkeeping.
 
 It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
-`moduleManifest` from `dagger/sdk-helpers`.
+`sdkHelpers.moduleManifest` from `dagger/sdk-helpers`.
 
 ## What lives here
 

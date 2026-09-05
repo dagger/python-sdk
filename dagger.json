@@ -12,9 +12,9 @@
   ],
   "dependencies": [
     {
-      "name": "module-manifest",
-      "source": "github.com/dagger/sdk-helpers@a2addef1ad0b6ba99db46e68d15148683a4dd6a6",
-      "pin": "a2addef1ad0b6ba99db46e68d15148683a4dd6a6"
+      "name": "sdk-helpers",
+      "source": "github.com/dagger/sdk-helpers@fec4ded81c0565ede1d3bc319d60c985ef95ee84",
+      "pin": "fec4ded81c0565ede1d3bc319d60c985ef95ee84"
     }
   ]
 }

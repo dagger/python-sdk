@@ -116,11 +116,11 @@ type PythonSdk {
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
     let hasJson = scopeHasFile(ws, scope, "dagger.json")
     let base = if (hasToml) {
-      moduleManifest(loadToml: ws.file(root + "/dagger-module.toml"))
+      sdkHelpers.moduleManifest(loadToml: ws.file(root + "/dagger-module.toml"))
     } else if (hasJson) {
-      moduleManifest(loadJson: ws.file(root + "/dagger.json"))
+      sdkHelpers.moduleManifest(loadJson: ws.file(root + "/dagger.json"))
     } else {
-      moduleManifest.withLegacyPythonRuntime
+      sdkHelpers.moduleManifest.withLegacyPythonRuntime
     }
     let configured = clients.{{moduleName, kind, sourceRootSubpath, asString, pin}}
       .reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>

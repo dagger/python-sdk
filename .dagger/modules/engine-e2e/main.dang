@@ -4,7 +4,7 @@ Checks the Python SDK against an engine built from dagger/dagger#13992
 dagger-module.toml.
 """
 type EngineE2e {
-  let engineCommit: String! = "76ac8c0b20adf76c0b028b050884fa019c37680e"
+  let engineCommit: String! = "6f0625319587865054377d0e03690424e3e8b861"
   let modulePath: String! = ".dagger/modules/sdk-smoke"
 
   let assert(condition: Boolean!, message: String!): Void {
@@ -41,7 +41,7 @@ type EngineE2e {
     ])
 
     let initialized = checked
-      .withExec(["dagger", "--auto-apply", "module", "init", "python", "--name", "sdk-smoke", "--path", modulePath])
+      .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "sdk-smoke", "--path", modulePath])
       .withExec(["test", "-f", modulePath + "/dagger-module.toml"])
       .withExec(["test", "!", "-e", modulePath + "/dagger.json"])
       .withExec(["test", "-f", modulePath + "/pyproject.toml"])
@@ -55,7 +55,7 @@ type EngineE2e {
 
     initialized
       .withExec([
-        "dagger", "--auto-apply", "module", "init", "python",
+        "dagger", "module", "init", "python", "--auto-apply",
         "--name", "sdk-settings",
         "--path", ".dagger/modules/sdk-settings",
         "--template", "empty",
