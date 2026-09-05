@@ -4,7 +4,7 @@ Checks the Python SDK against an engine built from dagger/dagger#13992
 dagger-module.toml.
 """
 type EngineE2e {
-  let engineCommit: String! = "4693aa406c117025ba285cdaba6863f486a328c2"
+  let engineCommit: String! = "76ac8c0b20adf76c0b028b050884fa019c37680e"
   let modulePath: String! = ".dagger/modules/sdk-smoke"
 
   let assert(condition: Boolean!, message: String!): Void {
