@@ -127,7 +127,7 @@ type E2e {
 
   """
   generateScope initializes a module that has no config: the template, a
-  dagger-module.toml from the engine's builder and no dagger.json, and the
+  dagger-module.toml from the manifest builder and no dagger.json, and the
   generated client library, all under the scope, with the workspace cwd and
   existing files untouched. SDK settings select the template and its
   pyproject.toml values.
@@ -194,8 +194,7 @@ type E2e {
       .withWorkdir(".")
       .changes(ws)
     assertAdded(current, tomlGenerateModulePath + "/" + generatedMarkerPath)
-    assert(contains(current.addedPaths, tomlGenerateModulePath + "/dagger-module.toml") == false, "regenerating added an existing manifest")
-    assert(contains(current.removedPaths, tomlGenerateModulePath + "/dagger-module.toml") == false, "regenerating removed the current manifest")
+    assertContains(current.after.file(tomlGenerateModulePath + "/dagger-module.toml").contents, "engineVersion = \"v1.0.0-0\"", "regenerating did not preserve engineVersion")
 
     let legacy = pythonSdk
       .generateScope(ws.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])

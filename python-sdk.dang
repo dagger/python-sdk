@@ -90,10 +90,7 @@ type PythonSdk {
     } else {
       let scope = normalizePath(ws.cwd)
       let hadConfig = hasModuleConfig(ws, scope)
-      # The rest works with the cwd at the workspace root: the engine resolves
-      # a module's local dependencies to workspace-root-relative paths and then
-      # reads them relative to Workspace.cwd (dagger/dagger ResolveDepToSource),
-      # so at the scope's cwd a dependency is looked up under the module itself.
+      # Resolve local dependency paths from the workspace root.
       let rooted = ws.withWorkdir(".")
       let initialized = if (hadConfig) {
         rooted
@@ -147,20 +144,12 @@ type PythonSdk {
     if (kind == ModuleSourceKind.GIT_SOURCE) {
       ref
     } else {
-      relativePath(pathParts(scope), pathParts(normalizePath(sourceRootSubpath)))
-    }
-  }
-
-  let pathParts(path: String!): [String!]! {
-    if (path == ".") { [] } else { path.split("/") }
-  }
-
-  let relativePath(from: [String!]!, to: [String!]!): String! {
-    if (!from.isEmpty and !to.isEmpty and from.takeFirst.join("") == to.takeFirst.join("")) {
-      relativePath(from.dropFirst, to.dropFirst)
-    } else {
-      let relative = (from.map { segment => ".." } + to).join("/")
-      if (relative == "") { "." } else { relative }
+      let relative = Path(normalizePath(sourceRootSubpath)).relativeTo(Path(scope))
+      if (relative == null) {
+        raise "cannot resolve client module path " + sourceRootSubpath + " from scope " + scope
+      } else {
+        relative.string
+      }
     }
   }
 
