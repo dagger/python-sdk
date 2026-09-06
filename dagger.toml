@@ -3,9 +3,6 @@
 # Example:
 #   dagger module install github.com/dagger/dagger/modules/wolfi
 
-[modules.e2e]
-source = ".dagger/modules/e2e"
-
 [modules.engine-e2e]
 source = ".dagger/modules/engine-e2e"
 

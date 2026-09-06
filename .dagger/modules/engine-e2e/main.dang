@@ -4,7 +4,7 @@ Checks the Python SDK against an engine built from dagger/dagger#13992
 dagger-module.toml.
 """
 type EngineE2e {
-  let engineCommit: String! = "6f0625319587865054377d0e03690424e3e8b861"
+  let engineCommit: String! = "8fd9b22b5416f8dc7cb420ba37769adef6e874d2"
   let modulePath: String! = ".dagger/modules/sdk-smoke"
 
   let assert(condition: Boolean!, message: String!): Void {
@@ -32,13 +32,7 @@ type EngineE2e {
     let listed = client.withExec(["dagger", "sdk", "list"])
     assert(listed.stdout.contains("python"), "the development Python SDK was not listed")
 
-    let checked = listed.withExec([
-      "dagger", "-m", ".dagger/modules/e2e", "check",
-      "e-2-e:find-client-root-check",
-      "e-2-e:generate-scope-init-check",
-      "e-2-e:generate-scope-existing-check",
-      "e-2-e:generate-scope-clients-check",
-    ])
+    let checked = listed.withExec(["dagger", "-m", ".dagger/modules/e2e", "check"])
 
     let initialized = checked
       .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "sdk-smoke", "--path", modulePath])
