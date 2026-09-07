@@ -3,12 +3,6 @@
 # Example:
 #   dagger module install github.com/dagger/dagger/modules/wolfi
 
-# Marker filename that skips generate when found at or above a Python SDK module root.
-# settings.skipGenerateFilename = ""
-
-[modules.e2e]
-source = ".dagger/modules/e2e"
-
 [modules.engine-e2e]
 source = ".dagger/modules/engine-e2e"
 
@@ -26,10 +20,6 @@ name = "generate-app"
 [sdks.python.scopes.".dagger/modules/e2e/fixtures/lookup/app"]
 is-module = true
 name = "lookup-app"
-
-[sdks.python.scopes.".dagger/modules/e2e/fixtures/skip/app"]
-is-module = true
-name = "skip-app"
 
 [sdks.python.scopes.".dagger/modules/e2e/fixtures/toml/app"]
 is-module = true

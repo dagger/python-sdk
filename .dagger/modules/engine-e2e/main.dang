@@ -4,7 +4,7 @@ Checks the Python SDK against an engine built from dagger/dagger#13992
 dagger-module.toml.
 """
 type EngineE2e {
-  let engineCommit: String! = "055def6f7794b9d0dfdcc4252f0695ea92257536"
+  let engineCommit: String! = "8fd9b22b5416f8dc7cb420ba37769adef6e874d2"
   let modulePath: String! = ".dagger/modules/sdk-smoke"
 
   let assert(condition: Boolean!, message: String!): Void {
@@ -32,8 +32,10 @@ type EngineE2e {
     let listed = client.withExec(["dagger", "sdk", "list"])
     assert(listed.stdout.contains("python"), "the development Python SDK was not listed")
 
-    let initialized = listed
-      .withExec(["dagger", "--auto-apply", "module", "init", "python", "--name", "sdk-smoke", "--path", modulePath])
+    let checked = listed.withExec(["dagger", "-m", ".dagger/modules/e2e", "check"])
+
+    let initialized = checked
+      .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "sdk-smoke", "--path", modulePath])
       .withExec(["test", "-f", modulePath + "/dagger-module.toml"])
       .withExec(["test", "!", "-e", modulePath + "/dagger.json"])
       .withExec(["test", "-f", modulePath + "/pyproject.toml"])
@@ -44,6 +46,21 @@ type EngineE2e {
       .withExec(["dagger", "-m", modulePath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
       .stdout
     assert(release.trimSpace != "", "the generated module did not run")
+
+    initialized
+      .withExec([
+        "dagger", "module", "init", "python", "--auto-apply",
+        "--name", "sdk-settings",
+        "--path", ".dagger/modules/sdk-settings",
+        "--template", "empty",
+        "--python-version", "3.13",
+        "--use-uv=false",
+        "--base-image", "python:3.13-slim",
+      ])
+      .withExec(["grep", "-q", "class SdkSettings:", ".dagger/modules/sdk-settings/src/sdk_settings/__init__.py"])
+      .withExec(["grep", "-q", ">=3.13", ".dagger/modules/sdk-settings/pyproject.toml"])
+      .withExec(["grep", "-q", "use-uv = false", ".dagger/modules/sdk-settings/pyproject.toml"])
+      .withExec(["grep", "-q", "python:3.13-slim", ".dagger/modules/sdk-settings/pyproject.toml"])
 
     null
   }

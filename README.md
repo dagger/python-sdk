@@ -6,16 +6,17 @@ SDK-specific module authoring (scaffolding new modules, language build config,
 codegen) lives in modules like this one. The engine drives the SDK
 (dagger/dagger#13992): it records a module scope in `dagger.toml`, sets the
 workspace cwd to it, and asks this module to generate the complete scope
-through `detectScope` and `generateScope`. The module writes the manifest and
+through `findClientRoot` and `generateScope`. The module writes the manifest and
 its own files; the engine owns the workspace bookkeeping.
 
-It uses the engine's native `Workspace` and `ModuleSource` APIs directly.
+It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
+`sdkHelpers.moduleManifest` from `dagger/sdk-helpers`.
 
 ## What lives here
 
 | Path | What it is |
 | --- | --- |
-| `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `detectScope`, `generateScope`, `mod` (generate, config), templates |
+| `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `findClientRoot`, `generateScope`, `mod` (generate, config), templates |
 | `sdk/` | the `dagger-io` client library and code generator |
 | `runtime/` | the module runtime the engine calls to run a module |
 
@@ -26,18 +27,18 @@ result into the module. The runtime never generates: it builds a module from its
 `dagger call`, and a module that has not been generated fails with an
 actionable error rather than being silently regenerated.
 
-Pre-1.0 `dagger.json` modules are the exception: they keep being generated and
-run by the Python SDK baked into the engine, exactly as before.
+When a managed pre-1.0 `dagger.json` scope is generated, the SDK writes
+`dagger-module.toml` and removes `dagger.json`. An unmanaged legacy module keeps
+using the Python SDK that is built into the engine.
 
 ## Two runtimes, one name
 
 Python modules reach one of two implementations, and which one is decided by
 the module's config format:
 
-- **Legacy** — a `dagger.json` with `"sdk": {"source": "python"}` resolves to
-  the runtime baked into the engine (`dagger/dagger`'s `sdk/python`), which
-  still generates bindings at module load. Nothing about those modules changes,
-  and they need no migration.
+- **Legacy** — an unmanaged `dagger.json` with `"sdk": {"source": "python"}`
+  resolves to the runtime built into the engine (`dagger/dagger`'s
+  `sdk/python`). It still generates bindings at module load.
 - **Modern** — a `dagger-module.toml` can point `[runtime] source` at this
   repository's `runtime/`, which is the no-codegen path above. Either a module
   ref or a path relative to the module works, for both `dagger generate` and
@@ -167,27 +168,12 @@ again.
 Standalone clients, in a scope without a module, are not generated yet; adding
 one to a Python scope is refused and the workspace is left unchanged.
 
-## Skipping generation
-
-A `.dagger-python-sdk-skip-generate` file at or above an existing module root
-makes `dagger generate` and `mod generate` leave that module as it is. Useful
-for fixtures, vendored modules, or anything you don't want regenerated. A new
-module is always generated.
-
-```sh
-touch some/fixture/.dagger-python-sdk-skip-generate
-```
-
 ## Test
 
 ```sh
 dagger check
 ```
 
-`engine-e-2-e:dev-sdk-check` builds an engine from dagger/dagger#13992 at the
-commit pinned in `.dagger/modules/engine-e2e` (the `engine-dev` dependency and
-`engineCommit`), installs this checkout as the `python` SDK, initializes a
-Python module, and calls it. Bump both to follow the branch. The `e-2-e:*`
-checks that call this module need an engine with that change as well; on the
-released engine they fail, because the module selects `moduleManifest`, which
-that engine does not have.
+`engine-e-2-e:dev-sdk-check` builds the pinned dagger/dagger#13992 engine. It
+runs the SDK interface checks, initializes Python modules with default and
+explicit settings, and calls a generated module.

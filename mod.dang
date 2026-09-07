@@ -13,11 +13,6 @@ type Mod {
   let ws: Workspace!
 
   """
-  Marker filename that skips generate when found at or above this module root.
-  """
-  let skipGenerateFilename: String!
-
-  """
   Module root relative to the client's cwd.
   """
   pub path: String! {
@@ -37,13 +32,6 @@ type Mod {
   }
 
   """
-  Whether this module or an ancestor contains the configured generate skip marker.
-  """
-  pub skipGenerate: Boolean! {
-    ws.findUp(name: skipGenerateFilename, from: "/" + rootPath) != null
-  }
-
-  """
   Manage this module's Python build configuration (pyproject.toml).
   """
   pub config: ModConfig! {
@@ -52,19 +40,13 @@ type Mod {
 
   """
   Generate this module.
-  If the generate skip marker is present, the changeset is empty.
   """
   pub generate: Changeset! {
-    if (skipGenerate) {
-      ws.changes(ws)
-    } else {
-      generated.changes(ws)
-    }
+    generated.changes(ws)
   }
 
   """
-  The workspace with this module's generated files merged in. The generate skip
-  marker is not applied here; `generate` applies it.
+  The workspace with this module's generated files merged in.
   """
   pub generated: Workspace! {
     let files = if (isModern) {
