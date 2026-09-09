@@ -177,13 +177,3 @@ dagger check
 `engine-e-2-e:dev-sdk-check` builds the pinned dagger/dagger#13992 engine. It
 runs the SDK interface checks, initializes Python modules with default and
 explicit settings, and calls a generated module.
-
-## Manifest pins
-
-This SDK uses `sdk-helpers@v1` to generate module manifests.
-The `lock` SDK setting defaults to `false`. A pin is a manifest field that stores
-a selected Git commit. Default output has no pin fields. Set `lock` to `true`
-to write selected commits as pins. Local dependencies need no pin.
-
-Source references stay intact, including any commit in a source reference.
-Commit data used by generated clients also stays intact.
