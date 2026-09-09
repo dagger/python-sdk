@@ -13,7 +13,7 @@
   "dependencies": [
     {
       "name": "sdk-helpers",
-      "source": "github.com/dagger/sdk-helpers"
+      "source": "github.com/dagger/sdk-helpers@v1"
     }
   ]
 }

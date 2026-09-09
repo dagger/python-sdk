@@ -245,6 +245,27 @@ type E2e {
     null
   }
 
+  """Git pins follow lock, and JSON is removed in both modes."""
+  pub generateScopePinsCheck(ws: Workspace!): Void @check {
+    let commit = "64645f1967d3dba6fce951dd61ae4acd8d9b0861"
+    let target = moduleSource("github.com/dagger/sdk-helpers@main", refPin: commit)
+    let input = ws.withWorkdir(tomlGenerateModulePath).withNewFile("keep.txt", "keep")
+    let unlocked = pythonSdk.generateScope(input, isModule: true, name: "toml-generate-app", clients: [target])
+    assertNotContains(unlocked.file("dagger-module.toml").contents, "pin =", "default output contains a pin")
+    assertContains(unlocked.file("dagger-module.toml").contents, target.asString, "Git source changed")
+    let locked = pythonSdk(lock: true).generateScope(unlocked, isModule: true, name: "toml-generate-app", clients: [target])
+    assertContains(locked.file("dagger-module.toml").contents, "pin = \"" + commit + "\"", "selected commit was lost")
+    let unlockedAgain = pythonSdk.generateScope(locked.withNewFile("dagger.json", "stale"), isModule: true, name: "toml-generate-app", clients: [target])
+    assertNotContains(unlockedAgain.file("dagger-module.toml").contents, "pin =", "disabling lock retained a pin")
+    assert(!unlockedAgain.directory(".").exists("dagger.json"), "generation retained JSON")
+    assert(unlockedAgain.cwd == input.cwd, "generation changed cwd")
+    assert(unlockedAgain.file("keep.txt").contents == "keep", "generation changed another file")
+    assertContains(unlockedAgain.file("dagger-module.toml").contents, "engineVersion = \"v1.0.0-0\"", "generation changed the engine version")
+    let repeated = pythonSdk.generateScope(unlockedAgain, isModule: true, name: "toml-generate-app", clients: [target])
+    assert(repeated.changes(unlockedAgain).isEmpty, "repeated generation changed the workspace")
+    null
+  }
+
   """
   Generation reports only what it produced: dagger.json and the committed
   .gitattributes are already on disk, so a changeset adding either describes
