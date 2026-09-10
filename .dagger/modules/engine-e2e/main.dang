@@ -19,6 +19,7 @@ type EngineE2e {
   """
   pub devSdkCheck(ws: Workspace!): Void @check {
     let sdkSource = ws.directory("/", exclude: [".git", ".remember", "**/.venv", "**/__pycache__", ".dagger/modules/e2e/out"])
+      .withFile("dagger.toml", ws.file("/.dagger/modules/engine-e2e/workspace.toml"))
     let engineSource = git("https://github.com/dagger/dagger")
       .ref(engineCommit)
       .asWorkspace
@@ -31,7 +32,7 @@ type EngineE2e {
     let listed = client.withExec(["dagger", "sdk", "list"])
     assert(listed.stdout.contains("python"), "the development Python SDK was not listed")
 
-    let checked = listed.withExec(["dagger", "-m", ".dagger/modules/e2e", "check"])
+    let checked = listed.withExec(["dagger", "check"])
 
     let initialized = checked
       .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "sdk-smoke", "--path", modulePath])
