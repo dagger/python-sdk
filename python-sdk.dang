@@ -7,6 +7,9 @@ type PythonSdk {
   """
   pub template: String! = "default"
 
+  """Write selected Git commits as manifest pins."""
+  pub lock: Boolean! = false
+
   """
   Python version written to a new module's pyproject.toml; empty keeps the template's.
   """
@@ -119,38 +122,9 @@ type PythonSdk {
     } else {
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
     }
-    let configured = clients.{{moduleName, kind, sourceRootSubpath, asString, pin}}
-      .reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>
-        manifest.withLegacyRuntimeDependency(
-          source: dependencySource(scope, client.kind, client.sourceRootSubpath, client.asString),
-          name: client.moduleName,
-          pin: client.pin,
-        )
-      }
-    let generated = ws.withFile(root + "/dagger-module.toml", configured.tomlFile)
-
-    if (hasJson) {
-      generated.withoutFile(root + "/dagger.json")
-    } else {
-      generated
-    }
-  }
-
-  """
-  The dependency source a client is recorded as: a git ref as is, a local
-  module by its path relative to the module.
-  """
-  let dependencySource(scope: String!, kind: ModuleSourceKind!, sourceRootSubpath: String!, ref: String!): String! {
-    if (kind == ModuleSourceKind.GIT_SOURCE) {
-      ref
-    } else {
-      let relative = Path(normalizePath(sourceRootSubpath)).relativeTo(Path(scope))
-      if (relative == null) {
-        raise "cannot resolve client module path " + sourceRootSubpath + " from scope " + scope
-      } else {
-        relative.string
-      }
-    }
+    clients.reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>
+      manifest.withLegacyRuntimeDependency(module: client)
+    }.generate(ws.withWorkdir(scope), lock: lock, legacyJson: false).withWorkdir(".")
   }
 
   """

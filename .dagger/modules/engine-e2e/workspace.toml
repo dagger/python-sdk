@@ -1,0 +1,42 @@
+# Dagger workspace configuration
+# Install modules with: dagger module install <module>
+# Example:
+#   dagger module install github.com/dagger/dagger/modules/wolfi
+
+[modules.e2e]
+source = ".dagger/modules/e2e"
+
+[modules.python-sdk]
+source = "."
+check.skip = ["*"]
+
+[sdks.python]
+module = "python-sdk"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/generate/app"]
+is-module = true
+name = "generate-app"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/lookup/app"]
+is-module = true
+name = "lookup-app"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/toml/app"]
+is-module = true
+name = "toml-app"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/mixed-discovery/ancestor/work/app"]
+is-module = true
+name = "mixed-discovery-app"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/config/app"]
+is-module = true
+name = "config-app"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/config/configured"]
+is-module = true
+name = "config-configured"
+
+[sdks.python.scopes.".dagger/modules/e2e/fixtures/toml-generate/app"]
+is-module = true
+name = "toml-generate-app"
