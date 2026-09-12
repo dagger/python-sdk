@@ -121,7 +121,7 @@ the mode that module is in; switching modes goes through
 `sdk/entrypoint/` and rewrites a runtime manifest with the generating
 engine's version. Loading a static module needs an engine that reads
 manifest version 2 (dagger/dagger#14038); see
-[`future/static-module-entrypoint.md`](./future/static-module-entrypoint.md)
+[`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design and the plan to make it the default.
 
 ## Install

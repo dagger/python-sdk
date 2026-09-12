@@ -2,7 +2,8 @@
 
 author: yves
 created: 2026-09-11
-status: approved 2026-09-12, in implementation
+status: done (phase 1 landed as draft PR dagger/python-sdk#28; phase 2 flips the
+default once released engines load manifest version 2)
 related: `dagger/dagger#14038` (manifest v2 entrypoints, draft, head
 `75c777223ccc4baaf5819a04d70d060034a94dbb`); `dagger/dagger#13992` (SDK
 interface, merged 2026-09-09 as `908d48ebda4b3dd1c33c8bebba49b90abb4f2953`,
@@ -798,7 +799,7 @@ Phase B has these gates, all of which must hold:
 
 ## Affected components
 
-- `future/static-module-entrypoint.md` (this document)
+- `future/done/static-module-entrypoint.md` (this document)
 - `sdk/src/dagger/mod/_describe.py` (new); `_converter.py` and `_module.py`
   materialise the description; `_entrypoint.py` (new, the renderer and the
   digests); `__main__.py` (new, `entrypoint` and `call`)
@@ -1041,3 +1042,6 @@ leaves `dagger check` and `uv run --frozen pytest` green.
   carries only the name). Re-verified on the dev engine: a `.venv/` or a
   hidden directory with Python files does not trip the guard; an added
   `uv.lock` or `src/hello/extra.py` is refused naming the file.
+- Phase 6 and 7 — 2026-09-12: draft PR `dagger/python-sdk#28`, head
+  `a3b8d6f`; CI green (`engine-e-2-e:dev-sdk-check`, `load`). Phase 2 of
+  the rollout waits for a released engine that loads version 2.
