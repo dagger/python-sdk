@@ -15,6 +15,7 @@ type E2e {
   let runtimeModulePath: String! = fixtureRoot + "/runtime/app"
   let tomlGenerateModulePath: String! = fixtureRoot + "/toml-generate/app"
   let clientDepPath: String! = fixtureRoot + "/clients/dep"
+  let staticTypesModulePath: String! = fixtureRoot + "/static-types"
   let runtimeGreeting: String! = "served by the python-sdk runtime"
   let mixedDiscoveryModulePath: String! = fixtureRoot + "/mixed-discovery/ancestor/work/app"
   let mixedDiscoveryNestedPath: String! = mixedDiscoveryModulePath + "/nested/deeper"
@@ -451,6 +452,138 @@ type E2e {
     assertContains(partial.after.file(configuredPyproj).contents, ">=3.13", "partial set did not update python version")
     assertContains(partial.after.file(configuredPyproj).contents, "use-uv = false", "omitting useUv should leave it untouched")
     assertContains(partial.after.file(configuredPyproj).contents, "python:3.12-slim", "omitting baseImage should leave it untouched")
+
+    null
+  }
+
+
+  """
+  A static entrypoint scope: the manifest version 2, the template, bindings
+  from the current schema view, and the generated entrypoint whose digests
+  are the engine's.
+  """
+  pub staticScopeInitCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/static-init"
+    let scoped = ws.withNewDirectory("/" + scope, directory).withWorkdir(scope)
+    let generated = pythonSdk(staticEntrypoint: true).generateScope(scoped, isModule: true, name: "static-init", clients: [])
+    let changes = generated.withWorkdir(".").changes(scoped.withWorkdir("."))
+
+    assert(generated.cwd == scoped.cwd, "generateScope must not change the workspace cwd")
+    let manifest = changes.layer.file(scope + "/dagger-module.toml").contents
+    assert(
+      manifest == "manifestVersion = 2\nname = \"static-init\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./sdk/entrypoint\"\n",
+      "unexpected static manifest: " + manifest,
+    )
+    assertAdded(changes, scope + "/src/static_init/__init__.py")
+    # Fields the oldest schema view lacks: the bindings came from the current one.
+    assertContainsAll(changes.layer.file(scope + "/" + generatedMarkerPath).contents, ["def cwd(", "def with_new_file("])
+
+    let main = changes.layer.file(scope + "/sdk/entrypoint/main.dang").contents
+    assertContainsAll(main, [
+      "implements ModuleEntrypoint",
+      "let moduleName: String! = \"static-init\"",
+      "let modulePath: String! = \"" + scope + "\"",
+    ])
+    ["pyproject.toml", "src/static_init/__init__.py"].each { path =>
+      let digest = changes.after.directory(scope).file(path).digest(excludeMetadata: true)
+      assertContains(main, "SourceFile(path: \"" + path + "\", digest: \"" + digest + "\")", "the baked digest of " + path + " is not the engine's")
+      null
+    }
+    let types = changes.layer.file(scope + "/sdk/entrypoint/types.dang").contents
+    assertContainsAll(types, ["typeDef.withObject(\"StaticInit\"", "function(\"container\"", "withConstructor("])
+    assertContainsNone(types, ["withField(", "withCachePolicy("])
+    let build = changes.layer.file(scope + "/sdk/entrypoint/build.dang").contents
+    assertContainsAll(build, ["type PythonModuleBuild", "let defaultBaseImage: String! = \"python:", "let defaultUvImage: String! = \"ghcr.io/astral-sh/uv:"])
+    assertNotContains(build, "currentModule", "build.dang still reads the SDK module's source")
+
+    null
+  }
+
+  """
+  A module moves between the two paths by flipping the setting: the manifest
+  version 2 and the entrypoint appear, then disappear again, then come back
+  the same.
+  """
+  pub staticScopeSwitchCheck(ws: Workspace!): Void @check {
+    let manifestPath = tomlGenerateModulePath + "/dagger-module.toml"
+    let entrypointPath = tomlGenerateModulePath + "/sdk/entrypoint"
+    let name = "toml-generate-app"
+
+    let static = pythonSdk(staticEntrypoint: true).generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    let toStatic = static.changes(ws)
+    assertContains(toStatic.after.file(manifestPath).contents, "manifestVersion = 2", "switching to a static entrypoint did not write a manifest version 2")
+    ["main.dang", "types.dang", "build.dang"].each { file => assertAdded(toStatic, entrypointPath + "/" + file) }
+    assert(toStatic.modifiedPaths.filter { path => path.hasPrefix(tomlGenerateModulePath + "/src/") }.length == 0, "switching touched user files")
+
+    let dynamic = pythonSdk.generateScope(static.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    let manifest = dynamic.file("/" + manifestPath).contents
+    assertContainsAll(manifest, ["name = \"toml-generate-app\"", "[runtime]", "source = \"python\""])
+    assertNotContains(manifest, "entrypoint", "switching back kept the entrypoint in the manifest")
+    assert(dynamic.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "switching back left the entrypoint behind")
+
+    let again = pythonSdk(staticEntrypoint: true).generateScope(dynamic.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    assert(again.changes(static).isEmpty, "a second switch to static differs from the first")
+
+    null
+  }
+
+  """
+  The static path refuses what a manifest version 2 cannot carry, before
+  writing anything.
+  """
+  pub staticScopeRefusalsCheck(ws: Workspace!): Void @check {
+    let static = pythonSdk(staticEntrypoint: true)
+    let name = "toml-generate-app"
+    let scoped = ws.withWorkdir(tomlGenerateModulePath)
+    let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
+    let runtimeManifest = "name = \"toml-generate-app\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"python\"\n"
+
+    let withClient = static.generateScope(scoped, isModule: true, name: name, clients: [ws.moduleSource("/" + clientDepPath)]).cwd rescue "raised"
+    assert(withClient == "raised", "a static entrypoint accepted a dependency")
+
+    let legacyScope = outputRoot + "/static-legacy"
+    let legacy = pythonSdk(staticEntrypoint: true, template: "legacy")
+      .generateScope(ws.withNewDirectory("/" + legacyScope, directory).withWorkdir(legacyScope), isModule: true, name: "static-legacy", clients: [])
+      .cwd rescue "raised"
+    assert(legacy == "raised", "the legacy template was generated with a static entrypoint")
+
+    let cached = static.generateScope(ws.withNewFile(manifestPath, "disableDefaultFunctionCaching = true\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
+    assert(cached == "raised", "disableDefaultFunctionCaching was dropped silently")
+
+    let included = static.generateScope(ws.withNewFile(manifestPath, "include = [\"src\"]\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
+    assert(included == "raised", "an include list was dropped silently")
+
+    # A module rooted at its own directory is what version 2 assumes, so this
+    # one generates instead of being refused.
+    let selfSourced = static.generateScope(ws.withNewFile(manifestPath, "source = \".\"\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents
+    assertContains(selfSourced, "manifestVersion = 2", "source = \".\" was refused on the static path")
+
+    let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
+    let neverCached = "from dagger import function, object_type\n\n\n@object_type\nclass TomlGenerateApp:\n    @function(cache=\"never\")\n    def hello(self) -> str:\n        return \"hello\"\n"
+    # Refused by the container that renders the types, so reading the
+    # rendered file is what triggers the refusal.
+    let fresh = static.generateScope(ws.withNewFile(sourcePath, neverCached).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang").contents rescue "raised"
+    assert(fresh == "raised", "a cache policy was accepted on the static path")
+
+    null
+  }
+
+  """
+  The rendered types.dang type-checks and evaluates as a Dang module on this
+  engine: the same builder calls the entrypoint makes at load time.
+  """
+  pub staticTypesLoadCheck(ws: Workspace!): Void @check {
+    let generated = pythonSdk(staticEntrypoint: true)
+      .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    let types = generated.file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang")
+    let run = sdkSdk
+      .target(ws.directory("/").withFile(staticTypesModulePath + "/types.dang", types), ".")
+      .runInstalled(["call", "-m", "vendor/sdk-workspace/" + staticTypesModulePath, "count"])
+    run.assertSuccess
+    assert(run.stdout.trimSpace == "1", "types.dang did not evaluate to the fixture's one type: " + run.stdout)
 
     null
   }
