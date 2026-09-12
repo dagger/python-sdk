@@ -19,7 +19,17 @@ from typing_extensions import dataclass_transform, overload
 import dagger
 from dagger import dag
 from dagger.client._core import configure_converter_enum
-from dagger.mod._converter import make_converter, to_typedef
+from dagger.mod._converter import make_converter, typedef_from
+from dagger.mod._describe import (
+    ArgumentDescription,
+    EnumDescription,
+    EnumMemberDescription,
+    FieldDescription,
+    FunctionDescription,
+    ModuleDescription,
+    ObjectDescription,
+    describe_type,
+)
 from dagger.mod._exceptions import (
     BadUsageError,
     FunctionError,
@@ -123,7 +133,11 @@ class Module:
             raise RegistrationError(str(e), e) from e
         await anyio.Path(TYPE_DEF_FILE).write_text(output)
 
-    async def _typedefs(self) -> str:  # noqa: C901, PLR0912, PLR0915
+    async def _typedefs(self) -> str:
+        return await _module_from(self.describe()).id()
+
+    def describe(self) -> ModuleDescription:
+        """Describe the registered types as plain data."""
         if not self._main_name:
             msg = "Main object name can't be empty"
             raise ValueError(msg)
@@ -138,140 +152,22 @@ class Module:
             )
             raise ObjectNotFoundError(msg, extra=e.extra) from None
 
-        mod = dag.module()
-
-        # Object types
+        description = None
+        objects = []
         for obj_name, obj_type in self._objects.items():
             if self.is_main(obj_type):
                 # Only the main object's constructor is needed.
                 # It's the entrypoint to the module.
                 obj_type.get_constructor(self._converter)
+                description = get_parent_module_doc(obj_type.cls)
+            objects.append(_describe_object(obj_name, obj_type))
 
-                # Module description from main object's parent module
-                if desc := get_parent_module_doc(obj_type.cls):
-                    mod = mod.with_description(desc)
-
-            # Object/interface type
-            type_def = dag.type_def()
-            if obj_type.interface:
-                type_def = type_def.with_interface(
-                    obj_name,
-                    description=get_doc(obj_type.cls),
-                )
-            else:
-                type_def = type_def.with_object(
-                    obj_name,
-                    description=get_doc(obj_type.cls),
-                    deprecated=obj_type.deprecated,
-                )
-
-            # Object fields
-            if obj_type.fields:
-                types = typing.get_type_hints(obj_type.cls)
-
-                for field_name, field in obj_type.fields.items():
-                    ctx = f"type for field '{field.original_name}' in {obj_type}"
-                    type_def = type_def.with_field(
-                        field_name,
-                        to_typedef(types[field.original_name], ctx),
-                        description=get_doc(field.return_type),
-                        deprecated=field.meta.deprecated,
-                    )
-
-            # Object/interface functions
-            for func_name, func in obj_type.functions.items():
-                what = f"function '{func_name}'" if func_name else "constructor"
-
-                func_def = dag.function(
-                    func_name,
-                    to_typedef(
-                        func.return_type,
-                        f"return type for {what} in {obj_type}",
-                    ),
-                )
-
-                if doc := func.doc:
-                    func_def = func_def.with_description(doc)
-
-                if func.cache_policy is not None:
-                    if func.cache_policy == "never":
-                        func_def = func_def.with_cache_policy(
-                            dagger.FunctionCachePolicy.Never,
-                        )
-                    elif func.cache_policy == "session":
-                        func_def = func_def.with_cache_policy(
-                            dagger.FunctionCachePolicy.PerSession,
-                        )
-                    elif func.cache_policy != "":
-                        func_def = func_def.with_cache_policy(
-                            dagger.FunctionCachePolicy.Default,
-                            time_to_live=func.cache_policy,
-                        )
-                if deprecated := func.deprecated:
-                    func_def = func_def.with_deprecated(reason=deprecated)
-                if func.check:
-                    func_def = func_def.with_check()
-                if func.generate:
-                    func_def = func_def.with_generator()
-                if func.service:
-                    func_def = func_def.with_up()
-                if func.agent:
-                    func_def = func_def.with_agent()
-
-                for param in func.parameters.values():
-                    arg_def = to_typedef(
-                        param.resolved_type,
-                        f"parameter type for '{param.name}' in {what} and {obj_type}",
-                    )
-
-                    if param.is_nullable:
-                        arg_def = arg_def.with_optional(True)
-
-                    func_def = func_def.with_arg(
-                        param.name,
-                        arg_def,
-                        description=param.doc,
-                        default_value=param.default_value,
-                        default_path=param.default_path,
-                        default_address=param.default_address,
-                        ignore=param.ignore,
-                        deprecated=param.deprecated,
-                    )
-
-                type_def = (
-                    type_def.with_constructor(func_def)
-                    if func_name == ""
-                    else type_def.with_function(func_def)
-                )
-
-            # Add object/interface to module
-            mod = (
-                mod.with_interface(type_def)
-                if obj_type.interface
-                else mod.with_object(type_def)
-            )
-
-        # Enum types
-        for name, cls in self._enums.items():
-            enum_def = dag.type_def().with_enum(name, description=get_doc(cls))
-            member_docs = extract_enum_member_doc(cls)
-
-            for member in cls:
-                description = getattr(member, "description", None)
-                meta = member_docs.get(member.name)
-
-                if description is None and meta and meta.description is not None:
-                    description = meta.description
-
-                enum_def = enum_def.with_enum_member(
-                    member.name,
-                    value=str(member.value),
-                    description=description,
-                    deprecated=meta.deprecated if meta else None,
-                )
-            mod = mod.with_enum(enum_def)
-
-        return await mod.id()
+        return ModuleDescription(
+            main_object=self._main_name,
+            description=description,
+            objects=tuple(objects),
+            enums=tuple(_describe_enum(name, cls) for name, cls in self._enums.items()),
+        )
 
     async def invoke(self) -> str:
         """Invoke a function and return its result.
@@ -347,6 +243,25 @@ class Module:
             )
 
         return result
+
+    async def dispatch(self, request: Mapping[str, Any]) -> Any:
+        """Run the call a ModuleEntrypoint forwards.
+
+        The receiver state and the arguments arrive as JSON text.
+        """
+        receiver = request.get("receiverValue") or ""
+        try:
+            parent_state = json.loads(receiver) if receiver.strip() else None
+            inputs = json.loads(request["fnArgs"])
+        except ValueError as e:
+            msg = "Unable to decode the call request"
+            raise InvalidInputError(msg, extra={"request": request}) from e
+        return await self.get_result(
+            request["receiverType"],
+            parent_state or {},
+            request["fnName"],
+            inputs,
+        )
 
     async def get_result(
         self,
@@ -1040,3 +955,193 @@ class Module:
             return cls
 
         return wrapper(cls) if cls else wrapper
+
+
+def _describe_object(name: str, obj_type: ObjectType) -> ObjectDescription:
+    fields: tuple[FieldDescription, ...] = ()
+    if obj_type.fields:
+        types = typing.get_type_hints(obj_type.cls)
+        fields = tuple(
+            FieldDescription(
+                name=field.name,
+                type=describe_type(
+                    types[field.original_name],
+                    f"type for field '{field.original_name}' in {obj_type}",
+                ),
+                description=get_doc(field.return_type),
+                deprecated=field.meta.deprecated,
+            )
+            for field in obj_type.fields.values()
+        )
+
+    functions = []
+    constructor = None
+    for func_name, func in obj_type.functions.items():
+        described = _describe_function(func_name, func, obj_type)
+        if func_name == "":
+            constructor = described
+        else:
+            functions.append(described)
+
+    return ObjectDescription(
+        name=name,
+        interface=obj_type.interface,
+        description=get_doc(obj_type.cls),
+        deprecated=obj_type.deprecated,
+        fields=fields,
+        functions=tuple(functions),
+        constructor=constructor,
+    )
+
+
+def _describe_function(
+    name: str,
+    func: Function,
+    obj_type: ObjectType,
+) -> FunctionDescription:
+    what = f"function '{name}'" if name else "constructor"
+    returns = describe_type(func.return_type, f"return type for {what} in {obj_type}")
+    args = tuple(
+        ArgumentDescription(
+            name=param.name,
+            type=describe_type(
+                param.resolved_type,
+                f"parameter type for '{param.name}' in {what} and {obj_type}",
+            ),
+            nullable=param.is_nullable,
+            description=param.doc,
+            default_value=param.default_value,
+            default_path=param.default_path,
+            default_address=param.default_address,
+            ignore=tuple(param.ignore) if param.ignore is not None else None,
+            deprecated=param.deprecated,
+        )
+        for param in func.parameters.values()
+    )
+    return FunctionDescription(
+        name=name,
+        returns=returns,
+        description=func.doc,
+        cache=func.cache_policy,
+        deprecated=func.deprecated,
+        check=func.check,
+        generator=func.generate,
+        service=func.service,
+        agent=func.agent,
+        args=args,
+    )
+
+
+def _describe_enum(name: str, cls: type[enum.Enum]) -> EnumDescription:
+    member_docs = extract_enum_member_doc(cls)
+    members = []
+    for member in cls:
+        description = getattr(member, "description", None)
+        meta = member_docs.get(member.name)
+        if description is None and meta and meta.description is not None:
+            description = meta.description
+        members.append(
+            EnumMemberDescription(
+                name=member.name,
+                value=str(member.value),
+                description=description,
+                deprecated=meta.deprecated if meta else None,
+            )
+        )
+    return EnumDescription(name, get_doc(cls), tuple(members))
+
+
+def _module_from(desc: ModuleDescription) -> dagger.Module:
+    mod = dag.module()
+    for obj in desc.objects:
+        if obj.name == desc.main_object and desc.description:
+            mod = mod.with_description(desc.description)
+        type_def = _object_from(obj)
+        mod = (
+            mod.with_interface(type_def) if obj.interface else mod.with_object(type_def)
+        )
+    for enum_desc in desc.enums:
+        mod = mod.with_enum(_enum_from(enum_desc))
+    return mod
+
+
+def _object_from(obj: ObjectDescription) -> dagger.TypeDef:
+    type_def = dag.type_def()
+    if obj.interface:
+        type_def = type_def.with_interface(obj.name, description=obj.description)
+    else:
+        type_def = type_def.with_object(
+            obj.name,
+            description=obj.description,
+            deprecated=obj.deprecated,
+        )
+    for field in obj.fields:
+        type_def = type_def.with_field(
+            field.name,
+            typedef_from(field.type),
+            description=field.description,
+            deprecated=field.deprecated,
+        )
+    for func in obj.functions:
+        type_def = type_def.with_function(_function_from(func))
+    if obj.constructor is not None:
+        type_def = type_def.with_constructor(_function_from(obj.constructor))
+    return type_def
+
+
+def _function_from(func: FunctionDescription) -> dagger.Function:  # noqa: C901
+    func_def = dag.function(func.name, typedef_from(func.returns))
+    if func.description:
+        func_def = func_def.with_description(func.description)
+    if func.cache == "never":
+        func_def = func_def.with_cache_policy(dagger.FunctionCachePolicy.Never)
+    elif func.cache == "session":
+        func_def = func_def.with_cache_policy(dagger.FunctionCachePolicy.PerSession)
+    elif func.cache:
+        func_def = func_def.with_cache_policy(
+            dagger.FunctionCachePolicy.Default,
+            time_to_live=func.cache,
+        )
+    if func.deprecated:
+        func_def = func_def.with_deprecated(reason=func.deprecated)
+    if func.check:
+        func_def = func_def.with_check()
+    if func.generator:
+        func_def = func_def.with_generator()
+    if func.service:
+        func_def = func_def.with_up()
+    if func.agent:
+        func_def = func_def.with_agent()
+    for arg in func.args:
+        arg_def = typedef_from(arg.type)
+        if arg.nullable:
+            arg_def = arg_def.with_optional(True)
+        func_def = func_def.with_arg(
+            arg.name,
+            arg_def,
+            description=arg.description,
+            default_value=(
+                dagger.JSON(arg.default_value)
+                if arg.default_value is not None
+                else None
+            ),
+            default_path=arg.default_path,
+            default_address=arg.default_address,
+            ignore=list(arg.ignore) if arg.ignore is not None else None,
+            deprecated=arg.deprecated,
+        )
+    return func_def
+
+
+def _enum_from(enum_desc: EnumDescription) -> dagger.TypeDef:
+    enum_def = dag.type_def().with_enum(
+        enum_desc.name, description=enum_desc.description
+    )
+    for member in enum_desc.members:
+        enum_def = enum_def.with_enum_member(
+            member.name,
+            value=member.value,
+            description=member.description,
+            deprecated=member.deprecated,
+        )
+    return enum_def

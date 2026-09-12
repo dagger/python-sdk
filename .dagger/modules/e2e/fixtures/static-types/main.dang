@@ -1,0 +1,12 @@
+"""
+Loads a generated types.dang, written next to this file by the e2e check,
+as an ordinary Dang module.
+"""
+type StaticTypes {
+  """
+  Number of types the generated types.dang defines.
+  """
+  pub count: Int! {
+    ModuleTypes().all.{{kind}}.length
+  }
+}
