@@ -244,6 +244,25 @@ class Module:
 
         return result
 
+    async def dispatch(self, request: Mapping[str, Any]) -> Any:
+        """Run the call a ModuleEntrypoint forwards.
+
+        The receiver state and the arguments arrive as JSON text.
+        """
+        receiver = request.get("receiverValue") or ""
+        try:
+            parent_state = json.loads(receiver) if receiver.strip() else None
+            inputs = json.loads(request["fnArgs"])
+        except ValueError as e:
+            msg = "Unable to decode the call request"
+            raise InvalidInputError(msg, extra={"request": request}) from e
+        return await self.get_result(
+            request["receiverType"],
+            parent_state or {},
+            request["fnName"],
+            inputs,
+        )
+
     async def get_result(
         self,
         parent_name: str,
