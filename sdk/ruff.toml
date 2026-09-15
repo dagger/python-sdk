@@ -88,6 +88,8 @@ ignore = [
 ]
 # Same as above, for dev module
 "src/dagger_gen.py" = ["A", "D", "E501", "SLF001", "PLR0913"]
+# The Dang entrypoint template has lines as long as the Dang they produce.
+"src/dagger/mod/_entrypoint.py" = ["E501"]
 # Ignore built-in shadowing in test mocks.
 "./tests/client/test_inputs.py" = ["A", "ERA001"]
 "./tests/*.py" = [

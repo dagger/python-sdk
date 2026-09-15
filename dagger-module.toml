@@ -1,6 +1,6 @@
 name = "python-sdk"
 engineVersion = "v1.0.0-beta.11"
-include = ["!runtime", "!.dagger", "!future", "!docs"]
+include = ["!.dagger", "!future", "!docs"]
 
 [runtime]
 source = "dang"
@@ -8,3 +8,7 @@ source = "dang"
 [[dependencies]]
 name = "sdk-helpers"
 source = "dagger.io/sdk/helpers@v1"
+
+[[dependencies]]
+name = "python-sdk-runtime"
+source = "runtime"

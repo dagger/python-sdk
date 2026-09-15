@@ -1,6 +1,4 @@
-import enum
 import functools
-import inspect
 import logging
 import typing
 
@@ -11,20 +9,14 @@ from dagger import dag
 from dagger.client._core import Arg, configure_converter_enum
 from dagger.client._guards import is_id_type, is_id_type_subclass
 from dagger.client.base import Interface, Scalar, Type
+from dagger.mod._describe import TypeRef, describe_type
 from dagger.mod._resolver import Function
 from dagger.mod._utils import (
-    get_doc,
     get_module,
     get_object_type,
-    is_annotated,
     is_dagger_interface_type,
     is_dagger_object_type,
-    is_initvar,
-    is_nullable,
-    is_subclass,
-    is_union,
     list_of,
-    non_null,
     strip_annotations,
     syncify,
     to_camel_case,
@@ -163,59 +155,29 @@ def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # n
 
 
 @functools.cache
-def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":  # noqa: C901, PLR0911
+def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":
     """Convert Python object to API type."""
-    if is_initvar(annotation):
-        return to_typedef(annotation.type, context)
+    return typedef_from(describe_type(annotation, context))
 
-    if is_annotated(annotation):
-        return to_typedef(strip_annotations(annotation), context)
 
+def typedef_from(ref: TypeRef) -> "TypeDef":
+    """Build the API type from its description."""
     td = dag.type_def()
 
-    typ = type(None) if annotation is None else annotation
-    error_msg = f"unsupported {context}: {typ!r}"
-
-    if is_nullable(typ):
+    if ref.optional:
         td = td.with_optional(True)
 
-    typ = non_null(typ)
-
-    # Can't represent unions in the API.
-    if is_union(typ):
-        raise TypeError(error_msg)
-
-    builtins = {
-        str: dagger.TypeDefKind.STRING_KIND,
-        int: dagger.TypeDefKind.INTEGER_KIND,
-        float: dagger.TypeDefKind.FLOAT_KIND,
-        bool: dagger.TypeDefKind.BOOLEAN_KIND,
-        type(None): dagger.TypeDefKind.VOID_KIND,
-    }
-
-    if typ in builtins:
-        return td.with_kind(builtins[typ])
-
-    if el := list_of(typ):
-        return td.with_list_of(to_typedef(el))
-
-    if inspect.isclass(cls := typ):
-        name = cls.__name__
-
-        if is_subclass(cls, enum.Enum):
-            return td.with_enum(name, description=get_doc(cls))
-
-        if is_subclass(cls, Scalar):
-            return td.with_scalar(name, description=get_doc(cls))
-
-        # object defined in this module
-        if obj_type := get_object_type(cls):
-            if obj_type.interface:
-                return td.with_interface(name)
-            return td.with_object(name)
-
-        # object type from API (codegen)
-        if is_id_type_subclass(cls):
-            return td.with_object(name)
-
-    raise TypeError(error_msg)
+    match ref.kind:
+        case dagger.TypeDefKind.LIST_KIND:
+            assert ref.elem is not None
+            return td.with_list_of(typedef_from(ref.elem))
+        case dagger.TypeDefKind.ENUM_KIND:
+            return td.with_enum(ref.name, description=ref.description)
+        case dagger.TypeDefKind.SCALAR_KIND:
+            return td.with_scalar(ref.name, description=ref.description)
+        case dagger.TypeDefKind.INTERFACE_KIND:
+            return td.with_interface(ref.name)
+        case dagger.TypeDefKind.OBJECT_KIND:
+            return td.with_object(ref.name)
+        case _:
+            return td.with_kind(ref.kind)

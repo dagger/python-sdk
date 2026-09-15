@@ -13,6 +13,12 @@ type Mod {
   let ws: Workspace!
 
   """
+  Whether the module gets a static entrypoint, from the SDK setting or from
+  the manifest it already has.
+  """
+  pub staticEntrypoint: Boolean!
+
+  """
   Module root relative to the client's cwd.
   """
   pub path: String! {
@@ -46,7 +52,9 @@ type Mod {
   }
 
   """
-  The workspace with this module's generated files merged in.
+  The workspace with this module's generated files merged in. On the static
+  path the manifest version 2 is written here too, so a module generated
+  directly gets the same files as one generated through the SDK scope.
   """
   pub generated: Workspace! {
     let files = if (isModern) {
@@ -62,15 +70,65 @@ type Mod {
     }
 
     # Merge, don't replace: the generated context holds only generated files.
-    ws.withDirectory("/" + rootPath, files)
+    let merged = ws.withDirectory("/" + rootPath, files)
+    let entrypointPath = vendorDirName + "/" + entrypointDirName
+    if (staticEntrypoint) {
+      merged.withNewFile("/" + manifestPath, entrypointManifest(moduleName))
+    } else if (ws.directory("/" + rootPath).exists(entrypointPath)) {
+      merged.withoutDirectory("/" + rootPath + "/" + entrypointPath)
+    } else {
+      merged
+    }
+  }
+
+  """
+  The manifest of a static module: the three keys manifest version 2 allows.
+  """
+  let entrypointManifest(name: String!): String! {
+    if (name.containsMatch("[\\x00-\\x1f\"\\\\]")) {
+      raise "module name cannot be written in a manifest: " + name
+    } else {
+      "manifestVersion = 2\nname = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./" + vendorDirName + "/" + entrypointDirName + "\"\n"
+    }
   }
 
   """
   Whether this module uses the 1.0 dagger-module.toml config.
   """
   let isModern: Boolean! {
-    let configPath = if (rootPath == ".") { "dagger-module.toml" } else { rootPath + "/dagger-module.toml" }
-    ws.directory("/", include: [configPath]).exists(configPath)
+    ws.directory("/", include: [manifestPath]).exists(manifestPath)
+  }
+
+  let manifestPath: String! {
+    if (rootPath == ".") { "dagger-module.toml" } else { rootPath + "/dagger-module.toml" }
+  }
+
+  let hasEntrypointManifest: Boolean! {
+    isModern and ws.file("/" + manifestPath).contents.containsMatch("(?m)^\\s*\\[entrypoint\\]")
+  }
+
+  let moduleName: String! {
+    let m = ws.file("/" + manifestPath).contents.match("(?m)^\\s*name\\s*=\\s*\"([^\"]*)\"")
+    if (m == null) {
+      raise "no module name in " + manifestPath
+    } else {
+      m.captures[0] ?? ""
+    }
+  }
+
+  """
+  The workspace the module's schema is read from and its container is built
+  in. A manifest version 2 is served the oldest schema view by an engine that
+  does not know it, so the module is staged with a runtime manifest instead.
+  """
+  let stagingWs: Workspace! {
+    if (hasEntrypointManifest) {
+      sdkHelpers.moduleManifest.withLegacyPythonRuntime.withName(name: moduleName)
+        .generate(ws.withWorkdir(rootPath), lock: false, legacyJson: false)
+        .withWorkdir(".")
+    } else {
+      ws
+    }
   }
 
   """
@@ -78,12 +136,53 @@ type Mod {
   holding only `sdk/` so it merges onto the module without touching anything else.
   """
   let vendoredDir: Directory! {
-    let schemaJSON = ws.moduleSource("/" + rootPath).introspectionSchemaJSON
+    let schemaJSON = stagingWs.moduleSource("/" + rootPath).introspectionSchemaJSON
+    let vendored = library.withFile(generatedBindingsPath, bindings(schemaJSON))
+    let files = if (staticEntrypoint) {
+      vendored.withDirectory(entrypointDirName, entrypointDir(vendored))
+    } else {
+      vendored
+    }
 
-    directory.withDirectory(
-      vendorDirName,
-      library.withFile(generatedBindingsPath, bindings(schemaJSON)),
-    )
+    directory.withDirectory(vendorDirName, files)
+  }
+
+  """
+  The entrypoint the engine loads instead of calling a runtime: the module's
+  own container renders its types, and the container build travels with it.
+  """
+  let entrypointDir(vendored: Directory!): Directory! {
+    let staged = stagingWs.withDirectory("/" + rootPath + "/" + vendorDirName, vendored)
+    pythonSdkRuntime
+      .moduleRuntime(modSource: staged.moduleSource("/" + rootPath), introspectionJson: null)
+      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--path", rootPath, "--output", entrypointOutput])
+      .directory(entrypointOutput)
+      .withNewFile("build.dang", buildDang)
+  }
+
+  """
+  runtime/build.dang with its reads of this module's source inlined, so the
+  copy in a generated entrypoint needs nothing but itself.
+  """
+  let buildDang: String! {
+    let pins = "let defaultBaseImage: String! = \"" + imageFrom("runtime/images/base/Dockerfile") + "\"\n" +
+      "  let defaultUvImage: String! = \"" + imageFrom("runtime/images/uv/Dockerfile") + "\""
+    let inlined = currentModule.source.file("runtime/build.dang").contents
+      .replaceMatches("(?s)#<externals>.*?#</externals>", pins)
+    if (inlined.contains("currentModule")) {
+      raise "runtime/build.dang reads currentModule outside its externals block"
+    } else {
+      inlined
+    }
+  }
+
+  let imageFrom(path: String!): String! {
+    let line = currentModule.source.file(path).contents.match("(?m)^FROM\\s+(\\S+)")
+    if (line == null) {
+      raise "no FROM line in " + path
+    } else {
+      line.captures[0] ?? ""
+    }
   }
 
   """
@@ -163,6 +262,8 @@ type Mod {
   let stripScriptPath: String! = "/strip-dev-sections.py"
 
   let vendorDirName: String! = "sdk"
+  let entrypointDirName: String! = "entrypoint"
+  let entrypointOutput: String! = "/dagger/entrypoint"
   let generatedBindingsPath: String! = "src/dagger/client/gen.py"
   let schemaPath: String! = "/schema.json"
 
