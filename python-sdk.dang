@@ -30,7 +30,7 @@ type PythonSdk {
   loads them without running the module. Needs an engine that loads manifest
   version 2.
   """
-  pub staticEntrypoint: Boolean! = false
+  let staticEntrypoint: Boolean! = false
 
   """
   Find the Python client root containing the workspace cwd: the directory of
