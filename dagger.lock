@@ -3,5 +3,10 @@
 # Run `dagger workspace update` to refresh the pinned versions.
 [["version","2"]]
 ["","git-latest",["github.com/dagger/sdk-helpers",["version","v1"]],"refs/tags/v1.0.4"]
+["","git-sha",["github.com/containernetworking/plugins","refs/tags/v1.9.0"],"9b3772e1a7abf93cbb7c6526a28bc0d27b830e02"]
 ["","git-sha",["github.com/dagger/sdk-helpers","refs/tags/v1.0.4"],"6c883f657933ecb06ae86d56d9cd1f8785346bb1"]
+["","git-sha",["github.com/libfuse/sshfs","refs/tags/sshfs-3.7.6"],"7a2d988775446ebe7af9b01c99b3b8e86bddb05a"]
+["","git-sha",["github.com/opencontainers/runc","refs/tags/v1.4.2"],"c241c0bb5e60a8e8c1b2e53d4eca8d0068d8d57e"]
+["","oci-sha",["docker.io/library/golang:1.26-alpine"],"sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628"]
+["","oci-sha",["docker.io/tonistiigi/xx:1.2.1"],"sha256:8879a398dedf0aadaacfbd332b29ff2f84bc39ae6d4e9c0a1109db27ac5ba012"]
 ["","vanity-url",["https://dagger.io/sdk/helpers"],"https://github.com/dagger/sdk-helpers"]
