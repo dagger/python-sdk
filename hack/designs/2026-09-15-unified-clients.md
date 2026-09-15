@@ -1,6 +1,6 @@
 # Unified clients for the Python SDK
 
-Status: proposed, design only (revision 4)
+Status: proposed, design only (revision 5)
 Date: 2026-09-15
 Repo base: `290ed4c`
 Spec: "Unified clients" (language-neutral). Prior art: `dagger/java-sdk#23`.
@@ -13,27 +13,29 @@ This is the markdown copy of the HTML design page. Badges:
 **[open]** a question for Yves, with a recommendation.
 **[closed]** a later revision answers it.
 
-Revision 4, after Yves's answers:
+Revision 5, after Yves's answers:
 
-- Decided: Q1, Q2, Q4, Q6, Q7, Q8, Q11 (section 14).
-- The design builds on `contextModuleSource`. It does not use `[[dependencies]]` (13).
-- The runtime copy is the member `sdk/`, not `clients/_runtime`. The global
-  client moves to `global-client/`.
-- Q3: the session is optional. One default session per process, started on
-  first query, shared by all clients (8.1).
-- Q9: rewritten with an example. New Q13: client types in a module's own
-  function signatures.
+- Decided: Q3, Q9, Q13 (section 14).
+- The SDK never edits `[project] dependencies`. Sources say where clients are.
+  Dependencies say what is used. The one exception is the global client (5.2).
+- A module calls itself through a client to itself (7.3).
+- An exported signature names core types and the module's own types only (7.4).
+- New open question: Q14, a client to itself for every module.
 
-Revision 3: a scope is one `pyproject.toml`, a uv workspace root; each client is
-a member. Revision 2: the location is a convention; a temporary global client
-behind a flag.
+Revision 4: decided Q1, Q2, Q4, Q6, Q7, Q8, Q11; built on `contextModuleSource`;
+runtime copy in `sdk/`; shared default session. Revision 3: a scope is one
+`pyproject.toml`, a uv workspace root; each client is a member. Revision 2: the
+location is a convention; a temporary global client behind a flag.
 
 ## 1. Summary
 
 - A scope is one `pyproject.toml`. It is a uv workspace root.
 - Each client is a workspace member at `clients/<name>`. Core is the member
   `clients/core`. The runtime copy is the member `sdk/`.
-- A consumer names one client. uv installs that client, core and the runtime.
+- The SDK writes where each client is: the members and `[tool.uv.sources]`. The
+  user writes which clients a project uses: `[project] dependencies`. The SDK
+  never edits that list, except for the global client.
+- A consumer that names one client installs that client, core and the runtime.
   It does not install the other clients.
 - A member carries no path. Its files are the same in every scope.
 - The scope can be anywhere. `.dagger/clients/python` is a suggestion for a
@@ -47,6 +49,9 @@ behind a flag.
 - Each client package carries its descriptor and serves its module on first
   use. A git client uses `moduleSource`. A local client uses
   `contextModuleSource`. No `[[dependencies]]`.
+- A module calls itself through a client to itself. There is no other mechanism.
+- An exported signature names core types and the module's own types only. A
+  client type is for calls inside a function body.
 - A temporary global client keeps existing module code working. A flag in the
   module's `pyproject.toml` turns it on. A new module has no flag.
 - The runtime imports generated core in many places today. Phase 1 removes
@@ -64,6 +69,7 @@ serve. Added terms:
 | Scope `pyproject.toml` | The file that defines a scope for this SDK. It is a uv workspace root. It lists the members and their sources. |
 | Member | A uv workspace member: a directory with its own `pyproject.toml` inside the scope. Each client, core, the runtime copy and the global client are members. |
 | Client project | A scope without a module. Its `pyproject.toml` can hold only the workspace, or it can also be a program that uses its own members. |
+| Self client | A client to the module that holds it. The module uses it to call its own functions through the engine. |
 | Distribution | What a package manager installs, for example `dagger-clients-linter`. |
 | Import package | What Python code imports, for example `dagger_clients.linter`. |
 | Namespace package | An import package without `__init__.py` (PEP 420). Many distributions can each add one sub-package to it. |
@@ -101,6 +107,10 @@ The current SDK generates per scope. Each module gets its own copy of everything
   `DAGGER_SESSION_TOKEN`. A module and `dagger run` set these. Without them, a
   plain program must use `async with dagger.connection()`
   (`provisioning/_connection.py:73`).
+- The runtime resolves a signature's types in `describe_type`
+  (`sdk/src/dagger/mod/_describe.py:125`).
+- The engine has an experimental `SELF_CALLS` module feature
+  (`ModuleSourceExperimentalFeature`, `sdk/src/dagger/client/gen.py:193`).
 - The committed core bindings (engine `v1.0.0-beta.10`) have
   `ModuleSource.clientSchemaIntrospectionJSON`, `ModuleSource.withName`,
   `Query.moduleSource(refString, refPin)`, `Module.serve(includeDependencies, entrypoint)`,
@@ -176,6 +186,7 @@ Two kinds of scope on disk:
   sdk/
   clients/core/
   clients/linter/
+  clients/my-module/                  a self client, if the user declares one (7.3)
   global-client/                      only with global-client = true (section 9)
 ```
 
@@ -223,9 +234,20 @@ removes the member.
 
 ### 5.2 The scope `pyproject.toml` [decided]
 
-The scope `pyproject.toml` is a uv workspace root. It lists the members and
-gives each one a workspace source. The SDK owns these entries. The user owns
-the rest of the file.
+The scope `pyproject.toml` has three parts. Each part has one owner.
+
+| Part | What it says | Owner |
+| --- | --- | --- |
+| `[tool.uv.workspace] members` | Which directories are members. | The SDK |
+| `[tool.uv.sources]` | Where each client declared on this scope is. It installs nothing. It makes nothing importable. | The SDK |
+| `[project] dependencies` | Which clients this project uses. Only these are installed and importable. | The user |
+
+Why the user owns `dependencies`: Dagger lets a user init a module and declare a
+client. Dagger has no command that says "this module uses this client". So the
+user says it in `pyproject.toml`, and the SDK does not guess.
+
+Sources list the clients declared on this scope. They do not list every client
+of the Dagger workspace: a consumer uses one scope per environment (5.3).
 
 ```toml
 # .dagger/clients/python/pyproject.toml (a client project)
@@ -244,15 +266,19 @@ dagger-clients-linter = { workspace = true }
 # .dagger/modules/my-module/pyproject.toml (a module scope)
 [project]
 name = "my-module"
-dependencies = ["dagger-io", "dagger-clients-linter"]
+dependencies = [
+    "dagger-io",
+    "dagger-clients-linter",          # added by the user, to use the linter client
+]
 
 [tool.uv.workspace]
-members = ["sdk", "clients/core", "clients/linter"]
+members = ["sdk", "clients/core", "clients/linter", "clients/my-module"]
 
 [tool.uv.sources]
-dagger-io             = { workspace = true }
-dagger-clients-core   = { workspace = true }
-dagger-clients-linter = { workspace = true }
+dagger-io                = { workspace = true }
+dagger-clients-core      = { workspace = true }
+dagger-clients-linter    = { workspace = true }
+dagger-clients-my-module = { workspace = true }   # declared, not used yet
 ```
 
 Tested with uv 0.12.13 [confident]:
@@ -269,10 +295,10 @@ Tested with uv 0.12.13 [confident]:
 
 ### 5.3 How a consumer names a client [confident]
 
-Inside the scope: the source already exists. The consumer adds the client to
-`[project] dependencies`. See Q9 for who does that.
+Inside the scope: the source already exists. The user adds the client to
+`[project] dependencies`. The SDK never does (Q9).
 
-Outside the scope: the consumer names the member by path. uv finds the member's
+Outside the scope: the user names the member by path. uv finds the member's
 workspace and takes core and the runtime from it.
 
 ```toml
@@ -314,14 +340,15 @@ core and the runtime included. The `CORE_DIGEST` import check is the guard for p
 - Module that uses a client project outside its directory [decided]: add the
   client project to the module's `include`, if a spike shows an include can name
   a path above the module root. Else refuse, and tell the user to declare the
-  clients on the module scope (Q8).
+  clients on the module scope.
 
 ## 6. Namespacing [decided]
 
 Generated code goes into the top-level namespace package `dagger_clients`. A
 client `telemetry` becomes `dagger_clients.telemetry` and cannot collide with
-`dagger.telemetry`. Core is `dagger_clients.core`, so a client named `core` is
-refused.
+`dagger.telemetry`. A self client cannot collide with the module's own code:
+the module is `my_module`, its self client is `dagger_clients.my_module`. Core
+is `dagger_clients.core`, so a client named `core` is refused.
 
 `dagger.clients.<name>` is not possible: `dagger` is a regular package, and
 type checkers do not follow `pkgutil.extend_path` across installs.
@@ -335,7 +362,9 @@ type checkers do not follow `pkgutil.extend_path` across installs.
 | Root class | Today's codegen rule | `MyProjectDev` |
 | Entry function | Snake-case name | `my_project_dev()` |
 
-## 7. Entry point [provisional]
+## 7. Entry point
+
+### 7.1 The entry function [provisional]
 
 ```python
 # A module (consumer)
@@ -364,17 +393,19 @@ anyio.run(main)
 ```
 
 Constructor arguments follow today's rules: required are positional, optional
-are keyword-only. The session is an optional keyword-only argument; without it
-the function uses the default session (8.1). A GraphQL argument named `session`
-becomes `session_`.
+are keyword-only. The session is an optional keyword-only argument [decided];
+without it the function uses the default session (8.1). A GraphQL argument named
+`session` becomes `session_`.
 
 ```python
 def linter(source: Directory, *, config: str | None = None,
            session: Session | None = None) -> Linter: ...
 ```
 
+### 7.2 Fields a client contributes to core types [decided]
+
 A field a client contributes to a core type becomes a module-level function
-with the core receiver first [decided]. The receiver holds its session.
+with the core receiver first. The receiver holds its session.
 
 ```python
 from dagger_clients.linter import as_linter
@@ -385,9 +416,72 @@ lint = as_linter(binding)          # was: binding.as_linter()
 Two core types that contribute a field with one name get one function with
 `@typing.overload` per receiver type.
 
+### 7.3 A module calling itself [decided goal, provisional shape]
+
+A module calls one of its own functions through a client to itself. There is
+no special mechanism. A self client is a client like any other.
+
+1. The user declares a client to the module on the module scope.
+2. `dagger generate` writes `clients/my-module` and its source.
+3. The user adds `dagger-clients-my-module` to `[project] dependencies`.
+4. The module code imports the self client and calls it.
+
+```python
+from dagger import function, object_type
+from dagger_clients.my_module import my_module
+
+@object_type
+class MyModule:
+    @function
+    async def build(self) -> str: ...
+
+    @function
+    async def release(self) -> str:
+        return await my_module().build()     # a call through the engine
+```
+
+- Serve: the descriptor is the module's own path. In the module's session,
+  `contextModuleSource(path).withName("my-module").asModule.serve` serves the
+  module into its own session. [speculative] The engine accepts this. The spike
+  also checks whether it needs the experimental `SELF_CALLS` feature.
+- Generation order: the self client comes from the module's schema. The engine
+  reads that schema by running the module. So the module runs with the previous
+  self client while the SDK generates the next one. Two rules keep this from
+  blocking:
+  - The step order above puts the dependency after the first generation. So the
+    build never installs a self client that does not exist yet.
+  - While the runtime registers the module's types, a core digest mismatch is a
+    warning, not an error (section 10).
+
+  [speculative] A spike must confirm that regeneration with a self client does
+  not block.
+
+### 7.4 What an exported signature can name [decided]
+
+This is an engine rule. A module's exported functions, fields and constructor
+arguments can name two kinds of types only: core types, for example
+`Directory`, and the module's own types. So module A cannot expose a function
+that returns a type of module B. A client type is for calls inside a function
+body.
+
+- The runtime refuses a client type in a signature when it registers types. The
+  check is in `describe_type` (`sdk/src/dagger/mod/_describe.py:125`): a class
+  from `dagger_clients.<name>`, other than `dagger_clients.core`, is refused.
+  The message names the function and the type.
+- [provisional] The classes of a self client are refused the same way. A
+  signature uses the module's own classes. The message names the module's own
+  class.
+
+```python
+@function
+def lint(self) -> Linter: ...          # refused: "lint returns dagger_clients.linter.Linter,
+                                        #  a type of another module; return a core type
+                                        #  or a type of this module"
+```
+
 ## 8. Session and serve
 
-### 8.1 The default session [provisional]
+### 8.1 The default session [decided]
 
 The session is not required. Most code never names one.
 
@@ -491,10 +585,16 @@ global-client = true
 ### What the SDK generates
 
 With the flag, `generateScope` writes the member `global-client/`: distribution
-`dagger-global-client`, import package `dagger_global`. The module depends on
-it. It is not under `clients/`, because it is not a client. It is the only
-generated code that belongs to one consumer, because it lists that module's own
-clients.
+`dagger-global-client`, import package `dagger_global`. It is not under
+`clients/`, because it is not a client. It is the only generated code that
+belongs to one consumer, because it lists that module's own clients.
+
+The one exception to Q9: with the flag, the SDK adds `dagger-global-client` to
+`[project] dependencies`. Without the flag, it removes it. The existing code did
+not declare its use of clients, so the SDK must install them for it. The member
+depends on every client of the module, so they install with it. When the flag
+goes, those clients stay installed only if the user added them to
+`dependencies`.
 
 ```python
 # dagger_global/__init__.py (generated, temporary)
@@ -562,7 +662,7 @@ graph BT
 | --- | --- | --- |
 | Type check | `py.typed` and full annotations. A removed or changed function is a type error after `dagger generate`. | No |
 | Install (uv) | Members from two scopes in one environment fail with a conflict on `dagger-clients-core`. | No |
-| Import | The client compares its `CORE_DIGEST` with `dagger_clients.core.CORE_DIGEST`. A mismatch raises `dagger.StaleClientError` (an `ImportError`) with "run `dagger generate`". The check is in generated code. | No |
+| Import | The client passes its `CORE_DIGEST` and the installed core's digest to a runtime function. A mismatch raises `dagger.StaleClientError` (an `ImportError`) with "run `dagger generate`". While the runtime registers a module's types, it logs a warning instead, so a module with a self client can regenerate (7.3). The runtime receives two strings, so it does not import core. | No |
 | Serve and query | A failed serve raises `dagger.ClientServeError`. A "cannot query field" error on a query that needs a descriptor becomes `StaleClientError`. An engine/core mismatch is a warning in phase 1. | Yes |
 
 A CI check that runs `dagger generate` and asserts no diff catches the rest.
@@ -601,24 +701,24 @@ is clean; the trap is elsewhere:
    [speculative] How to get core alone.
 4. Clients: for each client, read `clientSchemaIntrospectionJSON`, partition by
    `@sourceMap`, write the descriptor (`kind`, and the workspace path or
-   `asString` and `pin`), write `clients/<name>`.
+   `asString` and `pin`), write `clients/<name>`. A self client takes the same path.
 5. Removed clients: delete each directory under `clients/` that has
    `[tool.dagger] generated = "client"` and whose client is no longer declared.
 6. SDK-owned entries: set the `members` entries of generated members and one
    `{ workspace = true }` source per member. Keep all other content, including
    members the user added. [provisional] This needs a TOML editor that keeps
    formatting; `helpers/pyproject` reformats the file today.
-7. Module scope:
-   - add each client, and `dagger-io`, to `[project] dependencies` (Q9);
+7. `[project] dependencies`: do not edit it. The one exception is
+   `dagger-global-client`, added with the flag and removed without it.
+8. Module scope:
    - replace the old `dagger-io = { path = "sdk", editable = true }` source;
    - remove every `[[dependencies]]` entry from `dagger-module.toml`; the
      manifest builder already has `withoutLegacyRuntimeDependencies`
      (`python-sdk.dang:145`);
    - global client: write the flag for an existing module without it; with the
-     flag, write `global-client/` and depend on it; without it, remove both.
-8. Scope without a module: remove the refusal at `python-sdk.dang:100-105`. Do
-   not touch `[project] dependencies`.
-9. Lock: refresh `uv.lock` if it exists.
+     flag, write `global-client/`; without it, remove it.
+9. Scope without a module: remove the refusal at `python-sdk.dang:100-105`.
+10. Lock: refresh `uv.lock` if it exists.
 
 Each scope writes only inside its own directory. With no `[[dependencies]]`, the
 static entrypoint refusal for clients at `python-sdk.dang:154-156` goes away.
@@ -646,11 +746,12 @@ It does not use `currentWorkspace`.
 - Local-client end-to-end checks need an e2e engine with the field.
   `.dagger/modules/engine-e2e` builds `v1.0.0-beta.13` today. It must move to an
   engine that has the field.
+- Engine rule [decided]: an exported signature names core types and the
+  module's own types only (7.4). Nothing in this design needs more.
 - [speculative] The descriptor path is relative to the workspace root. In a
   module session, the engine resolves it against the module's context root. For
   a module in the user's workspace, the two roots must be the same directory.
-- [speculative] Without `[[dependencies]]`, the engine does not load a module's
-  clients when it loads the module. See Q13.
+- [speculative] A module can serve itself into its own session (7.3).
 
 ## 14. Questions
 
@@ -659,23 +760,18 @@ It does not use `currentWorkspace`.
 | Question | Decision |
 | --- | --- |
 | Q1. Namespace name | `dagger_clients`. |
-| Q2. Where the runtime comes from | A runtime copy in each scope, not published. Not under `clients/`, because it is not a client. So the copy is the member `sdk/`, as in today's modules, without generated code. The global client follows the same rule: `global-client/`. [provisional] The `sdk/` name is my reading of the answer. |
+| Q2. Where the runtime comes from | A runtime copy in each scope, not published. Not under `clients/`, because it is not a client. So the copy is the member `sdk/`, without generated code. The global client follows the same rule: `global-client/`. |
+| Q3. The session | An optional keyword-only `session=`. One default session per process, started on the first query and shared by every client. In a plain program, the runtime provisions the engine on the first query. |
 | Q4. Contributed field shape | Module-level function: `as_linter(binding)`. |
 | Q6. `dagger.mod` and core | Rewrite the module runtime protocol on the raw query builder. |
 | Q7. Local clients in modules | Build on `contextModuleSource`. No `[[dependencies]]`. |
 | Q8. A module that uses a client project outside its directory | `include` the client project, if a spike confirms it. Else refuse, and tell the user to declare the clients on the module scope. |
+| Q9. Who adds a client to `[project] dependencies` | The user, in every scope. The SDK writes sources for every client declared on the scope, including a self client. Dagger has no command that says "this module uses this client". Exception: the global client (section 9). |
 | Q10. Removing a client | [closed] in revision 3. `generateScope` deletes the member, its source and its `members` entry, then relocks. |
-| Q11. Version check strictness | Client/core mismatch: import error. Engine/core mismatch: warning in phase 1. |
+| Q11. Version check strictness | Client/core mismatch: import error, and a warning while the runtime registers types. Engine/core mismatch: warning in phase 1. |
+| Q13. Client types in a module's own signatures | Not supported. Engine rule: an exported signature names core types and the module's own types only. The runtime refuses a client type with a clear message (7.4). |
 
 ### Still open
-
-**Q3. The session [open, confirm].** Yves asked: is the session required, and
-can the client start it? Answer: the session is optional. The runtime starts one
-default session per process on the first query, and every client shares it. One
-session per client does not work, because objects cannot cross sessions and a
-module has only one session (8.1). Recommendation: an optional keyword-only
-`session=`, the shared default session, and engine provisioning on first query
-in a plain program.
 
 **Q5. The global client: details and end of life [open].** [decided] A
 temporary global client exists behind a flag; existing modules get the flag,
@@ -684,45 +780,19 @@ new modules do not. (1) Flag name and place: recommendation
 them to the core class at run time. (3) End of life: recommendation a
 `DeprecationWarning` in phase 2, removal in a release Yves names.
 
-**Q9. Does declaring a client on a scope also install it? [open].** A scope
-`pyproject.toml` has two different lists:
-
-- `[tool.uv.sources]` says where each client is. The SDK writes one entry for
-  every client declared on the scope.
-- `[project] dependencies` says which clients this project installs. Only a
-  scope with a `[project]` table has this list.
-
-The question: after `dagger module client add linter`, does the SDK also add
-`dagger-clients-linter` to `[project] dependencies`?
-
-| Scope | If the SDK adds it | If the user adds it |
-| --- | --- | --- |
-| Module scope | `from dagger_clients.linter import linter` works right after `client add`, as `dag.linter()` does today. | The import fails with `ModuleNotFoundError` until the user edits `pyproject.toml`. |
-| Client project that is also a program | The program installs every client it declares, also the ones it holds only for other consumers. | The program installs only the clients it uses. |
-| Client project without `[project]` | No dependency list. Nothing to decide. | Same. |
-
-Recommendation: the SDK adds the dependency in a module scope, and never in
-other scopes. A client declared on a module is a client that module uses. The
-global client also needs it installed.
-
 **Q12. The members directory inside a scope [open].** [decided] The scope
 location is a convention; clients go inside the scope. Open: (a)
 `clients/<name>` in every scope; (b) the scope root for a client project and
 `clients/` for a module; (c) a setting. Recommendation: (a). A shorter suggested
 client project location is `.dagger/python`.
 
-**Q13. Client types in a module's own function signatures [open, new].** A
-module can use a client inside a function body. It can also expose a client
-type in its API, for example `def lint(self) -> Linter`. Today
-`[[dependencies]]` makes the engine load the client with the module, so the
-engine knows `Linter` when the module registers its types. Without
-`[[dependencies]]`, the engine may not know `Linter` at that moment. Options:
-(a) refuse such signatures at `dagger generate`, with a clear message; clients
-stay usable inside function bodies; (b) the runtime serves the clients named in
-signatures before it registers types; (c) ask for an engine change.
-Recommendation: spike (b) first. If the engine refuses the types, (a) in phase
-1, and (c) as a follow-up. This is a regression for modules that expose
-dependency types today, so it needs a decision before phase 1 ends.
+**Q14. Does every module get a self client? [open, new].** Options: (a) no; the
+user declares a client to the module, like any other client; (b) the SDK always
+generates a self client for a module. Recommendation: (a). It follows the Q9
+rule: Dagger records what the user declares, and the user decides what to use.
+Option (b) adds a member and a schema read to every generation, also for modules
+that never call themselves. It also makes every generation depend on the
+self-client order in 7.3.
 
 ## 15. Checks
 
@@ -733,12 +803,12 @@ Invert each assertion once and confirm that it fails.
 3. AST scan of imports in core, in each client package and in the runtime.
 4. Module source that calls a client passes mypy and pyright, then `dagger call` runs it.
 5. `uv build --wheel` for each member with no engine; the wheel exists and contains the package; it imports in a fresh venv.
-6. A changed `CORE_DIGEST` makes a client import raise `StaleClientError`.
+6. A changed `CORE_DIGEST` makes a client import raise `StaleClientError`; during type registration it logs a warning.
 7. Fake engine: two calls on one client send one serve; two sessions send two.
 8. Shared session: `linter().lint(core().directory())` works in the default session.
 9. A module with a git client and a local client loads both through the CLI. The local half needs an engine with `contextModuleSource`.
 10. No `[[dependencies]]`: generating a module that has them removes them; the module still calls its clients.
-11. Global client, existing module: generation writes `global-client = true`; the unchanged source passes mypy and runs through `dagger call`; `type(dag.container()) is dagger_clients.core.Container`.
+11. Global client, existing module: generation writes `global-client = true` and adds `dagger-global-client` to `dependencies`; the unchanged source passes mypy and runs through `dagger call`; `type(dag.container()) is dagger_clients.core.Container`.
 12. Global client, new module: no `global-client` key, no `global-client/`; `dag.container` raises the migration message.
 13. Global client, turned off: `config set --global-client=false`, then generate; `global-client/` and its dependency are gone.
 14. Any location: a client project in another path; checks 1, 4 and 9 pass; `findClientRoot` inside a member answers with the scope root.
@@ -746,26 +816,32 @@ Invert each assertion once and confirm that it fails.
 16. One scope per environment: a consumer that names members of two scopes fails with uv's conflict on `dagger-clients-core`.
 17. Remove a client: its member, source and `members` entry are gone; `uv sync --locked` passes.
 18. User content kept: user tables, comments and a user member in the scope `pyproject.toml` survive generation byte for byte.
-19. Default session in a plain program: `python main.py`, without `dagger.connection()` and without `dagger run`, runs a client call and exits cleanly.
+19. Dependencies untouched: without the flag, generation leaves `[project] dependencies` byte for byte, also when it adds or removes clients.
+20. Default session in a plain program: `python main.py`, without `dagger.connection()` and without `dagger run`, runs a client call and exits cleanly.
+21. Self client: a module with a client to itself calls one of its own functions through `dagger call`; after an API change, `dagger generate` succeeds and the self client has the new API.
+22. Signature rule: a function that returns `dagger_clients.linter.Linter` fails registration with a message that names the function and the type; a function that returns a core type or the module's own class passes.
 
 ## 16. Phases
 
 **Phase 1: self-serving clients in workspace scopes.**
 
-- Spikes first: Q13 client types in signatures; core-alone schema; a workspace
-  module in `runtime/build.dang` (uv and pip modes); a format-keeping TOML
-  editor; Q8 include; typing through `dagger_global`; default session start and
-  close in a plain program.
+- Spikes first: a module serves itself, with and without `SELF_CALLS`, and
+  regenerates with a self client; core-alone schema; a workspace module in
+  `runtime/build.dang` (uv and pip modes); a format-keeping TOML editor; Q8
+  include; typing through `dagger_global`; default session start and close in a
+  plain program.
 - Remove every runtime import of generated core.
-- Runtime: `Session` and the default session, `Target`, serve memo, error types.
+- Runtime: `Session` and the default session, `Target`, serve memo, the core
+  digest check, error types, the signature rule in `describe_type`.
 - Generator: partition by `@sourceMap`; the core member, one member per client,
   entry functions, descriptors, digests, `global-client/` with the flag.
 - `generateScope` turns every scope into a uv workspace root, writes `sdk/`,
-  manages the members, and removes `[[dependencies]]`. New modules use the new
-  layout. Existing modules get `global-client = true`.
+  manages the members and sources, and removes `[[dependencies]]`. It does not
+  edit `[project] dependencies`, except for the global client. New modules use
+  the new layout. Existing modules get `global-client = true`.
 - `findClientRoot` lifts a member to its scope. `mod config` handles `global-client`.
 - Serve: git clients through `moduleSource`, local clients through `contextModuleSource`.
-- Checks 1–19. Local-client checks run once the e2e engine has `contextModuleSource`.
+- Checks 1–22. Local-client checks run once the e2e engine has `contextModuleSource`.
 
 **Phase 2: published runtime, end of migration.** Publish the runtime and remove
 the `sdk/` member. The global client warns on import; its removal date is
@@ -773,7 +849,9 @@ Yves's call.
 
 ## 17. Not verified
 
-- [speculative] A module function can name a client type without `[[dependencies]]` (Q13).
+- [speculative] A module can serve itself into its own session, and whether
+  that needs `SELF_CALLS`.
+- [speculative] Regeneration of a module with a self client does not block.
 - [speculative] For a module in the user's workspace, the context root that
   `contextModuleSource` uses is the workspace root.
 - [speculative] How `generateScope` gets core alone. Fallback: strip module-owned
