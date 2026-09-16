@@ -155,8 +155,9 @@ dagger module init python --name my-module \
 ```
 
 `--template` picks a starter template: `default` (a small working module) when
-you pass nothing, `empty` for a bare object class, or `legacy` for a
-container-echo example. The three `pyproject.toml` flags are optional; by
+you pass nothing, `flat` for the same module in a single file at the module
+root instead of under `src/`, `empty` for a bare object class, or `legacy` for
+a container-echo example. The three `pyproject.toml` flags are optional; by
 default the template's Python version is used, uv is enabled, and no base image
 override is written.
 

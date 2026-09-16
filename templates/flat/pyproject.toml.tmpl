@@ -1,0 +1,12 @@
+[project]
+name = "{{ .ModuleName }}"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = ["dagger-io"]
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+dagger-io = { path = "sdk", editable = true }
