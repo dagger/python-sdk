@@ -77,12 +77,12 @@ the end-to-end fixture exercises the runtime before the ref exists.
 
 By default a module's types are discovered by running it: the engine builds
 the module's container and starts Python once per session to register the
-types, then again for every call. With `--static-entrypoint` the types are
+types, then again for every call. With `--dang-entrypoint` the types are
 computed once, at `dagger generate`, and written into a generated entrypoint
 the engine loads without running Python:
 
 ```sh
-dagger module init python --name my-module --static-entrypoint
+dagger module init python --name my-module --dang-entrypoint
 ```
 
 Generating the module then writes an entrypoint manifest instead of a runtime
@@ -113,7 +113,7 @@ process's stderr.
 
 The setting is persisted on the scope. To switch an existing module either
 way, re-run `dagger module init python --path <module>` with
-`--static-entrypoint` or `--static-entrypoint=false`, or edit the scope's
+`--dang-entrypoint` or `--dang-entrypoint=false`, or edit the scope's
 settings in `dagger.toml`, then `dagger generate`. Generating one module
 directly, with `dagger call python-sdk mod --path <module> generate`, keeps
 the mode that module is in; switching modes goes through

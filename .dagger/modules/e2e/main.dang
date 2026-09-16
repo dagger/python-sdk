@@ -465,7 +465,7 @@ type E2e {
   pub staticScopeInitCheck(ws: Workspace!): Void @check {
     let scope = outputRoot + "/static-init"
     let scoped = ws.withNewDirectory("/" + scope, directory).withWorkdir(scope)
-    let generated = pythonSdk(staticEntrypoint: true).generateScope(scoped, isModule: true, name: "static-init", clients: [])
+    let generated = pythonSdk(dangEntrypoint: true).generateScope(scoped, isModule: true, name: "static-init", clients: [])
     let changes = generated.withWorkdir(".").changes(scoped.withWorkdir("."))
 
     assert(generated.cwd == scoped.cwd, "generateScope must not change the workspace cwd")
@@ -509,7 +509,7 @@ type E2e {
     let entrypointPath = tomlGenerateModulePath + "/sdk/entrypoint"
     let name = "toml-generate-app"
 
-    let static = pythonSdk(staticEntrypoint: true).generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    let static = pythonSdk(dangEntrypoint: true).generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     let toStatic = static.changes(ws)
     let switched = toStatic.after.file(manifestPath).contents
     assertContains(switched, "[entrypoint]", "switching to a static entrypoint did not write an entrypoint manifest")
@@ -524,7 +524,7 @@ type E2e {
     assertContainsAll(manifest, ["kind = \"module\"", "source = \"github.com/dagger/python-sdk/runtime\""])
     assert(dynamic.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "switching back left the entrypoint behind")
 
-    let again = pythonSdk(staticEntrypoint: true).generateScope(dynamic.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    let again = pythonSdk(dangEntrypoint: true).generateScope(dynamic.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     assert(again.changes(static).isEmpty, "a second switch to static differs from the first")
 
     null
@@ -535,7 +535,7 @@ type E2e {
   writing anything.
   """
   pub staticScopeRefusalsCheck(ws: Workspace!): Void @check {
-    let static = pythonSdk(staticEntrypoint: true)
+    let static = pythonSdk(dangEntrypoint: true)
     let name = "toml-generate-app"
     let scoped = ws.withWorkdir(tomlGenerateModulePath)
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
@@ -545,7 +545,7 @@ type E2e {
     assert(withClient == "raised", "a static entrypoint accepted a dependency")
 
     let legacyScope = outputRoot + "/static-legacy"
-    let legacy = pythonSdk(staticEntrypoint: true, template: "legacy")
+    let legacy = pythonSdk(dangEntrypoint: true, template: "legacy")
       .generateScope(ws.withNewDirectory("/" + legacyScope, directory).withWorkdir(legacyScope), isModule: true, name: "static-legacy", clients: [])
       .cwd rescue "raised"
     assert(legacy == "raised", "the legacy template was generated with a static entrypoint")
@@ -578,7 +578,7 @@ type E2e {
   engine: the same builder calls the entrypoint makes at load time.
   """
   pub staticTypesLoadCheck(ws: Workspace!): Void @check {
-    let generated = pythonSdk(staticEntrypoint: true)
+    let generated = pythonSdk(dangEntrypoint: true)
       .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
       .withWorkdir(".")
     let types = generated.file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang")

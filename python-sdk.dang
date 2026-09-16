@@ -30,7 +30,7 @@ type PythonSdk {
   loads them without running the module. Needs an engine that loads manifest
   version 2.
   """
-  pub staticEntrypoint: Boolean! = false
+  pub dangEntrypoint: Boolean! = false
 
   """
   Find the Python client root containing the workspace cwd: the directory of
@@ -97,7 +97,7 @@ type PythonSdk {
   template. Every module receives a dagger-module.toml from the manifest
   builder module and is then generated. A pre-1.0 dagger.json is migrated
   and removed. The scope's module clients become the module's dependencies,
-  so the generated bindings include their types. With staticEntrypoint, the
+  so the generated bindings include their types. With dangEntrypoint, the
   module gets an entrypoint manifest and a generated entrypoint instead of a
   runtime.
   Standalone clients, in a scope without a module, are not generated yet.
@@ -119,7 +119,7 @@ type PythonSdk {
       } else {
         rooted.withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
       }
-      if (staticEntrypoint) {
+      if (dangEntrypoint) {
         checkStaticScope(initialized, scope, hadConfig, clients)
       }
       # The runtime manifest is what every engine serves a schema for; the
@@ -160,7 +160,7 @@ type PythonSdk {
   """
   let checkStaticScope(ws: Workspace!, scope: String!, hadConfig: Boolean!, clients: [ModuleSource!]!): Void {
     if (clients.length > 0) {
-      raise "a static entrypoint cannot use other modules yet: an entrypoint manifest has no dependencies; set staticEntrypoint = false"
+      raise "a static entrypoint cannot use other modules yet: an entrypoint manifest has no dependencies; set dangEntrypoint = false"
     }
     if (hadConfig == false and template == "legacy") {
       raise "the legacy template is not available with a static entrypoint"
@@ -168,7 +168,7 @@ type PythonSdk {
     if (scopeHasFile(ws, scope, "dagger-module.toml")) {
       let objections = staticObjections(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
       if (objections.length > 0) {
-        raise "dagger-module.toml has settings a static entrypoint cannot carry (" + objections.join(", ") + "); remove them or set staticEntrypoint = false"
+        raise "dagger-module.toml has settings a static entrypoint cannot carry (" + objections.join(", ") + "); remove them or set dangEntrypoint = false"
       }
     }
     null
@@ -274,7 +274,7 @@ type PythonSdk {
     Mod(
       rootPath: modPath,
       ws: ws,
-      staticEntrypoint: staticEntrypoint or hasEntrypointManifest(ws, modPath),
+      dangEntrypoint: dangEntrypoint or hasEntrypointManifest(ws, modPath),
     )
   }
 
