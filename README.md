@@ -75,17 +75,18 @@ the end-to-end fixture exercises the runtime before the ref exists.
 
 ## Static entrypoint
 
-Not available yet. A module's types are discovered by running it: the engine
-builds the module's container and starts Python once per session to register
-the types, then again for every call. The SDK can instead compute the types
-once, at `dagger generate`, and write them into a generated entrypoint the
-engine loads without running Python. The setting that turns this on is not
-exposed until the engine loads manifest version 2 (dagger/dagger#14038), so
-`dagger module init python` has no `--static-entrypoint` flag yet and every
-new module is generated on the default path.
+By default a module's types are discovered by running it: the engine builds
+the module's container and starts Python once per session to register the
+types, then again for every call. With `--static-entrypoint` the types are
+computed once, at `dagger generate`, and written into a generated entrypoint
+the engine loads without running Python:
 
-Once enabled, generating a module writes a manifest version 2 instead of a
-runtime manifest, and `sdk/entrypoint/` next to the vendored library:
+```sh
+dagger module init python --name my-module --static-entrypoint
+```
+
+Generating the module then writes an entrypoint manifest instead of a runtime
+manifest, and `sdk/entrypoint/` next to the vendored library:
 
 | File | What it is |
 | --- | --- |
@@ -101,7 +102,7 @@ change them; a call after an edit is refused with a message to run
 only file contents count, not permissions.
 
 What the static path cannot do yet, and refuses at `dagger generate`:
-module clients (manifest version 2 has no dependencies), any `cache=` value
+module clients (an entrypoint manifest has no dependencies), any `cache=` value
 on a function (the entrypoint's exec is content-cached and receives no
 per-call signal), the `legacy` template, and a manifest with `include`,
 `disableDefaultFunctionCaching`, a runtime other than `python`, a `source`
@@ -110,11 +111,16 @@ modules keep the default path. There is no `debug` terminal on the static
 path, and a function error reaches the caller as the exec failure with the
 process's stderr.
 
-A module that already has a manifest version 2 keeps its static entrypoint
-when generated directly, with `dagger call python-sdk mod --path <module>
-generate`. `dagger generate` moves it back to the default path: it removes
-`sdk/entrypoint/` and rewrites a runtime manifest with the generating engine's
-version. See
+The setting is persisted on the scope. To switch an existing module either
+way, re-run `dagger module init python --path <module>` with
+`--static-entrypoint` or `--static-entrypoint=false`, or edit the scope's
+settings in `dagger.toml`, then `dagger generate`. Generating one module
+directly, with `dagger call python-sdk mod --path <module> generate`, keeps
+the mode that module is in; switching modes goes through
+`dagger module init python --path <module>` as above. Switching back removes
+`sdk/entrypoint/` and rewrites a runtime manifest with the generating
+engine's version. Loading a static module needs an engine that reads an
+entrypoint manifest (dagger/dagger#14038); see
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design and the plan to make it the default.
 
@@ -219,6 +225,6 @@ one to a Python scope is refused and the workspace is left unchanged.
 dagger check
 ```
 
-`engine-e-2-e:dev-sdk-check` builds the dagger/dagger `v1.0.0-beta.13` engine. It
+`engine-e-2-e:dev-sdk-check` builds the pinned dagger/dagger#13992 engine. It
 runs the SDK interface checks, initializes Python modules with default and
 explicit settings, and calls a generated module.

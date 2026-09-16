@@ -30,7 +30,7 @@ type PythonSdk {
   loads them without running the module. Needs an engine that loads manifest
   version 2.
   """
-  let staticEntrypoint: Boolean! = false
+  pub staticEntrypoint: Boolean! = false
 
   """
   Find the Python client root containing the workspace cwd: the directory of
@@ -92,7 +92,7 @@ type PythonSdk {
   builder module and is then generated. A pre-1.0 dagger.json is migrated
   and removed. The scope's module clients become the module's dependencies,
   so the generated bindings include their types. With staticEntrypoint, the
-  module gets a manifest version 2 and a generated entrypoint instead of a
+  module gets an entrypoint manifest and a generated entrypoint instead of a
   runtime.
   Standalone clients, in a scope without a module, are not generated yet.
   """
@@ -117,7 +117,7 @@ type PythonSdk {
         checkStaticScope(initialized, scope, hadConfig, clients)
       }
       # The runtime manifest is what every engine serves a schema for; the
-      # static path swaps it for the manifest version 2 as it generates.
+      # static path swaps it for the entrypoint manifest as it generates.
       let configured = generateScopeManifest(initialized, scope, name, clients)
       mod(configured, path: scope, findUp: false).generated.withWorkdir(scope)
     }
@@ -133,7 +133,7 @@ type PythonSdk {
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
     let hasJson = scopeHasFile(ws, scope, "dagger.json")
     let base = if (hasToml and isEntrypointManifest(ws.file(root + "/dagger-module.toml").contents)) {
-      # A manifest version 2 holds nothing the runtime manifest keeps.
+      # An entrypoint manifest holds nothing the runtime manifest keeps.
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
     } else if (hasToml) {
       sdkHelpers.moduleManifest(loadToml: ws.file(root + "/dagger-module.toml"))
@@ -152,7 +152,7 @@ type PythonSdk {
   """
   let checkStaticScope(ws: Workspace!, scope: String!, hadConfig: Boolean!, clients: [ModuleSource!]!): Void {
     if (clients.length > 0) {
-      raise "a static entrypoint cannot use other modules yet: manifest version 2 has no dependencies; set staticEntrypoint = false"
+      raise "a static entrypoint cannot use other modules yet: an entrypoint manifest has no dependencies; set staticEntrypoint = false"
     }
     if (hadConfig == false and template == "legacy") {
       raise "the legacy template is not available with a static entrypoint"
@@ -167,14 +167,14 @@ type PythonSdk {
   }
 
   """
-  Manifest keys and tables that manifest version 2 has no place for.
+  Manifest keys and tables that an entrypoint manifest has no place for.
   """
   let staticObjections(toml: String!): [String!]! {
     let head = toml.split("\n[").takeFirst(1).join("")
     let keys = ["include", "disableDefaultFunctionCaching"].filter { key =>
       head.containsMatch(Regexp("(?m)^\\s*" + key + "\\s*="))
     }
-    # Manifest version 2 roots a module at its own directory, which is what
+    # An entrypoint manifest roots a module at its own directory, which is what
     # `source = "."` says; any other source is what it cannot carry.
     let sourceMatch = head.match("(?m)^\\s*source\\s*=\\s*\"([^\"]*)\"")
     let sourceValue = if (sourceMatch == null) { "." } else { sourceMatch.captures[0] ?? "." }
