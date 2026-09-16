@@ -69,6 +69,12 @@ type PythonSdk {
   let vendorDirName: String! = "sdk"
 
   """
+  The runtime module a manifest-v2 engine loads as this module's entrypoint.
+  Legacy engines ignore it and use the builtin runtime named by [runtime].
+  """
+  let runtimeModuleSource: String! = "github.com/dagger/python-sdk/runtime"
+
+  """
   Whether a module config, dagger-module.toml or the pre-1.0 dagger.json,
   exists at a workspace-root-relative scope.
   """
@@ -135,12 +141,14 @@ type PythonSdk {
     let base = if (hasToml and isEntrypointManifest(ws.file(root + "/dagger-module.toml").contents)) {
       # An entrypoint manifest holds nothing the runtime manifest keeps.
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
+        .withModuleEntrypoint(source: runtimeModuleSource)
     } else if (hasToml) {
       sdkHelpers.moduleManifest(loadToml: ws.file(root + "/dagger-module.toml"))
     } else if (hasJson) {
       sdkHelpers.moduleManifest(loadJson: ws.file(root + "/dagger.json"))
     } else {
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
+        .withModuleEntrypoint(source: runtimeModuleSource)
     }
     clients.reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>
       manifest.withLegacyRuntimeDependency(module: client)
@@ -188,7 +196,7 @@ type PythonSdk {
   }
 
   let isEntrypointManifest(toml: String!): Boolean! {
-    toml.containsMatch("(?m)^\\s*\\[entrypoint\\]")
+    toml.containsMatch("(?m)^\\s*\\[entrypoint\\]\\s*\\n\\s*kind\\s*=\\s*\"dang\"")
   }
 
   let hasEntrypointManifest(ws: Workspace!, scope: String!): Boolean! {

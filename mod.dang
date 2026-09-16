@@ -106,7 +106,8 @@ type Mod {
   }
 
   let hasEntrypointManifest: Boolean! {
-    isModern and ws.file("/" + manifestPath).contents.containsMatch("(?m)^\\s*\\[entrypoint\\]")
+    isModern and ws.file("/" + manifestPath).contents
+      .containsMatch("(?m)^\\s*\\[entrypoint\\]\\s*\\n\\s*kind\\s*=\\s*\"dang\"")
   }
 
   let moduleName: String! {

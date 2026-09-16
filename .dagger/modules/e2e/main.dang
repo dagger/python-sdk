@@ -500,9 +500,9 @@ type E2e {
   }
 
   """
-  A module moves between the two paths by flipping the setting: the manifest
-  version 2 and the entrypoint appear, then disappear again, then come back
-  the same.
+  A module moves between the two paths by flipping the setting: the static Dang
+  entrypoint appears, then disappears again, then comes back the same. The
+  module-kind entrypoint naming the runtime module rides along either way.
   """
   pub staticScopeSwitchCheck(ws: Workspace!): Void @check {
     let manifestPath = tomlGenerateModulePath + "/dagger-module.toml"
@@ -520,7 +520,8 @@ type E2e {
     let dynamic = pythonSdk.generateScope(static.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     let manifest = dynamic.file("/" + manifestPath).contents
     assertContainsAll(manifest, ["name = \"toml-generate-app\"", "[runtime]", "source = \"python\""])
-    assertNotContains(manifest, "entrypoint", "switching back kept the entrypoint in the manifest")
+    assertNotContains(manifest, "kind = \"dang\"", "switching back kept the static entrypoint in the manifest")
+    assertContainsAll(manifest, ["kind = \"module\"", "source = \"github.com/dagger/python-sdk/runtime\""])
     assert(dynamic.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "switching back left the entrypoint behind")
 
     let again = pythonSdk(staticEntrypoint: true).generateScope(dynamic.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
