@@ -106,8 +106,7 @@ type Mod {
   }
 
   let hasEntrypointManifest: Boolean! {
-    isModern and ws.file("/" + manifestPath).contents
-      .containsMatch("(?m)^\\s*\\[entrypoint\\]\\s*\\n\\s*kind\\s*=\\s*\"dang\"")
+    isModern and ws.file("/" + manifestPath).contents.containsMatch("(?m)^\\s*\\[entrypoint\\]")
   }
 
   let moduleName: String! {
@@ -123,6 +122,11 @@ type Mod {
   The workspace the module's schema is read from and its container is built
   in. An entrypoint manifest is served the oldest schema view by an engine that
   does not know it, so the module is staged with a runtime manifest instead.
+
+  Any entrypoint kind is staged away, not just the Dang one. An engine that
+  loads manifest version 2 resolves a module-kind entrypoint through the
+  runtime module, which has no generated source to trust at this point; the
+  runtime manifest points back at the module being built.
   """
   let stagingWs: Workspace! {
     if (hasEntrypointManifest) {
