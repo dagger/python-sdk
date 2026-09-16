@@ -53,7 +53,7 @@ type Mod {
 
   """
   The workspace with this module's generated files merged in. On the static
-  path the manifest version 2 is written here too, so a module generated
+  path the entrypoint manifest is written here too, so a module generated
   directly gets the same files as one generated through the SDK scope.
   """
   pub generated: Workspace! {
@@ -73,7 +73,7 @@ type Mod {
     let merged = ws.withDirectory("/" + rootPath, files)
     let entrypointPath = vendorDirName + "/" + entrypointDirName
     if (staticEntrypoint) {
-      merged.withNewFile("/" + manifestPath, entrypointManifest(moduleName))
+      entrypointManifest(merged, entrypointPath)
     } else if (ws.directory("/" + rootPath).exists(entrypointPath)) {
       merged.withoutDirectory("/" + rootPath + "/" + entrypointPath)
     } else {
@@ -82,14 +82,16 @@ type Mod {
   }
 
   """
-  The manifest of a static module: the three keys manifest version 2 allows.
+  Write the manifest of a static module: the name and the Dang entrypoint,
+  and nothing the runtime manifest keeps. sdk-helpers owns the manifest's
+  shape, so the SDK never writes the TOML itself.
   """
-  let entrypointManifest(name: String!): String! {
-    if (name.containsMatch("[\\x00-\\x1f\"\\\\]")) {
-      raise "module name cannot be written in a manifest: " + name
-    } else {
-      "manifestVersion = 2\nname = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./" + vendorDirName + "/" + entrypointDirName + "\"\n"
-    }
+  let entrypointManifest(target: Workspace!, entrypointPath: String!): Workspace! {
+    sdkHelpers.moduleManifest
+      .withName(name: moduleName)
+      .withDangEntrypoint(source: "./" + entrypointPath)
+      .generate(target.withWorkdir(rootPath), lock: false, legacyJson: false)
+      .withWorkdir(".")
   }
 
   """
@@ -118,7 +120,7 @@ type Mod {
 
   """
   The workspace the module's schema is read from and its container is built
-  in. A manifest version 2 is served the oldest schema view by an engine that
+  in. An entrypoint manifest is served the oldest schema view by an engine that
   does not know it, so the module is staged with a runtime manifest instead.
   """
   let stagingWs: Workspace! {

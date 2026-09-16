@@ -458,7 +458,7 @@ type E2e {
 
 
   """
-  A static entrypoint scope: the manifest version 2, the template, bindings
+  A static entrypoint scope: the entrypoint manifest, the template, bindings
   from the current schema view, and the generated entrypoint whose digests
   are the engine's.
   """
@@ -471,7 +471,7 @@ type E2e {
     assert(generated.cwd == scoped.cwd, "generateScope must not change the workspace cwd")
     let manifest = changes.layer.file(scope + "/dagger-module.toml").contents
     assert(
-      manifest == "manifestVersion = 2\nname = \"static-init\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./sdk/entrypoint\"\n",
+      manifest == "name = \"static-init\"\n\n[entrypoint]\n  kind = \"dang\"\n  source = \"./sdk/entrypoint\"\n",
       "unexpected static manifest: " + manifest,
     )
     assertAdded(changes, scope + "/src/static_init/__init__.py")
@@ -511,7 +511,9 @@ type E2e {
 
     let static = pythonSdk(staticEntrypoint: true).generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     let toStatic = static.changes(ws)
-    assertContains(toStatic.after.file(manifestPath).contents, "manifestVersion = 2", "switching to a static entrypoint did not write a manifest version 2")
+    let switched = toStatic.after.file(manifestPath).contents
+    assertContains(switched, "[entrypoint]", "switching to a static entrypoint did not write an entrypoint manifest")
+    assertNotContains(switched, "manifestVersion", "the entrypoint manifest carries a manifestVersion the engine refuses")
     ["main.dang", "types.dang", "build.dang"].each { file => assertAdded(toStatic, entrypointPath + "/" + file) }
     assert(toStatic.modifiedPaths.filter { path => path.hasPrefix(tomlGenerateModulePath + "/src/") }.length == 0, "switching touched user files")
 
@@ -528,7 +530,7 @@ type E2e {
   }
 
   """
-  The static path refuses what a manifest version 2 cannot carry, before
+  The static path refuses what an entrypoint manifest cannot carry, before
   writing anything.
   """
   pub staticScopeRefusalsCheck(ws: Workspace!): Void @check {
@@ -553,11 +555,11 @@ type E2e {
     let included = static.generateScope(ws.withNewFile(manifestPath, "include = [\"src\"]\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
     assert(included == "raised", "an include list was dropped silently")
 
-    # A module rooted at its own directory is what version 2 assumes, so this
-    # one generates instead of being refused.
+    # A module rooted at its own directory is what an entrypoint manifest
+    # assumes, so this one generates instead of being refused.
     let selfSourced = static.generateScope(ws.withNewFile(manifestPath, "source = \".\"\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
       .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents
-    assertContains(selfSourced, "manifestVersion = 2", "source = \".\" was refused on the static path")
+    assertContains(selfSourced, "[entrypoint]", "source = \".\" was refused on the static path")
 
     let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
     let neverCached = "from dagger import function, object_type\n\n\n@object_type\nclass TomlGenerateApp:\n    @function(cache=\"never\")\n    def hello(self) -> str:\n        return \"hello\"\n"

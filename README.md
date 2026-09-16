@@ -85,7 +85,7 @@ the engine loads without running Python:
 dagger module init python --name my-module --static-entrypoint
 ```
 
-Generating the module then writes a manifest version 2 instead of a runtime
+Generating the module then writes an entrypoint manifest instead of a runtime
 manifest, and `sdk/entrypoint/` next to the vendored library:
 
 | File | What it is |
@@ -102,7 +102,7 @@ change them; a call after an edit is refused with a message to run
 only file contents count, not permissions.
 
 What the static path cannot do yet, and refuses at `dagger generate`:
-module clients (manifest version 2 has no dependencies), any `cache=` value
+module clients (an entrypoint manifest has no dependencies), any `cache=` value
 on a function (the entrypoint's exec is content-cached and receives no
 per-call signal), the `legacy` template, and a manifest with `include`,
 `disableDefaultFunctionCaching`, a runtime other than `python`, a `source`
@@ -119,8 +119,8 @@ directly, with `dagger call python-sdk mod --path <module> generate`, keeps
 the mode that module is in; switching modes goes through
 `dagger module init python --path <module>` as above. Switching back removes
 `sdk/entrypoint/` and rewrites a runtime manifest with the generating
-engine's version. Loading a static module needs an engine that reads
-manifest version 2 (dagger/dagger#14038); see
+engine's version. Loading a static module needs an engine that reads an
+entrypoint manifest (dagger/dagger#14038); see
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design and the plan to make it the default.
 
