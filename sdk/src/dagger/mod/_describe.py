@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import inspect
+import json
 from typing import Any
 
 import dagger
@@ -120,6 +121,17 @@ class ModuleDescription:
     description: str | None = None
     objects: tuple[ObjectDescription, ...] = ()
     enums: tuple[EnumDescription, ...] = ()
+
+
+def describe_json(desc: ModuleDescription) -> str:
+    """Serialize a description as JSON for a runtime that rebuilds the types.
+
+    The module-kind entrypoint reads this in its own session and replays the
+    same builder calls the API build makes, so the definitions it returns
+    belong to that session instead of the module's nested one. A TypeDefKind
+    becomes its schema name; a tuple becomes a list; nothing else is special.
+    """
+    return json.dumps(dataclasses.asdict(desc), default=lambda value: value.value)
 
 
 def describe_type(  # noqa: C901, PLR0911
