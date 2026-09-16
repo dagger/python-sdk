@@ -607,9 +607,15 @@ class _InputField:
             self.has_default = True
 
         if default_value and is_enum_type(self.named_type):
-            self.default_value = f"{self.named_type.name}.{default_value}"
+            self.default_value = self._enum_default(default_value)
         else:
             self.default_value = repr(default_value)
+
+    def _enum_default(self, value) -> str:
+        """Render an enum default: the named type unwraps lists, the value doesn't."""
+        if isinstance(value, list):
+            return f"[{', '.join(self._enum_default(v) for v in value)}]"
+        return f"{self.named_type.name}.{value}"
 
     @joiner
     def __str__(self) -> Iterator[str]:

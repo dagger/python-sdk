@@ -681,3 +681,31 @@ def test_input_object_mutable_default_accepts_none():
         "if not (self.tags is None or (isinstance(self.tags, list) "
         "and all(isinstance(_v0, str) for _v0 in self.tags))):"
     ) in rendered
+
+
+def test_enum_list_default_renders_members(ctx: Context):
+    """A list default on an enum argument renders each member, not the list."""
+    state = GraphQLEnumType(
+        "AgentState",
+        {"IDLE": GraphQLEnumValue("IDLE"), "FAILED": GraphQLEnumValue("FAILED")},
+    )
+    args = {"on": Argument(NonNull(List(NonNull(state))), ["IDLE", "FAILED"])}
+
+    handler = _ObjectField(ctx, "fn", Field(String, args), Object("Foo", {}))
+    body = "".join(handler.func_body())
+
+    assert "[AgentState.IDLE, AgentState.FAILED]" in body
+    assert "AgentState.['IDLE', 'FAILED']" not in body
+
+
+def test_enum_scalar_default_renders_member(ctx: Context):
+    """A scalar enum default still renders as a single member."""
+    state = GraphQLEnumType(
+        "AgentState",
+        {"IDLE": GraphQLEnumValue("IDLE"), "FAILED": GraphQLEnumValue("FAILED")},
+    )
+    args = {"on": Argument(NonNull(state), "IDLE")}
+
+    handler = _ObjectField(ctx, "fn", Field(String, args), Object("Foo", {}))
+
+    assert "on: AgentState = AgentState.IDLE" in handler.func_signature()
