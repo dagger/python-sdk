@@ -72,9 +72,10 @@ type PythonSdk {
   The shared Dang entrypoint every module on the runtime path names, served
   from this repository's entrypoint/ directory. An engine that loads manifest
   version 2 drives the module through it; an older engine ignores the table
-  and uses the builtin runtime named by [runtime].
+  and uses the builtin runtime named by [runtime]. `@v1` selects the greatest
+  `entrypoint/v1.*` tag of this repository, then the greatest plain `v1.*` one.
   """
-  let sharedEntrypointSource: String! = "github.com/dagger/python-sdk/entrypoint"
+  let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
   """
   Whether a module config, dagger-module.toml or the pre-1.0 dagger.json,

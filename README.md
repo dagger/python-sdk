@@ -91,7 +91,7 @@ source = "python"
 
 [entrypoint]
 kind = "dang"
-source = "github.com/dagger/python-sdk/entrypoint"
+source = "dagger.io/sdk/python/entrypoint@v1"
 ```
 
 One manifest then loads on both kinds of engine. An engine that predates
@@ -127,7 +127,8 @@ drifts; refresh it with
 `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`.
 
 The address above only resolves once `entrypoint/` is on this repository's
-default branch. The Python process the entrypoint starts belongs to no module
+default branch and a `v1` release is tagged: `@v1` selects the greatest
+`entrypoint/v1.*` tag, then the greatest plain `v1.*` tag. The Python process the entrypoint starts belongs to no module
 on the engine's side: the core API works in it, and `dag.current_module()`
 fails with "no current module". The static entrypoint has the same limit.
 
