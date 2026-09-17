@@ -59,7 +59,10 @@ def main(argv: list[str] | None = None):
     client_parser.add_argument("--pin", help="commit that a git ref is pinned to")
     client_parser.add_argument(
         "--core-digest",
-        help="digest of the core package (defaults to the one of the given schema)",
+        help=(
+            "CORE_DIGEST of the generated core package, which the client must "
+            "match to import (defaults to the digest of the given schema's core)"
+        ),
     )
     client_parser.set_defaults(run=client)
 

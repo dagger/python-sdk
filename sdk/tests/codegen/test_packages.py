@@ -100,7 +100,8 @@ def test_core_entry_point():
 
     assert files["py.typed"] == ""
     assert "def core(*, session: Session | None = None) -> Query:" in code
-    assert "return client_root(Query, None, session=session, args=[])" in code
+    assert "return client_root(Query, None, None, [], session=session)" in code
+    assert "check_core" not in code
     assert f'CORE_DIGEST = "{core_digest(schema)}"' in code
     assert '"CORE_DIGEST",' in code
     assert '"core",' in code
@@ -135,12 +136,15 @@ def test_client_imports_the_core_types_it_names():
         dedent(
             """
             from dagger_clients.core import (
+                CORE_DIGEST as _installed_core,
                 Binding,
                 Directory,
                 Severity,
             )
 
-            from ._target import NAME, PIN, REF
+            from ._target import CORE_DIGEST, NAME, PIN, REF
+
+            check_core(NAME, CORE_DIGEST, _installed_core)
 
             TARGET = Target(name=NAME, ref=REF, pin=PIN)
             """
@@ -165,7 +169,7 @@ def test_client_entry_function():
                     Arg("source", source),
                     Arg("config", config, None),
                 ]
-                return client_root(Linter, TARGET, session=session, args=_args)
+                return client_root(Linter, TARGET, "linter", _args, session=session)
                 """
             ),
             "    ",
@@ -327,6 +331,11 @@ def test_client_name_becomes_a_package():
         "def my_project_dev(*, session: Session | None = None) -> MyProjectDev:"
         in (files["__init__.py"])
     )
+    # The field name is the engine's, so the SDK never derives it.
+    assert (
+        'client_root(MyProjectDev, TARGET, "myProjectDev", _args, session=session)'
+        in files["__init__.py"]
+    )
     # The descriptor pins the name as given, which is the one the engine knows.
     assert 'NAME = "my-project.dev"' in files["_target.py"]
 
@@ -415,6 +424,11 @@ def test_cli_generates_packages(tmp_path, introspection):
     out = tmp_path / "src"
 
     cli.main(["generate-core", "-i", str(introspection), "-o", str(out)])
+    core = (out / "dagger_clients/core/__init__.py").read_text()
+    digest = core[core.index("CORE_DIGEST = ") :].splitlines()[0]
+
+    # In real use, the caller hands the client the digest of the core it
+    # generated, because the two must match for the client to import.
     cli.main(
         [
             "generate-client",
@@ -423,25 +437,37 @@ def test_cli_generates_packages(tmp_path, introspection):
             *("--name", "linter"),
             *("--ref", "github.com/acme/linter"),
             *("--pin", "4f1c9e"),
+            *("--core-digest", "sha256:from-core"),
+        ]
+    )
+    cli.main(
+        [
+            "generate-client",
+            *("-i", str(introspection)),
+            *("-o", str(out)),
+            *("--name", "glow"),
+            *("--ref", "./glow"),
         ]
     )
 
     assert sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()) == [
         "dagger_clients/core/__init__.py",
         "dagger_clients/core/py.typed",
+        "dagger_clients/glow/__init__.py",
+        "dagger_clients/glow/_target.py",
+        "dagger_clients/glow/py.typed",
         "dagger_clients/linter/__init__.py",
         "dagger_clients/linter/_target.py",
         "dagger_clients/linter/py.typed",
     ]
-    core = (out / "dagger_clients/core/__init__.py").read_text()
     client = (out / "dagger_clients/linter/__init__.py").read_text()
     target = (out / "dagger_clients/linter/_target.py").read_text()
     assert "Linter" not in core
     assert "def as_linter(binding: Binding, /) -> Linter:" in client
     assert 'PIN = "4f1c9e"' in target
-    # The client was generated against the core of the same schema.
-    digest = core[core.index("CORE_DIGEST = ") :].splitlines()[0]
-    assert digest in target
+    assert 'CORE_DIGEST = "sha256:from-core"' in target
+    # Without the flag, the digest is the one of the same schema's core.
+    assert digest in (out / "dagger_clients/glow/_target.py").read_text()
 
 
 def test_cli_reads_what_write_package_writes(tmp_path):

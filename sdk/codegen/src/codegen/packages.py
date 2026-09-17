@@ -51,7 +51,7 @@ from typing import Protocol, overload, runtime_checkable
 
 from typing_extensions import Self
 
-from dagger.client import Session, Target, client_root, client_select
+from dagger.client import %s
 from dagger.client._core import Arg
 from dagger.client._guards import type_error as _type_error
 from dagger.client.base import Enum, Input, Root, Scalar, Type
@@ -90,7 +90,10 @@ class _EntryField(_ObjectField):
     @joiner
     def func_body(self) -> Iterator[str]:
         yield from self.func_prelude()
-        yield f"return client_root({self.type}, TARGET, session=session, args=_args)"
+        yield (
+            f"return client_root({self.type}, TARGET, "
+            f'"{self.graphql_name}", _args, session=session)'
+        )
 
     def render(self) -> str:
         return _block(self.func_signature(), indent(self.func_body()))
@@ -185,12 +188,12 @@ def _core_init(schema: GraphQLSchema, schema_version: str) -> Iterator[str]:
     ctx = new_context(schema, schema_version, partitioned=True)
     digest = partition.core_digest(schema, schema_version)
 
-    yield _HEADER
+    yield _HEADER % "Session, client_root"
     yield from render_types(ctx, _owned(schema, None))
     yield _block(
         "def core(*, session: Session | None = None) -> Query:",
         indent('"""The way into the core API."""'),
-        indent("return client_root(Query, None, session=session, args=[])"),
+        indent("return client_root(Query, None, None, [], session=session)"),
     )
     yield _block(
         f"CORE_DIGEST = {quote(digest)}",
@@ -282,7 +285,9 @@ def _client_init(
     entry: _EntryField | None = None
     contributed: list[_ContributedField] = []
     for parent, name, field in partition.contributed_fields(schema, module):
-        # The engine names the constructor of a module after the module.
+        # The entry is the `Query` field that the module contributes under its
+        # own name, because that is the constructor the engine makes for it.
+        # Any other `Query` field it contributes is a plain function.
         if parent.name == "Query" and name.lower() == package.replace("_", ""):
             entry = _EntryField(ctx, name, field, parent)
         else:
@@ -295,13 +300,16 @@ def _client_init(
     references = _references(schema, module, owned)
     references |= {f.parent_name: f.label for f in contributed}
 
-    yield _HEADER.rstrip()
-    if imports := _core_imports(ctx, module, references):
-        yield f"from {NAMESPACE}.{partition.CORE} import ("
-        yield from (indent(f"{name},") for name in imports)
-        yield ")"
+    yield _HEADER.rstrip() % "Session, Target, check_core, client_root, client_select"
+    yield f"from {NAMESPACE}.{partition.CORE} import ("
+    yield indent("CORE_DIGEST as _installed_core,")
+    yield from (indent(f"{name},") for name in _core_imports(ctx, module, references))
+    yield ")"
     yield ""
-    yield "from ._target import NAME, PIN, REF"
+    yield "from ._target import CORE_DIGEST, NAME, PIN, REF"
+    yield ""
+    # Before anything else, so that a stale client fails on its import line.
+    yield "check_core(NAME, CORE_DIGEST, _installed_core)"
     yield _block(
         "TARGET = Target(name=NAME, ref=REF, pin=PIN)",
         '"""The module that this client loads on first use."""',
