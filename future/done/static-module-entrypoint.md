@@ -37,7 +37,7 @@ v0.20.7, needed five fix releases, and was removed in v0.21.1 because it
 could not see what Python computes at import time. Importing is exact by
 construction and is about 150 lines.
 
-The change is gated by one SDK setting, `staticEntrypoint`, in two phases.
+The change is gated by one SDK setting, `dangEntrypoint`, in two phases.
 In phase A the setting defaults to `false` and nothing changes for a module
 that does not set it. In phase B the default becomes `true`, and a module
 that needs the dynamic path sets it to `false`. The dynamic path is today's
@@ -53,8 +53,8 @@ development engine and recorded here.
 
 | Term | Meaning |
 |---|---|
-| dynamic path | What every Python module does today: a version 1 `dagger-module.toml` with `[runtime]`, a runtime module that builds the module's container, and types discovered by running the module once per session. Selected by `staticEntrypoint = false`. |
-| static path | A version 2 `dagger-module.toml` with `[entrypoint]`, a generated Dang entrypoint under `sdk/entrypoint/`, and types written into it at `dagger generate`. Selected by `staticEntrypoint = true`. |
+| dynamic path | What every Python module does today: a version 1 `dagger-module.toml` with `[runtime]`, a runtime module that builds the module's container, and types discovered by running the module once per session. Selected by `dangEntrypoint = false`. |
+| static path | A version 2 `dagger-module.toml` with `[entrypoint]`, a generated Dang entrypoint under `sdk/entrypoint/`, and types written into it at `dagger generate`. Selected by `dangEntrypoint = true`. |
 | runtime registry | The `dagger.mod.Module` instance that the module's decorators populate when the module is imported. It holds the object, interface and enum definitions and dispatches calls. |
 | description | The plain-data form of what the registry holds: `ModuleDescription` in `dagger.mod._describe`. Both paths derive their type definitions from it. |
 | renderer | The code that turns a description into Dang source. |
@@ -180,7 +180,7 @@ merged (2026-09-09) and this repository adopted its SDK interface in
 
 ## Goals
 
-1. `dagger generate` on a Python module with `staticEntrypoint = true`
+1. `dagger generate` on a Python module with `dangEntrypoint = true`
    writes a version 2 `dagger-module.toml` and a generated Dang entrypoint
    under `sdk/entrypoint/`. The entrypoint's `types()` is a literal list of
    `TypeDef` expressions. `call()` runs the module's function.
@@ -224,7 +224,7 @@ the README.
   exposed. `types()` has no place for it.
 - The `debug` setting of the dynamic path has no equivalent: a version 2
   manifest carries no SDK configuration.
-- A module with `staticEntrypoint = true` cannot depend on other modules.
+- A module with `dangEntrypoint = true` cannot depend on other modules.
   Manifest version 2 has no dependency list
   (`future/module-manifest-v2/compat-bridge.md` at `75c77722`,
   *Dependencies*). `generateScope` refuses a non-empty `clients` list on the
@@ -454,10 +454,10 @@ twice.
 Generate a static entrypoint that carries the module's types, so the
 engine loads them without running the module.
 """
-pub staticEntrypoint: Boolean! = false
+pub dangEntrypoint: Boolean! = false
 ```
 
-`dagger module init python --static-entrypoint` sets it; the engine persists
+`dagger module init python --dang-entrypoint` sets it; the engine persists
 it on the scope and passes it back on every `dagger generate`. A workspace
 sets it for every Python module through `[modules.python-sdk.settings]`,
 which a scope's own setting overrides.
@@ -465,7 +465,7 @@ which a scope's own setting overrides.
 | | Phase A (this change) | Phase B (a later change) |
 |---|---|---|
 | Default | `false` | `true` |
-| Opt in / out | `--static-entrypoint` selects the static path | `--static-entrypoint=false` selects the dynamic path |
+| Opt in / out | `--dang-entrypoint` selects the static path | `--dang-entrypoint=false` selects the dynamic path |
 | Existing module, setting unset, next `dagger generate` | unchanged | migrates to the static path, or fails with an actionable error if refused |
 | Engine floor of this SDK module | `v1.0.0-beta.11`, as today | the first release that loads manifest version 2 |
 
@@ -839,7 +839,7 @@ Phase B has these gates, all of which must hold:
 
 ### e2e checks on CI's engine (`.dagger/modules/e2e`)
 
-- `staticScopeInitCheck`: `generateScope` with `staticEntrypoint: true` on
+- `staticScopeInitCheck`: `generateScope` with `dangEntrypoint: true` on
   an empty scope: a manifest whose whole content is the five version 2
   lines; the template files; a `gen.py` that defines `cwd` and
   `with_new_file` on `Workspace` (the current schema view); a `main.dang`
@@ -878,7 +878,7 @@ CLI are built with `dagger/dagger`'s `.dagger/modules/dev` and
    `DefaultPath` and `DefaultAddress` resolution, `dag.current_module()`
    and its `source()`. Record differences in *Accepted differences*.
 2. Scratch workspace: install this repository as SDK `python`, `dagger
-   module init python --name=hello --static-entrypoint`, inspect the files.
+   module init python --name=hello --dang-entrypoint`, inspect the files.
 3. `dagger call hello container`; then the *Measurements* fixture as a
    module: `dagger functions` and the GraphQL `__type` of every object
    compared with the dynamic path on the same engine, with `[runtime]
@@ -886,10 +886,10 @@ CLI are built with `dagger/dagger`'s `.dagger/modules/dev` and
 4. Edit a signature and call without `dagger generate`: refused, naming the
    file. Change only a file's permissions: the call runs. `dagger generate`:
    the new signature is served.
-5. `dagger module init python --path <scope> --static-entrypoint=false`,
+5. `dagger module init python --path <scope> --dang-entrypoint=false`,
    then `dagger generate`: back on the dynamic path, `sdk/entrypoint/` gone,
    the module runs. Edit the setting in `dagger.toml` to `true` and
-   generate: back. Set `[modules.python-sdk.settings] staticEntrypoint =
+   generate: back. Set `[modules.python-sdk.settings] dangEntrypoint =
    true` with no scope setting: the same.
 6. Wall clock and the engine's `loading type definitions` span for the
    fixture on both paths, three runs each.
@@ -977,7 +977,7 @@ leaves `dagger check` and `uv run --frozen pytest` green.
    the `call` subcommand; `test_dispatch.py`.
 5. `runtime: move the container build into a shared type` —
    `runtime/build.dang`; `runtime/main.dang` as the adapter.
-6. `python-sdk: generate a static entrypoint behind the staticEntrypoint
+6. `python-sdk: generate a static entrypoint behind the dangEntrypoint
    setting` — the setting, the manifest, the refusals, `Mod.generated`, the
    `runtime/` dependency and include, the four e2e checks.
 7. `docs: describe the static path and the rollout` — `README.md`.

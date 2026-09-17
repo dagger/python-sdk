@@ -16,7 +16,7 @@ type Mod {
   Whether the module gets a static entrypoint, from the SDK setting or from
   the manifest it already has.
   """
-  pub staticEntrypoint: Boolean!
+  pub dangEntrypoint: Boolean!
 
   """
   Module root relative to the client's cwd.
@@ -72,7 +72,7 @@ type Mod {
     # Merge, don't replace: the generated context holds only generated files.
     let merged = ws.withDirectory("/" + rootPath, files)
     let entrypointPath = vendorDirName + "/" + entrypointDirName
-    if (staticEntrypoint) {
+    if (dangEntrypoint) {
       entrypointManifest(merged, entrypointPath)
     } else if (ws.directory("/" + rootPath).exists(entrypointPath)) {
       merged.withoutDirectory("/" + rootPath + "/" + entrypointPath)
@@ -122,6 +122,11 @@ type Mod {
   The workspace the module's schema is read from and its container is built
   in. An entrypoint manifest is served the oldest schema view by an engine that
   does not know it, so the module is staged with a runtime manifest instead.
+
+  Any entrypoint kind is staged away, not just the Dang one. An engine that
+  loads manifest version 2 resolves a module-kind entrypoint through the
+  runtime module, which has no generated source to trust at this point; the
+  runtime manifest points back at the module being built.
   """
   let stagingWs: Workspace! {
     if (hasEntrypointManifest) {
@@ -140,7 +145,7 @@ type Mod {
   let vendoredDir: Directory! {
     let schemaJSON = stagingWs.moduleSource("/" + rootPath).introspectionSchemaJSON
     let vendored = library.withFile(generatedBindingsPath, bindings(schemaJSON))
-    let files = if (staticEntrypoint) {
+    let files = if (dangEntrypoint) {
       vendored.withDirectory(entrypointDirName, entrypointDir(vendored))
     } else {
       vendored

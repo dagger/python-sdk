@@ -32,6 +32,13 @@ def main(argv: list[str] | None = None) -> int:
     entrypoint.add_argument("--output", required=True, type=pathlib.Path)
     entrypoint.set_defaults(run=_entrypoint)
 
+    describe = commands.add_parser(
+        "describe",
+        help="write the module's type definitions as JSON for a runtime entrypoint",
+    )
+    describe.add_argument("--output", required=True, type=pathlib.Path)
+    describe.set_defaults(run=_describe)
+
     call = commands.add_parser(
         "call",
         help="run the call read from standard input and write its JSON result",
@@ -62,6 +69,14 @@ def _entrypoint(args: argparse.Namespace) -> None:
         root=pathlib.Path.cwd(),
         output=args.output,
     )
+
+
+def _describe(args: argparse.Namespace) -> None:
+    from dagger.mod._describe import describe_json
+    from dagger.mod.cli import load_module
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(describe_json(load_module().describe()))
 
 
 def _call(args: argparse.Namespace) -> None:

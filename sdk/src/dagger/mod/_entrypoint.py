@@ -140,7 +140,7 @@ def _function(func: FunctionDescription) -> list[str]:
     if func.cache is not None:
         msg = (
             f"function '{func.name}' sets cache={func.cache!r}: a static entrypoint "
-            "cannot honour cache policies; set staticEntrypoint = false to keep "
+            "cannot honour cache policies; set dangEntrypoint = false to keep "
             "discovering types at runtime"
         )
         raise BadUsageError(msg)
