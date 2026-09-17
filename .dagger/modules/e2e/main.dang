@@ -404,6 +404,62 @@ type E2e {
   }
 
   """
+  runtime/build.dang as the shared entrypoint carries it.
+
+  The engine copies only the .dang files at the top of an entrypoint
+  directory, and `currentModule` inside an entrypoint is the module it serves,
+  so a shared entrypoint can read none of its own non-Dang files. The externals
+  block that reads the pinned Dockerfiles is written out here instead, the same
+  way a generated per-module entrypoint carries it.
+  """
+  pub sharedEntrypointBuild(ws: Workspace!): File! {
+    let pins = "let defaultBaseImage: String! = \"" + imageFrom(ws, "runtime/images/base/Dockerfile") + "\"\n" +
+      "  let defaultUvImage: String! = \"" + imageFrom(ws, "runtime/images/uv/Dockerfile") + "\""
+    let inlined = ws.file("/runtime/build.dang").contents
+      .replaceMatches("(?s)#<externals>.*?#</externals>", pins)
+    if (inlined.contains("currentModule")) {
+      raise "runtime/build.dang reads currentModule outside its externals block"
+    } else {
+      directory
+        .withNewFile(sharedEntrypointBuildPath, sharedEntrypointHeader + inlined)
+        .file(sharedEntrypointBuildPath)
+    }
+  }
+
+  let sharedEntrypointBuildPath: String! = "entrypoint/build.dang"
+
+  let sharedEntrypointHeader: String! =
+    "# Generated from runtime/build.dang by the e2e module. DO NOT EDIT.\n" +
+    "#\n" +
+    "# Refresh with:\n" +
+    "#   dagger call -m .dagger/modules/e2e shared-entrypoint-build \\\n" +
+    "#     export --path " + "entrypoint/build.dang" + "\n" +
+    "\n"
+
+  let imageFrom(ws: Workspace!, path: String!): String! {
+    let line = ws.file("/" + path).contents.match("(?m)^FROM\\s+(\\S+)")
+    if (line == null) {
+      raise "no FROM line in " + path
+    } else {
+      line.captures[0] ?? ""
+    }
+  }
+
+  """
+  The committed copy of the build in the shared entrypoint matches the runtime
+  module's, so a Dependabot bump to a pinned image reaches both.
+  """
+  pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check {
+    let want = sharedEntrypointBuild(ws).contents
+    let got = ws.file("/" + sharedEntrypointBuildPath).contents
+    assert(
+      got == want,
+      sharedEntrypointBuildPath + " is stale; refresh it with `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path " + sharedEntrypointBuildPath + "`",
+    )
+    null
+  }
+
+  """
   Main object names derive from module names as in the engine's builtin Python
   runtime, so a module keeps loading when it moves between the two.
   """

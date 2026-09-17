@@ -1,3 +1,9 @@
+# Generated from runtime/build.dang by the e2e module. DO NOT EDIT.
+#
+# Refresh with:
+#   dagger call -m .dagger/modules/e2e shared-entrypoint-build \
+#     export --path entrypoint/build.dang
+
 """
 The container a Python module runs in, built from its committed files.
 The runtime module, the generated static entrypoint and the shared entrypoint
@@ -35,20 +41,8 @@ type PythonModuleBuild {
   let uvCacheVolume: String! = "modpython-uv"
   let pipCacheVolume: String! = "modpython-pip"
 
-  #<externals>
-  # Committed single-FROM Dockerfiles so Dependabot keeps the digests fresh.
-  let defaultBaseImage: String! { imageFrom("images/base/Dockerfile") }
-  let defaultUvImage: String! { imageFrom("images/uv/Dockerfile") }
-
-  let imageFrom(path: String!): String! {
-    let line = currentModule.source.file(path).contents.match("(?m)^FROM\\s+(\\S+)")
-    if (line == null) {
-      raise "no FROM line in " + path
-    } else {
-      line.captures[0] ?? ""
-    }
-  }
-  #</externals>
+  let defaultBaseImage: String! = "python:3.14-slim@sha256:486b8092bfb12997e10d4920897213a06563449c951c5506c2a2cfaf591c599f"
+  let defaultUvImage: String! = "ghcr.io/astral-sh/uv:0.11.16@sha256:440fd6477af86a2f1b38080c539f1672cd22acb1b1a47e321dba5158ab08864d"
 
   """
   The module directory.

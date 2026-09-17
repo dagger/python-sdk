@@ -1,0 +1,230 @@
+"""
+The Python SDK's shared module entrypoint.
+
+One copy of this directory, served from this repository, backs every Python
+module that names it in `[entrypoint] kind = "dang"`. Nothing is generated into
+the module: the entrypoint finds the module it serves through the workspace it
+is handed, whose working directory is that module's directory.
+
+The module still describes its own types the way it always has. This rebuilds
+them from that description in this session, rather than loading the module the
+description came from, so the definitions belong to the session the engine
+reads them from.
+"""
+type Entrypoint implements ModuleEntrypoint {
+  """
+  Every type the module at the workspace cwd defines.
+  """
+  pub types(workspace: Workspace!): [TypeDef!]! {
+    let desc = json.withContents(describeJSON(workspace))
+    let objects = desc.field(["objects"]).asArray.{{contents}}.map { raw =>
+      objectType(json.withContents(raw.contents))
+    }
+    let enums = desc.field(["enums"]).asArray.{{contents}}.map { raw =>
+      enumType(json.withContents(raw.contents))
+    }
+    objects + enums
+  }
+
+  """
+  Call one constructor or function of the module at the workspace cwd.
+
+  The request and the result are the module's own JSON, so the entrypoint
+  passes them through without reading them.
+  """
+  pub call(
+    workspace: Workspace!,
+    receiverType: String!,
+    receiverValue: JSON,
+    fnName: String!,
+    fnArgs: JSON!,
+  ): JSON! {
+    let request = JSON.encode({{
+      receiverType: receiverType,
+      receiverValue: receiverValue,
+      fnName: fnName,
+      fnArgs: fnArgs,
+    }})
+    let result = build(workspace).installed
+      .withExec(
+        ["python", "-m", "dagger.mod", "call", "--output", callResultPath],
+        stdin: request,
+        experimentalPrivilegedNesting: true,
+      )
+      .file(callResultPath)
+      .contents
+    (result :: JSON!)
+  }
+
+  let describePath: String! = "/dagger/describe.json"
+  let callResultPath: String! = "/dagger/result.json"
+
+  """The module's type description, as the JSON its own tools already emit."""
+  let describeJSON(workspace: Workspace!): Dagger.JSON! {
+    (build(workspace).installed
+      .withExec(
+        ["python", "-m", "dagger.mod", "describe", "--output", describePath],
+        experimentalPrivilegedNesting: true,
+      )
+      .file(describePath)
+      .contents :: Dagger.JSON!)
+  }
+
+  """The module this entrypoint was handed: its directory is the workspace cwd."""
+  let build(workspace: Workspace!): PythonModuleBuild! {
+    let path = modulePath(workspace)
+    PythonModuleBuild(
+      contextDir: workspace.directory(
+        "/",
+        include: [if (path == ".") { "**" } else { path + "/**" }],
+        exclude: ["**/.venv", "**/__pycache__"],
+      ),
+      subPath: path,
+      moduleName: moduleName(workspace, path),
+    )
+  }
+
+  let modulePath(workspace: Workspace!): String! {
+    let cwd = workspace.cwd.trimPrefix("/").trimSuffix("/")
+    if (cwd == "") { "." } else { cwd }
+  }
+
+  let moduleName(workspace: Workspace!, path: String!): String! {
+    let manifest = if (path == ".") { "dagger-module.toml" } else { path + "/dagger-module.toml" }
+    let matched = workspace.file("/" + manifest).contents.match("(?m)^\\s*name\\s*=\\s*\"([^\"]*)\"")
+    if (matched == null) {
+      raise "no module name in " + manifest
+    } else {
+      matched.captures[0] ?? ""
+    }
+  }
+
+  let objectType(raw: JSONValue!): TypeDef! {
+    let base = if (raw.field(["interface"]).asBoolean) {
+      typeDef.withInterface(raw.field(["name"]).asString, description: optString(raw, "description"))
+    } else {
+      typeDef.withObject(
+        raw.field(["name"]).asString,
+        description: optString(raw, "description"),
+        deprecated: optString(raw, "deprecated"),
+      )
+    }
+    let withFields = raw.field(["fields"]).asArray.{{contents}}.reduce(base) { acc, rawField =>
+      let f = json.withContents(rawField.contents)
+      acc.withField(
+        f.field(["name"]).asString,
+        typeRef(json.withContents(f.field(["type"]).contents)),
+        description: optString(f, "description"),
+        deprecated: optString(f, "deprecated"),
+      )
+    }
+    let withFunctions = raw.field(["functions"]).asArray.{{contents}}.reduce(withFields) { acc, rawFn =>
+      acc.withFunction(functionOf(json.withContents(rawFn.contents)))
+    }
+    let ctor = raw.field(["constructor"])
+    if (ctor.contents == "null") {
+      withFunctions
+    } else {
+      withFunctions.withConstructor(functionOf(json.withContents(ctor.contents)))
+    }
+  }
+
+  let enumType(raw: JSONValue!): TypeDef! {
+    let base = typeDef.withEnum(raw.field(["name"]).asString, description: optString(raw, "description"))
+    raw.field(["members"]).asArray.{{contents}}.reduce(base) { acc, rawMember =>
+      let m = json.withContents(rawMember.contents)
+      acc.withEnumMember(
+        m.field(["name"]).asString,
+        value: m.field(["value"]).asString,
+        description: optString(m, "description"),
+        deprecated: optString(m, "deprecated"),
+      )
+    }
+  }
+
+  let functionOf(raw: JSONValue!): Function! {
+    let base = function(raw.field(["name"]).asString, typeRef(json.withContents(raw.field(["returns"]).contents)))
+    let described = optString(raw, "description")
+    let f1 = if (described == null) { base } else { base.withDescription(described ?? "") }
+    let cache = optString(raw, "cache")
+    let cached = if (cache == null) {
+      f1
+    } else if (cache == "never") {
+      f1.withCachePolicy(FunctionCachePolicy.Never)
+    } else if (cache == "session") {
+      f1.withCachePolicy(FunctionCachePolicy.PerSession)
+    } else {
+      f1.withCachePolicy(FunctionCachePolicy.Default, timeToLive: cache ?? "")
+    }
+    let deprecated = optString(raw, "deprecated")
+    let f2 = if (deprecated == null) { cached } else { cached.withDeprecated(reason: deprecated ?? "") }
+    let f3 = if (raw.field(["check"]).asBoolean) { f2.withCheck } else { f2 }
+    let f4 = if (raw.field(["generator"]).asBoolean) { f3.withGenerator } else { f3 }
+    let f5 = if (raw.field(["service"]).asBoolean) { f4.withUp } else { f4 }
+    let f6 = if (raw.field(["agent"]).asBoolean) { f5.withAgent } else { f5 }
+    raw.field(["args"]).asArray.{{contents}}.reduce(f6) { acc, rawArg =>
+      argOf(acc, json.withContents(rawArg.contents))
+    }
+  }
+
+  let argOf(fn: Function!, raw: JSONValue!): Function! {
+    let base = typeRef(json.withContents(raw.field(["type"]).contents))
+    let argType = if (raw.field(["nullable"]).asBoolean) { base.withOptional(true) } else { base }
+    fn.withArg(
+      raw.field(["name"]).asString,
+      argType,
+      description: optString(raw, "description"),
+      defaultValue: optJSON(raw, "default_value"),
+      defaultPath: optString(raw, "default_path"),
+      defaultAddress: optString(raw, "default_address"),
+      ignore: optStringList(raw, "ignore"),
+      deprecated: optString(raw, "deprecated"),
+    )
+  }
+
+  let typeRef(raw: JSONValue!): TypeDef! {
+    let kind = raw.field(["kind"]).asString
+    let base = if (kind == "LIST_KIND") {
+      typeDef.withListOf(typeRef(json.withContents(raw.field(["elem"]).contents)))
+    } else if (kind == "ENUM_KIND") {
+      typeDef.withEnum(raw.field(["name"]).asString, description: optString(raw, "description"))
+    } else if (kind == "SCALAR_KIND") {
+      typeDef.withScalar(raw.field(["name"]).asString, description: optString(raw, "description"))
+    } else if (kind == "INTERFACE_KIND") {
+      typeDef.withInterface(raw.field(["name"]).asString)
+    } else if (kind == "OBJECT_KIND") {
+      typeDef.withObject(raw.field(["name"]).asString)
+    } else {
+      typeDef.withKind(scalarKind(kind))
+    }
+    if (raw.field(["optional"]).asBoolean) { base.withOptional(true) } else { base }
+  }
+
+  let scalarKind(kind: String!): TypeDefKind! {
+    if (kind == "STRING_KIND") { TypeDefKind.STRING_KIND }
+    else if (kind == "INTEGER_KIND") { TypeDefKind.INTEGER_KIND }
+    else if (kind == "BOOLEAN_KIND") { TypeDefKind.BOOLEAN_KIND }
+    else if (kind == "FLOAT_KIND") { TypeDefKind.FLOAT_KIND }
+    else { TypeDefKind.VOID_KIND }
+  }
+
+  """A JSON string field, or null where the description carries JSON null."""
+  let optString(raw: JSONValue!, field: String!): String {
+    let value = raw.field([field])
+    if (value.contents == "null") { null } else { value.asString }
+  }
+
+  let optJSON(raw: JSONValue!, field: String!): Dagger.JSON {
+    let value = raw.field([field])
+    if (value.contents == "null") { null } else { (value.asString :: Dagger.JSON!) }
+  }
+
+  let optStringList(raw: JSONValue!, field: String!): [String!] {
+    let value = raw.field([field])
+    if (value.contents == "null") {
+      null
+    } else {
+      value.asArray.{{asString}}.map { element => element.asString }
+    }
+  }
+}
