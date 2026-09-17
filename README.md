@@ -19,6 +19,7 @@ It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
 | `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `findClientRoot`, `generateScope`, `mod` (generate, config), templates |
 | `sdk/` | the `dagger-io` client library and code generator |
 | `runtime/` | the module runtime the engine calls to run a module, and the container build the static entrypoint shares |
+| `entrypoint/` | the shared Dang `ModuleEntrypoint`, served from this repository to any module that names it |
 
 Code generation happens at `dagger generate`, which calls `generateScope` for
 every recorded scope. It runs the code generator in `sdk/` and vendors the
@@ -72,6 +73,64 @@ runtime runs the module — so switching back is just editing the line again.
 
 Within this repository, a path relative to the module works too, which is how
 the end-to-end fixture exercises the runtime before the ref exists.
+
+## Shared entrypoint
+
+`entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every
+Python module at once, with nothing generated into the module. `dagger
+generate` names it in the manifest of every module that does not use
+`--dang-entrypoint`, next to the builtin runtime:
+
+```toml
+# <module>/dagger-module.toml
+name = "my-module"
+engineVersion = "v1.0.0"
+
+[runtime]
+source = "python"
+
+[entrypoint]
+kind = "dang"
+source = "dagger.io/sdk/python/entrypoint@v1"
+```
+
+One manifest then loads on both kinds of engine. An engine that predates
+entrypoints ignores the table and runs the module on the runtime. An engine
+that loads manifest version 2 drives the module through the entrypoint and
+ignores `[runtime]`; when the module has `[[dependencies]]` it reads the
+manifest the old way instead, because manifest version 2 has no dependency
+list, and the runtime runs the module.
+
+A Dang entrypoint already in the manifest is kept as written, so a module can
+pin a version of the shared entrypoint or point at a fork. A static entrypoint
+is told from the shared one by its source, a path inside the module.
+
+The entrypoint finds the module it serves through the workspace it is handed,
+whose working directory is that module's directory. It reads the module's name
+from that directory's manifest, builds the module's container with the same
+build the runtime uses, and asks the module to describe itself
+(`python -m dagger.mod describe`) or to run one call
+(`python -m dagger.mod call`). The types it returns are rebuilt from that
+description in the engine's own session.
+
+| File | What it is |
+| --- | --- |
+| `main.dang` | the `ModuleEntrypoint`: `types` and `call` |
+| `build.dang` | the container build, generated from `runtime/build.dang` |
+
+`build.dang` is generated, not hand-edited: the engine copies only the `.dang`
+files at the top of an entrypoint directory, and `currentModule` inside an
+entrypoint is the module it serves, so a shared entrypoint can read none of its
+own non-Dang files. The externals block that reads `runtime/images/` is written
+out into the copy. `dagger check -m .dagger/modules/e2e` fails when the copy
+drifts; refresh it with
+`dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`.
+
+The address above only resolves once `entrypoint/` is on this repository's
+default branch and a `v1` release is tagged: `@v1` selects the greatest
+`entrypoint/v1.*` tag, then the greatest plain `v1.*` tag. The Python process the entrypoint starts belongs to no module
+on the engine's side: the core API works in it, and `dag.current_module()`
+fails with "no current module". The static entrypoint has the same limit.
 
 ## Static entrypoint
 

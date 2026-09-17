@@ -106,7 +106,7 @@ type Mod {
   }
 
   let hasEntrypointManifest: Boolean! {
-    isModern and ws.file("/" + manifestPath).contents.containsMatch("(?m)^\\s*\\[entrypoint\\]")
+    isModern and ManifestToml(ws.file("/" + manifestPath).contents).hasEntrypoint
   }
 
   let moduleName: String! {
@@ -120,17 +120,26 @@ type Mod {
 
   """
   The workspace the module's schema is read from and its container is built
-  in. An entrypoint manifest is served the oldest schema view by an engine that
-  does not know it, so the module is staged with a runtime manifest instead.
+  in: the module's own manifest with the entrypoint table taken out.
 
-  Any entrypoint kind is staged away, not just the Dang one. An engine that
-  loads manifest version 2 resolves a module-kind entrypoint through the
-  runtime module, which has no generated source to trust at this point; the
-  runtime manifest points back at the module being built.
+  An engine that does not know the table serves a static entrypoint manifest
+  the oldest schema view. An engine that loads manifest version 2 would resolve
+  the entrypoint here, shared or static, and build the module from source it
+  has not generated yet. Either way the runtime manifest points back at the
+  module being built. Everything else the manifest holds stays, the
+  dependencies above all: the bindings are generated from this schema.
   """
   let stagingWs: Workspace! {
     if (hasEntrypointManifest) {
-      sdkHelpers.moduleManifest.withLegacyPythonRuntime.withName(name: moduleName)
+      let staged = ManifestToml(ws.file("/" + manifestPath).contents).withoutEntrypoint
+      let loaded = sdkHelpers.moduleManifest(loadToml: staged)
+      # A static entrypoint manifest holds no runtime to fall back on.
+      let runnable = if (staged.contents.containsMatch("(?m)^\\s*\\[runtime\\]")) {
+        loaded
+      } else {
+        loaded.withLegacyPythonRuntime
+      }
+      runnable.withName(name: moduleName)
         .generate(ws.withWorkdir(rootPath), lock: false, legacyJson: false)
         .withWorkdir(".")
     } else {
