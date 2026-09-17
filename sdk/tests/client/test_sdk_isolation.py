@@ -84,7 +84,8 @@ def test_sdk_files_import_without_generated_code():
 
 
 @pytest.mark.parametrize("path", sdk_files(), ids=lambda p: str(p.relative_to(SRC)))
-def test_sdk_file_names_no_generated_package(path: pathlib.Path):
+def test_sdk_file_text_names_no_generated_package(path: pathlib.Path):
+    """Catches a name in a string, which no import resolution sees."""
     found = [
         f"{path.relative_to(SRC)}:{number}: {line.strip()}"
         for number, line in enumerate(path.read_text().splitlines(), 1)
@@ -95,20 +96,144 @@ def test_sdk_file_names_no_generated_package(path: pathlib.Path):
 
 
 def _is_submodule(name: str) -> bool:
-    return (SRC / f"{name}.py").is_file() or (SRC / name).is_dir()
+    # Listed, not stat'ed: a case-insensitive filesystem matches Client to client/.
+    return name in {p.stem for p in SRC.iterdir()}
+
+
+GENERATED = ("dagger.client.gen", "dagger_gen", "dagger_clients")
+
+
+def _is_generated(name: str) -> bool:
+    return any(name == g or name.startswith(g + ".") for g in GENERATED)
+
+
+def _generated_imports(source: str, module: str) -> list[tuple[int, str]]:
+    """Every import that lands on generated code, wherever it sits in the file.
+
+    Names are resolved to absolute before judging, so ``from .gen import X``
+    counts the same as ``from dagger.client.gen import X``.
+    """
+    package = module if _is_package(module) else module.rpartition(".")[0]
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            bad = [
+                f"import {a.name}"
+                for a in node.names
+                if _is_generated(a.name) or a.name == "dagger"
+            ]
+        elif isinstance(node, ast.ImportFrom):
+            base = importlib.util.resolve_name(
+                "." * node.level + (node.module or ""), package
+            )
+            bad = [
+                f"from {base} import {a.name}"
+                for a in node.names
+                if _is_generated(base)
+                or _is_generated(f"{base}.{a.name}")
+                # A name the init provides may be generated; a submodule never is.
+                or (base == "dagger" and not _is_submodule(a.name))
+            ]
+        else:
+            continue
+        found += [(node.lineno, stmt) for stmt in bad]
+    return found
+
+
+def _is_package(module: str) -> bool:
+    return (SRC.parent / module.replace(".", "/")).is_dir()
+
+
+def _module_name(path: pathlib.Path) -> str:
+    parts = path.relative_to(SRC).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(("dagger", *parts))
 
 
 @pytest.mark.parametrize("path", sdk_files(), ids=lambda p: str(p.relative_to(SRC)))
-def test_sdk_file_imports_no_name_from_the_package_init(path: pathlib.Path):
-    """A name the init provides may be generated; a submodule never is."""
-    found = []
-    for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.Import):
-            names = [a.name for a in node.names if a.name == "dagger"]
-        elif isinstance(node, ast.ImportFrom) and node.module == "dagger":
-            names = [a.name for a in node.names if not _is_submodule(a.name)]
-        else:
-            continue
-        found += [f"{path.relative_to(SRC)}:{node.lineno}: {name}" for name in names]
+def test_sdk_file_imports_no_generated_package(path: pathlib.Path):
+    found = _generated_imports(path.read_text(), _module_name(path))
 
-    assert not found, "\n".join(found)
+    assert not found, "\n".join(
+        f"{path.relative_to(SRC)}:{line}: {stmt}" for line, stmt in found
+    )
+
+
+LAZY_MUTATION = """
+def root_type():
+    from .gen import Client
+
+    return Client
+"""
+
+
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
+        pytest.param(LAZY_MUTATION, "dagger.client.base", id="lazy-relative"),
+        pytest.param("from . import gen\n", "dagger.client.base", id="from-dot"),
+        pytest.param("from .. import gen\n", "dagger.client.sub.x", id="from-dotdot"),
+        pytest.param(
+            "from ..client import gen\n",
+            "dagger.provisioning._engine",
+            id="sibling-package",
+        ),
+        pytest.param(
+            "from dagger.client import gen\n", "dagger.mod._module", id="from-parent"
+        ),
+        pytest.param(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            "    from dagger.client.gen import Client\n",
+            "dagger.mod._module",
+            id="type-checking",
+        ),
+        pytest.param(
+            "class A:\n    def m(self):\n        import dagger.client.gen\n",
+            "dagger.mod._module",
+            id="method-body",
+        ),
+        pytest.param("import dagger_gen\n", "dagger.log", id="dagger_gen"),
+        pytest.param(
+            "from dagger_clients.core import core\n", "dagger.log", id="dagger_clients"
+        ),
+        pytest.param("def f():\n    import dagger\n", "dagger.log", id="lazy-package"),
+        pytest.param("from . import Client\n", "dagger.log", id="dot-is-the-init"),
+        pytest.param(
+            "from ... import Client\n", "dagger.client.sub.x", id="dots-to-the-init"
+        ),
+    ],
+)
+def test_guard_rejects_generated_import(source: str, module: str):
+    assert _generated_imports(source, module)
+
+
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
+        pytest.param(
+            "from ._core import Context\n", "dagger.client.base", id="sibling"
+        ),
+        pytest.param("from . import _core\n", "dagger.client.base", id="from-dot"),
+        pytest.param("from dagger import mod\n", "dagger.log", id="submodule"),
+        pytest.param(
+            "from dagger.client.base import Root\n", "dagger.mod._module", id="absolute"
+        ),
+        pytest.param("import dagger_gen_tools\n", "dagger.log", id="prefix-only"),
+        pytest.param("import gen\n", "dagger.client.base", id="third-party-gen"),
+    ],
+)
+def test_guard_accepts_sdk_import(source: str, module: str):
+    assert not _generated_imports(source, module)
+
+
+def test_package_init_names_generated_code_once():
+    """The init is exempt while it star-imports the bindings for ``dagger.X``.
+
+    The later slice trades that for the optional ``dagger_global`` import,
+    at which point this test and the exemption go together.
+    """
+    found = [stmt for _, stmt in _generated_imports(PACKAGE_INIT.read_text(), "dagger")]
+
+    assert found == ["from dagger_gen import *", "from dagger.client.gen import *"]
