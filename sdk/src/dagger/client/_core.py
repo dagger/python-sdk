@@ -21,7 +21,7 @@ import exceptiongroup
 from cattrs.preconf.json import make_converter as make_json_converter
 from typing_extensions import TypeForm
 
-from dagger import DaggerError, InvalidQueryError
+from dagger._exceptions import DaggerError, InvalidQueryError
 from dagger.client._session import BaseConnection, SharedConnection
 from dagger.client.base import Input, Scalar, Type
 
