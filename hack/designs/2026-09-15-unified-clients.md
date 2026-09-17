@@ -515,6 +515,39 @@ The SDK owns the `Target` class and the load query. The query uses the raw query
 builder, not generated core. One field carries both kinds of reference, so the
 descriptor has one shape; see section 13.
 
+### 8.4 The API the generated code targets [decided]
+
+Generated code calls four hand-written names, and nothing else of the SDK:
+
+```python
+# dagger.client
+@dataclass(frozen=True, slots=True)
+class Target:
+    name: str
+    ref: str
+    pin: str | None = None
+
+def client_root(cls: type[T], target: Target | None, field: str | None,
+                args: list[Arg], *, session: Session | None = None) -> T
+def client_select(receiver: Type, target: Target, field: str,
+                  args: list[Arg]) -> Context
+```
+
+- `client_root` starts a query at the root. `target=None` means there is nothing
+  to load, which is how `core()` is emitted, so core and a client share one
+  shape.
+- `client_select` continues from a core receiver, for a field a client
+  contributes to a core type (7.2). It keeps the receiver's session and context.
+  It returns a `Context`, so the generated code wraps it in the return type, or
+  executes it when the field returns a scalar.
+- Both attach the target to the query context. The SDK loads a target at most
+  once per session (8.3).
+- **The generator passes the exact GraphQL field name.** The SDK never derives
+  it from a class name or from `Target.name`: that would copy the engine's
+  naming rule into the SDK, where it can drift.
+- The generated packages import `Session`, `Target`, `client_root` and
+  `client_select` from `dagger.client`.
+
 ## 9. Temporary global client [decided]
 
 Existing module code uses `dag.linter().lint()`, `dag.container()` and
