@@ -1,10 +1,12 @@
+import json
 from textwrap import dedent, indent
 
 import graphql
 import pytest
 from graphql import build_schema
 
-from codegen.packages import client_package, core_package
+from codegen import cli
+from codegen.packages import client_package, core_package, write_package
 from codegen.partition import ClientError, ClientNameError, core_digest
 
 _CORE = """
@@ -368,3 +370,106 @@ def test_client_refuses_a_type_of_another_client():
 
     with pytest.raises(ClientError, match=r'"Env\.glowLinter" .* names "Glow"'):
         _linter(_LINTER, _GLOW, Env=env)
+
+
+def _introspection(sdl: str) -> dict:
+    """Introspection result, with directives the way the engine adds them."""
+    schema = build_schema(sdl)
+
+    def directives(node) -> list[dict]:
+        return [
+            {
+                "name": d.name.value,
+                "args": [
+                    {"name": a.name.value, "value": graphql.print_ast(a.value)}
+                    for a in d.arguments
+                ],
+            }
+            for d in (node.directives if node else ())
+        ]
+
+    result = graphql.introspection_from_schema(schema)
+    for tp in result["__schema"]["types"]:
+        named = schema.type_map[tp["name"]]
+        tp["directives"] = directives(named.ast_node)
+        for field in tp["fields"] or ():
+            member = named.fields[field["name"]]
+            field["directives"] = directives(member.ast_node)
+            for arg in field["args"]:
+                arg["directives"] = directives(member.args[arg["name"]].ast_node)
+        for field in tp["inputFields"] or ():
+            field["directives"] = directives(named.fields[field["name"]].ast_node)
+        for value in tp["enumValues"] or ():
+            value["directives"] = directives(named.values[value["name"]].ast_node)
+    return {**result, "__schemaVersion": "v0.21.0"}
+
+
+@pytest.fixture
+def introspection(tmp_path):
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(_introspection(_sdl(_LINTER, _GLOW))))
+    return path
+
+
+def test_cli_generates_packages(tmp_path, introspection):
+    out = tmp_path / "src"
+
+    cli.main(["generate-core", "-i", str(introspection), "-o", str(out)])
+    cli.main(
+        [
+            "generate-client",
+            *("-i", str(introspection)),
+            *("-o", str(out)),
+            *("--name", "linter"),
+            *("--ref", "github.com/acme/linter"),
+            *("--pin", "4f1c9e"),
+        ]
+    )
+
+    assert sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file()) == [
+        "dagger_clients/core/__init__.py",
+        "dagger_clients/core/py.typed",
+        "dagger_clients/linter/__init__.py",
+        "dagger_clients/linter/_target.py",
+        "dagger_clients/linter/py.typed",
+    ]
+    core = (out / "dagger_clients/core/__init__.py").read_text()
+    client = (out / "dagger_clients/linter/__init__.py").read_text()
+    target = (out / "dagger_clients/linter/_target.py").read_text()
+    assert "Linter" not in core
+    assert "def as_linter(binding: Binding, /) -> Linter:" in client
+    assert 'PIN = "4f1c9e"' in target
+    # The client was generated against the core of the same schema.
+    digest = core[core.index("CORE_DIGEST = ") :].splitlines()[0]
+    assert digest in target
+
+
+def test_cli_reads_what_write_package_writes(tmp_path):
+    schema = _schema(_LINTER)
+    package, files = client_package(schema, "linter", ".")
+
+    root = write_package(tmp_path, package, files)
+
+    assert root == tmp_path / "dagger_clients" / "linter"
+    assert {p.name: p.read_text() for p in root.iterdir()} == files
+
+
+def test_cli_refuses_a_client_name(tmp_path, introspection, capsys):
+    args = ["generate-client", "-i", str(introspection), "-o", str(tmp_path)]
+
+    with pytest.raises(SystemExit):
+        cli.main([*args, "--name", "core", "--ref", "."])
+
+    assert 'client name "core" is taken by the core bindings' in capsys.readouterr().err
+    assert not (tmp_path / "dagger_clients").exists()
+
+
+def test_cli_still_generates_one_file(tmp_path, introspection):
+    output = tmp_path / "gen.py"
+
+    cli.main(["generate", "-i", str(introspection), "-o", str(output)])
+
+    code = output.read_text()
+    assert "class Linter(Type):" in code
+    assert "class Client(Query):" in code
+    assert "dag = Client()" in code
