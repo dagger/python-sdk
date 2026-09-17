@@ -69,12 +69,6 @@ type PythonSdk {
   let vendorDirName: String! = "sdk"
 
   """
-  The runtime module a manifest-v2 engine loads as this module's entrypoint.
-  Legacy engines ignore it and use the builtin runtime named by [runtime].
-  """
-  let runtimeModuleSource: String! = "github.com/dagger/python-sdk/runtime"
-
-  """
   Whether a module config, dagger-module.toml or the pre-1.0 dagger.json,
   exists at a workspace-root-relative scope.
   """
@@ -141,18 +135,71 @@ type PythonSdk {
     let base = if (hasToml and isEntrypointManifest(ws.file(root + "/dagger-module.toml").contents)) {
       # An entrypoint manifest holds nothing the runtime manifest keeps.
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
-        .withModuleEntrypoint(source: runtimeModuleSource)
     } else if (hasToml) {
-      sdkHelpers.moduleManifest(loadToml: ws.file(root + "/dagger-module.toml"))
+      sdkHelpers.moduleManifest(loadToml: withoutStaleEntrypoint(ws.file(root + "/dagger-module.toml")))
     } else if (hasJson) {
       sdkHelpers.moduleManifest(loadJson: ws.file(root + "/dagger.json"))
     } else {
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
-        .withModuleEntrypoint(source: runtimeModuleSource)
     }
     clients.reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>
       manifest.withLegacyRuntimeDependency(module: client)
     }.generate(ws.withWorkdir(scope), lock: lock, legacyJson: false).withWorkdir(".")
+  }
+
+  """
+  Drop an entrypoint table an earlier SDK wrote, before the manifest is read.
+
+  That SDK named the runtime module as a module-kind entrypoint. An engine that
+  loads manifest version 2 rejects every kind but "dang", and sdk-helpers keeps
+  every table it loads with no way to clear one, so the table goes here instead.
+
+  A Dang entrypoint is kept, whatever order its keys are in: this reads the
+  table's own kind rather than trusting how the caller classified the manifest.
+  """
+  let withoutStaleEntrypoint(manifest: File!): File! {
+    let split = splitEntrypointTable(manifest.contents)
+    let kind = tomlStringValue(split.entrypoint.join("\n"), "kind")
+    if (split.entrypoint.isEmpty or kind == "dang") {
+      manifest
+    } else {
+      directory
+        .withNewFile(manifestFileName, split.kept.join("\n"))
+        .file(manifestFileName)
+    }
+  }
+
+  let manifestFileName: String! = "dagger-module.toml"
+
+  """
+  A manifest's lines, split into its entrypoint table and everything else.
+
+  A TOML table runs to the next table header, so one pass over the lines
+  separates them. A header is recognised with its trailing comment removed, so
+  a `[` inside a comment or a value never ends the table; every line is carried
+  over exactly as it was read.
+  """
+  let splitEntrypointTable(toml: String!): TomlSplit! {
+    toml.split("\n").reduce(TomlSplit()) { state, line =>
+      let header = line.replaceMatches("#.*", "").trimSpace
+      if (header.hasPrefix("[")) {
+        let isEntrypoint = header == "[entrypoint]"
+        TomlSplit(
+          kept: if (isEntrypoint) { state.kept } else { state.kept + [line] },
+          entrypoint: if (isEntrypoint) { state.entrypoint + [line] } else { state.entrypoint },
+          inTable: isEntrypoint,
+        )
+      } else if (state.inTable) {
+        TomlSplit(kept: state.kept, entrypoint: state.entrypoint + [line], inTable: true)
+      } else {
+        TomlSplit(kept: state.kept + [line], entrypoint: state.entrypoint, inTable: false)
+      }
+    }
+  }
+
+  let tomlStringValue(table: String!, key: String!): String! {
+    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\"([^\"]*)\""))
+    if (m == null) { "" } else { m.captures[0] ?? "" }
   }
 
   """
@@ -354,5 +401,21 @@ type PythonSdk {
       let withImg = if (baseImage == "") { withUv } else { withUv.withExec(["pyproject", "set-base-image", pyproj, baseImage]) }
       withImg.directory("/rendered")
     }
+  }
+}
+
+"""
+Accumulator for splitting a manifest's entrypoint table off the rest.
+"""
+type TomlSplit {
+  pub kept: [String!]!
+  pub entrypoint: [String!]!
+  pub inTable: Boolean!
+
+  new(kept: [String!]! = [], entrypoint: [String!]! = [], inTable: Boolean! = false) {
+    self.kept = kept
+    self.entrypoint = entrypoint
+    self.inTable = inTable
+    self
   }
 }

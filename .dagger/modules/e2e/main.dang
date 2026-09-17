@@ -367,6 +367,43 @@ type E2e {
   let runtimeFixturePath: String! = "vendor/sdk-workspace/" + fixtureRoot + "/runtime/app"
 
   """
+  Generating reads a manifest's entrypoint table rather than its shape.
+
+  A stale module-kind entrypoint is dropped, because an engine that loads
+  manifest version 2 rejects that kind. A hand-written Dang entrypoint is kept
+  whatever order its keys are in. Both manifests carry a "[" inside a comment,
+  which must not be read as the start of the next table.
+  """
+  pub manifestEntrypointCheck(ws: Workspace!): Void @check {
+    let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
+    let name = "toml-generate-app"
+
+    let stale = ws.withNewFile(manifestPath,
+      "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n" +
+      "[entrypoint]\nkind = \"module\"\nsource = \"github.com/dagger/python-sdk/runtime\" # [was this]\n\n" +
+      "[runtime]\nsource = \"python\"\n")
+    let dropped = pythonSdk
+      .generateScope(stale.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .withWorkdir(".")
+      .file(manifestPath).contents
+    assertNotContains(dropped, "[entrypoint]", "a module-kind entrypoint survived generation")
+    assertContainsAll(dropped, ["name = \"" + name + "\"", "[runtime]", "source = \"python\""])
+
+    let handWritten = ws.withNewFile(manifestPath,
+      "name = \"" + name + "\"\n\n" +
+      "[entrypoint]\n# source first, and a bracket [here] in a comment\n" +
+      "source = \"./sdk/entrypoint\"\nkind = \"dang\"\n")
+    let kept = pythonSdk
+      .generateScope(handWritten.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .withWorkdir(".")
+      .file(manifestPath).contents
+    assertContainsAll(kept, ["kind = \"dang\"", "source = \"./sdk/entrypoint\""])
+    assertNotContains(kept, "[runtime]", "a Dang entrypoint manifest gained a runtime table")
+
+    null
+  }
+
+  """
   Main object names derive from module names as in the engine's builtin Python
   runtime, so a module keeps loading when it moves between the two.
   """
@@ -501,8 +538,8 @@ type E2e {
 
   """
   A module moves between the two paths by flipping the setting: the static Dang
-  entrypoint appears, then disappears again, then comes back the same. The
-  module-kind entrypoint naming the runtime module rides along either way.
+  entrypoint appears, then disappears again, then comes back the same. Switching
+  back leaves a runtime manifest with no entrypoint table at all.
   """
   pub staticScopeSwitchCheck(ws: Workspace!): Void @check {
     let manifestPath = tomlGenerateModulePath + "/dagger-module.toml"
@@ -521,7 +558,9 @@ type E2e {
     let manifest = dynamic.file("/" + manifestPath).contents
     assertContainsAll(manifest, ["name = \"toml-generate-app\"", "[runtime]", "source = \"python\""])
     assertNotContains(manifest, "kind = \"dang\"", "switching back kept the static entrypoint in the manifest")
-    assertContainsAll(manifest, ["kind = \"module\"", "source = \"github.com/dagger/python-sdk/runtime\""])
+    # An engine that loads manifest version 2 rejects every kind but "dang",
+    # and a version 2 read ignores [runtime], so a leftover table is a break.
+    assertNotContains(manifest, "[entrypoint]", "switching back left an entrypoint table in the manifest")
     assert(dynamic.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "switching back left the entrypoint behind")
 
     let again = pythonSdk(dangEntrypoint: true).generateScope(dynamic.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
