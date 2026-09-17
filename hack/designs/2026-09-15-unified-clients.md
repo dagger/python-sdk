@@ -504,12 +504,14 @@ query executes.
 
 ```python
 # clients/linter/src/dagger_clients/linter/_target.py (generated)
-from dagger.client import Target
-
-TARGET = Target(name="linter", ref="./path/to/the/linter/module")
-# or: Target(name="glow", ref="github.com/eunomie/glow", pin="4f1c9e…")
+# Plain data, no import: the descriptor is what generation knew.
+NAME = "linter"
+REF = "./path/to/the/linter/module"     # or "github.com/eunomie/glow"
+PIN = None                              # or the commit the client was generated against
 CORE_DIGEST = "sha256:…"
 ```
+
+The package's `__init__.py` builds `TARGET` from those constants.
 
 The SDK owns the `Target` class and the load query. The query uses the raw query
 builder, not generated core. One field carries both kinds of reference, so the
@@ -531,6 +533,7 @@ def client_root(cls: type[T], target: Target | None, field: str | None,
                 args: list[Arg], *, session: Session | None = None) -> T
 def client_select(receiver: Type, target: Target, field: str,
                   args: list[Arg]) -> Context
+def check_core(client: str, expected: str, installed: str) -> None
 ```
 
 - `client_root` starts a query at the root. `target=None` means there is nothing
@@ -545,8 +548,12 @@ def client_select(receiver: Type, target: Target, field: str,
 - **The generator passes the exact GraphQL field name.** The SDK never derives
   it from a class name or from `Target.name`: that would copy the engine's
   naming rule into the SDK, where it can drift.
-- The generated packages import `Session`, `Target`, `client_root` and
-  `client_select` from `dagger.client`.
+- `check_core` is the import-time staleness check of section 10. Each client
+  package calls it with its own name, the digest it was generated against, and
+  the digest of the installed core. Core's own package calls nothing.
+- The generated packages import `Session`, `Target`, `client_root`,
+  `client_select` and `check_core` from `dagger.client`.
+- The generator writes no `pyproject.toml`. `generateScope` writes it (12).
 
 ## 9. Temporary global client [decided]
 
