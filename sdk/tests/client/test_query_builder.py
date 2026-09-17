@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from dagger.client._core import Arg, Context, snake_to_camel, to_literal
+from dagger.client._core import Arg, Context, EnumName, snake_to_camel, to_literal
 from dagger.client.base import Enum, Input, Scalar, Type
 
 
@@ -190,3 +190,13 @@ def test_enum_literal_before_str():
         BLUE = "blue"
 
     assert to_literal(StrColor.BLUE) == "BLUE"
+
+
+def test_enum_name_literal_is_bare():
+    assert to_literal(EnumName("OBJECT_KIND")) == "OBJECT_KIND"
+    assert to_literal("OBJECT_KIND") == '"OBJECT_KIND"'
+
+
+def test_enum_name_literal_rejects_query_syntax():
+    with pytest.raises(Exception, match="Invalid enum value name"):
+        to_literal(EnumName("A) { id } #"))
