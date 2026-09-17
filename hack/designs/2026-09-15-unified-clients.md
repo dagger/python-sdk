@@ -24,8 +24,10 @@ Revision 7, after more discussion:
   repeatable result (5.4).
 - After generation, the user's code needs to know nothing about a client but its
   import. The one thing a client needs is the power to load the module it targets.
-- One question comes back: who writes `[project] dependencies` now that the
-  scope is the consumer (Q9).
+- Q9 is decided: the SDK writes the client into `[project] dependencies`,
+  because the scope is now the consumer.
+- The load becomes one engine field, `serveModule`, read in Python as
+  `core().serve_module(…)` (section 13).
 
 Earlier revisions. 6: all questions decided. 5: self client; signature rule.
 4: no `[[dependencies]]`; shared default session. 3: a scope is one
@@ -51,8 +53,7 @@ Earlier revisions. 6: all questions decided. 5: self client; signature rule.
 - There is one default session per process. The SDK starts it on the first
   query. All clients share it.
 - Each client package carries a descriptor and loads the module it targets on
-  first use. A git client uses `moduleSource`. A local client asks the engine for
-  a module in its own context. No `[[dependencies]]`.
+  first use, with one engine call. No `[[dependencies]]`.
 - A module calls itself through a client to itself. The user declares that
   client; the SDK adds none.
 - An exported signature names core types and the module's own types only. A
@@ -282,7 +283,7 @@ It has three parts, and each part has one owner.
 | --- | --- | --- |
 | `[tool.uv.workspace] members` | Which directories are members. | The SDK |
 | `[tool.uv.sources]` | Where each client of this scope is. It installs nothing. | The SDK |
-| `[project] dependencies` | Which clients this project uses. Only these are installed and importable. | See Q9 |
+| `[project] dependencies` | Which clients this project uses. Only these are installed and importable. | The SDK |
 
 ```toml
 # <scope>/pyproject.toml
@@ -415,7 +416,7 @@ client is a client like any other, and the SDK creates none on its own.
 
 1. The user declares a client to the module on the module scope.
 2. `dagger generate` writes `clients/my-module` and its source.
-3. The user adds `dagger-clients-my-module` to `[project] dependencies` (Q9).
+3. The same generation adds `dagger-clients-my-module` to `[project] dependencies`.
 4. The module code imports the self client and calls it.
 
 ```python
@@ -505,15 +506,14 @@ query executes.
 # clients/linter/src/dagger_clients/linter/_target.py (generated)
 from dagger.client import Target
 
-TARGET = Target.local(name="linter", path="/path/to/the/linter/module")
-# or: Target.git(name="glow", ref="github.com/eunomie/glow", pin="4f1c9e…")
+TARGET = Target(name="linter", ref="./path/to/the/linter/module")
+# or: Target(name="glow", ref="github.com/eunomie/glow", pin="4f1c9e…")
 CORE_DIGEST = "sha256:…"
 ```
 
 The SDK owns the `Target` class and the load query. The query uses the raw query
-builder, not generated core. A git descriptor uses
-`moduleSource(refString, refPin)`, which works today. A local descriptor needs
-the engine to resolve a path in the caller's own context; see section 13.
+builder, not generated core. One field carries both kinds of reference, so the
+descriptor has one shape; see section 13.
 
 ## 9. Temporary global client [decided]
 
@@ -566,8 +566,7 @@ dag = Client()
   class at import, at run time only. Type checkers do not see it, which points
   to the migration.
 - Dependencies: with the flag, the SDK adds the global client to
-  `[project] dependencies`, and it depends on the scope's clients, so they
-  install with it. Existing code declared nothing, so the SDK declares it instead.
+  `[project] dependencies`, next to the clients it already writes there.
 - End of life: a `DeprecationWarning` on import in phase 2. Removal in a later
   release.
 
@@ -634,8 +633,9 @@ module config is written.
    ref and the pin), write `clients/<name>`. A self client takes the same path.
 5. Removed clients: delete each directory under `clients/` that carries
    `[tool.dagger] generated = "client"` and is no longer declared.
-6. SDK-owned entries: set the `members` entries and one `{ workspace = true }`
-   source per member. Keep everything else, including members the user added.
+6. SDK-owned entries: set the `members` entries, one `{ workspace = true }`
+   source per member, and one `[project] dependencies` entry per client. Keep
+   everything else, including members and dependencies the user added.
    [provisional] This needs a TOML editor that keeps formatting;
    `helpers/pyproject` reformats the file today.
 7. Module scope: replace the old `dagger-io = { path = "sdk", editable = true }`
@@ -661,25 +661,58 @@ generated member, so it is never a client root. The answer is the nearest
 modules that are not upgraded yet. This repo's own `sdk/` carries no marker, so
 the check in `.dagger/modules/e2e/main.dang` still holds.
 
-## 13. Engine dependency
+## 13. How a client loads its module
 
-A client must be able to load the module it targets, from a client session and
-from a module session.
+A client must load the module it targets, from a client session and from a
+module session. The engine work is in progress. The shape under discussion is
+one field:
 
-| Descriptor | What the client asks for | Works on |
-| --- | --- | --- |
-| git | `moduleSource(refString, refPin)`, then load under the generated name. | Today's engines. |
-| local | A module at a path in the caller's own context. | An engine field for this. `Query.contextModuleSource(path)` is the current proposal (`dagger/dagger#14148`). Yves is checking the engine side. |
+```graphql
+serveModule(ref: String!, name: String, pin: String)
+```
+
+### `core.serveModule`, not `dag.serveModule` [provisional]
+
+Both names describe one field of `Query`, so the engine schema is the same. The
+difference is what an SDK shows the user.
+
+- In this design `dag` is the session. It owns the connection and holds no API
+  field (property 2). A field named on `dag` would put an API call back on the
+  session.
+- Core binds `Query`, so the field arrives as `core().serve_module(…)` with no
+  work on our side. That is also how a user would reach it by hand, for a module
+  the SDK did not generate a client for.
+- Neither choice changes the SDK files: the load query goes out through the raw
+  query builder, so the SDK never imports core to send it.
+
+So: yes to `serveModule`, and please put it on `Query`. Python will read it as core.
+
+### What this SDK needs from the field
+
+| Need | Why |
+| --- | --- |
+| One argument for both kinds of reference: a workspace path and a git URL. | The SDK gets one code path and one descriptor shape. Today it needs two: `moduleSource(refString, refPin)` for git, and a path field for local. |
+| A path resolves in the caller's own context. | This is the property that makes one client work in a module and in a plain program (`dagger/dagger#14148`). A module resolves against its own context root, a client session against its workspace. |
+| A name to pin, `name:`. | The bindings were generated under a name. Pinning it stops a later change in how the engine derives a name from producing a root field the bindings do not have. |
+| A pin for a git reference. | The client records the commit it was generated against, and loads that commit. |
+| Idempotent. | The SDK loads once per session and per client, but a second call must not fail. |
+| The same call in both session kinds. | One code path in the SDK, for a module and for a plain program. |
+| A loud answer, for example the name it served under. | The SDK compares it with the generated name and fails at load time, with the descriptor in the message, instead of at the first query with "cannot query field". |
+| One round trip. | It replaces the chain `moduleSource` → `withName` → `asModule` → `serve`. A first use costs one query. |
+
+With that field, the descriptor holds one reference and an optional pin (8.3),
+and the SDK has one load path for every client.
 
 - The design does not use `[[dependencies]]`, and it does not use
   `currentWorkspace` from module code.
-- Implementation can start now. Git clients can be tested end to end now.
+- Implementation can start now. A git client works on today's engines through
+  `moduleSource`, and moves to one call when the field lands.
 - Local-client end-to-end checks need an engine with the field.
   `.dagger/modules/engine-e2e` must move to it.
-- [speculative] A path in a descriptor is relative to the workspace root. A
+- [speculative] A path in a descriptor is written against the workspace root. A
   module session resolves it against the module's own context root. For a module
   in the user's workspace, the two roots must be the same directory.
-- [speculative] A module can load itself into its own session (7.3).
+- [speculative] A module can load itself (7.3).
 
 ## 14. Decisions
 
@@ -691,30 +724,14 @@ from a module session.
 | Q4. Contributed field shape | Module-level function: `as_linter(binding)`. |
 | Q5. The global client | Flag `[tool.dagger] global-client = true`. Contributed fields are added to the core class at run time. A `DeprecationWarning` in phase 2; removal in a later release. It sits with the SDK files (section 9). |
 | Q6. Module support and core | Rewrite the module support protocol on the raw query builder. |
-| Q7. How a local client loads its module | Through an engine field that resolves a path in the caller's own context. No `[[dependencies]]`. |
+| Q7. How a local client loads its module | Through an engine field that resolves a path in the caller's own context: `serveModule` (section 13). No `[[dependencies]]`. |
 | Q8. Clients outside the scope | [closed] A client is generated inside the scope that uses it, so the case does not exist. Sharing between scopes may come later. |
+| Q9. Who writes `[project] dependencies` | The SDK. A client declared on a scope is a client that scope uses, so generation writes the dependency, and removes it with the client. The user's code then works right after `dagger generate`. |
 | Q10. Removing a client | `generateScope` deletes the member, its source and its `members` entry, then relocks. |
 | Q11. Version check strictness | Client/core mismatch: import error, and a warning while the SDK registers types. Engine/core mismatch: warning in phase 1. |
 | Q12. The tree inside a scope | `src/`, `sdk/`, `clients/core`, `clients/<name>`. The same inside a module and outside one. No suggested workspace location. |
 | Q13. Client types in a module's own signatures | Not supported. An exported signature names core types and the module's own types only. The SDK refuses a client type with a clear message (7.4). |
 | Q14. A self client for every module | No. The user declares a client to the module when the module calls itself. |
-
-**Q9. Who writes `[project] dependencies`? [open, reopened by revision 7]**
-
-In revision 5 the answer was "the user", with this reason: Dagger has no way to
-say "this module uses this client". Revision 7 changes that reason. A client is
-now generated inside the scope that uses it, so the declaration in `dagger.toml`
-is a statement of use.
-
-Options: (a) the SDK adds each declared client to `[project] dependencies`, and
-removes it with the client; (b) the user adds it, as decided in revision 5.
-
-Recommendation: (a). It matches "the user's code needs to know nothing about a
-client": after `dagger generate`, the import works. It also removes the one step
-that fails with `ModuleNotFoundError` and no hint. The user can still remove an
-entry, and the next generation puts it back, which is the same contract as the
-members and the sources. If you prefer (b), the design stands as in revision 5,
-and the global client keeps its exception.
 
 ## 15. Checks
 
@@ -732,17 +749,19 @@ Invert each assertion once and confirm that it fails.
 10. End to end, module: a module with a git client and a local client loads both through the CLI.
 11. End to end, plain project: a test project with a client runs its test with no engine handling of its own.
 12. No `[[dependencies]]`: generating a module that has them removes them; the module still calls its clients.
-13. Configuration drives generation: adding a client writes exactly one member, one source and one `members` entry; removing it undoes all three.
-14. Generated code needs no configuration: delete the client entries from `dagger.toml`, keep the tree, and the module still calls its clients.
-15. Global client, existing module: the flag is written; the unchanged source passes mypy and runs through `dagger call`; `type(dag.container()) is dagger_clients.core.Container`.
-16. Global client, new module: no flag, no `dagger_global`; `dag.container` raises the migration message.
-17. Global client, turned off: the global client and its dependency are gone.
-18. Install one: a consumer that names one client gets only that client, core and the SDK files.
-19. Remove a client: its member, source and `members` entry are gone; `uv sync --locked` passes.
-20. User content kept: user tables, comments and a user member survive generation byte for byte.
-21. Default session in a plain program: a program with no connection handling runs a client call and exits cleanly.
-22. Self client: a module with a client to itself calls its own function through `dagger call`; after an API change, generation succeeds.
-23. Signature rule: a function that returns a client type fails registration with a clear message; a core type and the module's own class pass.
+13. Configuration drives generation: adding a client writes exactly one member, one source, one `members` entry and one dependency; removing it undoes all four.
+14. Import after generate: a scope with a fresh client imports it with no edit by the user.
+15. Name pinning: a client whose generated name differs from the name the engine serves fails at load, with the descriptor in the message.
+16. Generated code needs no configuration: delete the client entries from `dagger.toml`, keep the tree, and the module still calls its clients.
+17. Global client, existing module: the flag is written; the unchanged source passes mypy and runs through `dagger call`; `type(dag.container()) is dagger_clients.core.Container`.
+18. Global client, new module: no flag, no `dagger_global`; `dag.container` raises the migration message.
+19. Global client, turned off: the global client and its dependency are gone.
+20. Install one: a consumer that names one client gets only that client, core and the SDK files.
+21. Remove a client: its member, source and `members` entry are gone; `uv sync --locked` passes.
+22. User content kept: user tables, comments and a user member survive generation byte for byte.
+23. Default session in a plain program: a program with no connection handling runs a client call and exits cleanly.
+24. Self client: a module with a client to itself calls its own function through `dagger call`; after an API change, generation succeeds.
+25. Signature rule: a function that returns a client type fails registration with a clear message; a core type and the module's own class pass.
 
 ## 16. Phases
 
@@ -762,7 +781,7 @@ Invert each assertion once and confirm that it fails.
   and the sources, and removes `[[dependencies]]`. It generates for a scope
   without a module too.
 - `findClientRoot` lifts a member to its scope. `mod config` handles the flag.
-- Checks 1–23. Local-client checks run once the engine has the field.
+- Checks 1–25. Local-client checks run once the engine has the field.
 
 **Phase 2: published SDK files, end of migration.** Publish the SDK files and
 remove the `sdk/` copy from a scope. The global client warns on import; its
