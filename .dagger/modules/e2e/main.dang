@@ -366,39 +366,55 @@ type E2e {
   """
   let runtimeFixturePath: String! = "vendor/sdk-workspace/" + fixtureRoot + "/runtime/app"
 
-  """
-  Generating reads a manifest's entrypoint table rather than its shape.
+  let sharedEntrypointSource: String! = "github.com/dagger/python-sdk/entrypoint"
 
-  A stale module-kind entrypoint is dropped, because an engine that loads
-  manifest version 2 rejects that kind. A hand-written Dang entrypoint is kept
-  whatever order its keys are in. Both manifests carry a "[" inside a comment,
+  """The manifest generating the toml-generate fixture leaves, from a seeded workspace."""
+  let fatManifestOf(seeded: Workspace!): String! {
+    pythonSdk
+      .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+      .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents
+  }
+
+  """
+  A module on the runtime path gets a fat manifest: the builtin runtime for an
+  engine that predates entrypoints, and the shared Dang entrypoint for one that
+  loads manifest version 2.
+
+  A stale module-kind entrypoint is replaced, because that engine rejects the
+  kind. A Dang entrypoint the user wrote is kept: a pinned version, or a fork.
+  The manifests carry their keys in either order and a "[" inside a comment,
   which must not be read as the start of the next table.
   """
-  pub manifestEntrypointCheck(ws: Workspace!): Void @check {
+  pub fatManifestCheck(ws: Workspace!): Void @check {
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
     let name = "toml-generate-app"
+    let runtimeTable = "[runtime]\nsource = \"python\"\n"
 
-    let stale = ws.withNewFile(manifestPath,
+    let plain = fatManifestOf(ws)
+    assertContainsAll(plain, ["[runtime]", "source = \"python\"", "[entrypoint]", "kind = \"dang\"", "source = \"" + sharedEntrypointSource + "\""])
+
+    let stale = fatManifestOf(ws.withNewFile(manifestPath,
       "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n" +
       "[entrypoint]\nkind = \"module\"\nsource = \"github.com/dagger/python-sdk/runtime\" # [was this]\n\n" +
-      "[runtime]\nsource = \"python\"\n")
-    let dropped = pythonSdk
-      .generateScope(stale.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
-      .withWorkdir(".")
-      .file(manifestPath).contents
-    assertNotContains(dropped, "[entrypoint]", "a module-kind entrypoint survived generation")
-    assertContainsAll(dropped, ["name = \"" + name + "\"", "[runtime]", "source = \"python\""])
+      runtimeTable))
+    assertContainsAll(stale, ["[runtime]", "kind = \"dang\"", "source = \"" + sharedEntrypointSource + "\""])
+    assertContainsNone(stale, ["kind = \"module\"", "python-sdk/runtime"])
 
-    let handWritten = ws.withNewFile(manifestPath,
-      "name = \"" + name + "\"\n\n" +
+    let fork = "github.com/someone/python-sdk/entrypoint@entrypoint/v1"
+    let pinned = fatManifestOf(ws.withNewFile(manifestPath,
+      "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n" + runtimeTable + "\n" +
       "[entrypoint]\n# source first, and a bracket [here] in a comment\n" +
-      "source = \"./sdk/entrypoint\"\nkind = \"dang\"\n")
-    let kept = pythonSdk
-      .generateScope(handWritten.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
-      .withWorkdir(".")
-      .file(manifestPath).contents
-    assertContainsAll(kept, ["kind = \"dang\"", "source = \"./sdk/entrypoint\""])
-    assertNotContains(kept, "[runtime]", "a Dang entrypoint manifest gained a runtime table")
+      "source = \"" + fork + "\"\nkind = \"dang\"\n"))
+    assertContainsAll(pinned, ["[runtime]", "kind = \"dang\"", "source = \"" + fork + "\""])
+    assertNotContains(pinned, sharedEntrypointSource + "\"", "a Dang entrypoint the user wrote was overwritten")
+
+    # A static entrypoint is told from the shared one by its source, not its kind.
+    let static = ws.withNewFile(manifestPath,
+      "name = \"" + name + "\"\n\n[entrypoint]\nsource = \"./sdk/entrypoint\"\nkind = \"dang\"\n")
+    assert(pythonSdk.mod(static, path: tomlGenerateModulePath, findUp: false).dangEntrypoint, "a static entrypoint written source-first was not recognised")
+    let shared = ws.withNewFile(manifestPath, plain)
+    assert(pythonSdk.mod(shared, path: tomlGenerateModulePath, findUp: false).dangEntrypoint == false, "the shared entrypoint was taken for a static one")
 
     null
   }
@@ -595,7 +611,7 @@ type E2e {
   """
   A module moves between the two paths by flipping the setting: the static Dang
   entrypoint appears, then disappears again, then comes back the same. Switching
-  back leaves a runtime manifest with no entrypoint table at all.
+  back leaves the fat manifest: the runtime, and the shared Dang entrypoint.
   """
   pub staticScopeSwitchCheck(ws: Workspace!): Void @check {
     let manifestPath = tomlGenerateModulePath + "/dagger-module.toml"
@@ -613,10 +629,8 @@ type E2e {
     let dynamic = pythonSdk.generateScope(static.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     let manifest = dynamic.file("/" + manifestPath).contents
     assertContainsAll(manifest, ["name = \"toml-generate-app\"", "[runtime]", "source = \"python\""])
-    assertNotContains(manifest, "kind = \"dang\"", "switching back kept the static entrypoint in the manifest")
-    # An engine that loads manifest version 2 rejects every kind but "dang",
-    # and a version 2 read ignores [runtime], so a leftover table is a break.
-    assertNotContains(manifest, "[entrypoint]", "switching back left an entrypoint table in the manifest")
+    assertNotContains(manifest, "./sdk/entrypoint", "switching back kept the static entrypoint in the manifest")
+    assertContainsAll(manifest, ["kind = \"dang\"", "source = \"" + sharedEntrypointSource + "\""])
     assert(dynamic.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "switching back left the entrypoint behind")
 
     let again = pythonSdk(dangEntrypoint: true).generateScope(dynamic.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")

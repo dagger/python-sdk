@@ -76,18 +76,34 @@ the end-to-end fixture exercises the runtime before the ref exists.
 
 ## Shared entrypoint
 
-`entrypoint/` is one `ModuleEntrypoint`, written in Dang, that can back every
-Python module at once. A module names it in its manifest and has nothing
-generated into it:
+`entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every
+Python module at once, with nothing generated into the module. `dagger
+generate` names it in the manifest of every module that does not use
+`--dang-entrypoint`, next to the builtin runtime:
 
 ```toml
 # <module>/dagger-module.toml
 name = "my-module"
+engineVersion = "v1.0.0"
+
+[runtime]
+source = "python"
 
 [entrypoint]
 kind = "dang"
 source = "github.com/dagger/python-sdk/entrypoint"
 ```
+
+One manifest then loads on both kinds of engine. An engine that predates
+entrypoints ignores the table and runs the module on the runtime. An engine
+that loads manifest version 2 drives the module through the entrypoint and
+ignores `[runtime]`; when the module has `[[dependencies]]` it reads the
+manifest the old way instead, because manifest version 2 has no dependency
+list, and the runtime runs the module.
+
+A Dang entrypoint already in the manifest is kept as written, so a module can
+pin a version of the shared entrypoint or point at a fork. A static entrypoint
+is told from the shared one by its source, a path inside the module.
 
 The entrypoint finds the module it serves through the workspace it is handed,
 whose working directory is that module's directory. It reads the module's name
@@ -110,9 +126,10 @@ out into the copy. `dagger check -m .dagger/modules/e2e` fails when the copy
 drifts; refresh it with
 `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`.
 
-Nothing generates this reference yet. `[entrypoint] kind = "dang"` needs an
-engine that loads manifest version 2, and the address above only resolves once
-`entrypoint/` is on this repository's default branch.
+The address above only resolves once `entrypoint/` is on this repository's
+default branch. The Python process the entrypoint starts belongs to no module
+on the engine's side: the core API works in it, and `dag.current_module()`
+fails with "no current module". The static entrypoint has the same limit.
 
 ## Static entrypoint
 
