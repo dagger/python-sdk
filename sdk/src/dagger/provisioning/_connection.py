@@ -1,15 +1,13 @@
 import contextlib
 import logging
-from typing import TYPE_CHECKING
+import typing
 
 from dagger import telemetry
 from dagger._managers import ResourceManager
+from dagger.client.base import root_type
 
 from ._config import Config
 from ._engine import Engine, provision_engine
-
-if TYPE_CHECKING:
-    from dagger import Client
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +54,14 @@ class Connection(ResourceManager):
         super().__init__()
         self.cfg = config or Config()
 
-    async def __aenter__(self) -> "Client":
+    # The client is the generated root, a type the SDK files can't name.
+    async def __aenter__(self) -> typing.Any:
         telemetry.initialize()
         logger.debug("Establishing connection with isolated client")
         async with self.get_stack() as stack:
             engine = await Engine(self.cfg, stack).provision()
-            conn = engine.get_client_connection()
-            return await engine.setup_client(conn)
+            conn = await engine.setup_client(engine.get_client_connection())
+            return root_type().from_connection(conn)
 
     async def close(self):
         logger.debug("Closing connection with isolated client")

@@ -20,10 +20,15 @@ from dagger.client._config import Retry as Retry
 from dagger.client._config import Timeout as Timeout
 from dagger.client._connection import connect as connect
 from dagger.client._connection import close as close
+from dagger.client.base import set_root_type as _set_root_type
 
 # Module support (only makes sense in a module runtime container)
 with contextlib.suppress(ModuleNotFoundError):
     from dagger.mod import *
+
+# The SDK files hand out the generated root but can't import it.
+_set_root_type(Client)  # noqa: F405
+del _set_root_type
 
 # Re-export imports so they look like they live directly in this package.
 for _value in list(locals().values()):

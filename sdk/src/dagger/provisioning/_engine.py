@@ -3,14 +3,14 @@ import logging
 import os
 import shutil
 import sys
-import typing
 from typing import TextIO
 
 from exceptiongroup import ExceptionGroup
 from typing_extensions import Self
 
-import dagger
 from dagger._engine._version import CLI_VERSION
+from dagger._exceptions import QueryError
+from dagger.client._core import Context
 from dagger.client._session import (
     BaseConnection,
     ConnectConfig,
@@ -26,9 +26,6 @@ from ._progress import Progress
 from ._session import start_cli_session
 
 logger = logging.getLogger(__name__)
-
-if typing.TYPE_CHECKING:
-    from dagger import Client
 
 
 @contextlib.asynccontextmanager
@@ -127,15 +124,14 @@ class Engine:
         # Get from cache or download.
         return await Downloader(progress=self.progress)
 
-    async def setup_client(self, conn: BaseConnection) -> "Client":
-        """Setup client instance from connection."""
+    async def setup_client(self, conn: BaseConnection) -> BaseConnection:
+        """Open the connection and check the engine behind it."""
         await self.progress.update("Establishing connection to the API server")
         conn = await self.stack.enter_async_context(conn)
 
-        client = dagger.Client.from_connection(conn)
         self.stack.push_async_callback(self.progress.stop)
 
-        return await self.verify(client)
+        return await self.verify(conn)
 
     def get_shared_client_connection(self) -> SharedConnection:
         """Global client connection to the GraphQL server."""
@@ -156,15 +152,15 @@ class Engine:
             self.connect_config,
         )
 
-    async def verify(self, client: "Client") -> "Client":
+    async def verify(self, conn: BaseConnection) -> BaseConnection:
         """Check if the Dagger CLI version is compatible with the engine."""
         await self.progress.update("Checking version compatibility")
         try:
-            await client.version()
-        except dagger.QueryError as e:
+            await Context(conn).root_select("version", []).execute(str)
+        except QueryError as e:
             logger.warning("Failed to check Dagger engine version compatibility: %s", e)
 
         await self.progress.update("Running pipelines")
         await self.progress.stop()
 
-        return client
+        return conn
