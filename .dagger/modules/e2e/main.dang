@@ -736,14 +736,20 @@ type E2e {
       "    @function\n" +
       "    async def greeting(self) -> str:\n" +
       "        return await client_dep().greeting()\n")
+    # The CLI runs in sdk-sdk's workspace, which holds this repository under
+    # vendorRoot, so the scope is generated in that layout: the client's
+    # descriptor names its module from the root the CLI sees.
+    let vendored = directory
+      .withDirectory(vendorRoot, calling.directory("/"))
+      .asWorkspace(cwd: vendorRoot + "/" + tomlGenerateModulePath)
     let generated = pythonSdk
-      .generateScope(calling.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + clientDepPath)])
+      .generateScope(vendored, isModule: true, name: "toml-generate-app", clients: [vendored.moduleSource("/" + vendorRoot + "/" + clientDepPath)])
       .withWorkdir(".")
       # The runtime of this working tree, as the runtime fixture names it.
-      .withNewFile("/" + tomlGenerateModulePath + "/dagger-module.toml", runtimeOnlyManifest("toml-generate-app"))
+      .withNewFile("/" + vendorRoot + "/" + tomlGenerateModulePath + "/dagger-module.toml", runtimeOnlyManifest("toml-generate-app"))
     let run = sdkSdk
-      .target(generated.directory("/"), ".")
-      .runInstalled(["call", "-m", "vendor/sdk-workspace/" + tomlGenerateModulePath, "greeting"])
+      .target(generated.directory("/" + vendorRoot), ".")
+      .runInstalled(["call", "-m", vendorRoot + "/" + tomlGenerateModulePath, "greeting"])
     run.assertSuccess
     assertContains(run.stdout, "hello from the client dependency", "the module did not call its client")
 
@@ -792,7 +798,9 @@ type E2e {
   The fixture as seen from sdk-sdk's scratch workspace, where this repository
   is vendored.
   """
-  let runtimeFixturePath: String! = "vendor/sdk-workspace/" + fixtureRoot + "/runtime/app"
+  let runtimeFixturePath: String! = vendorRoot + "/" + fixtureRoot + "/runtime/app"
+
+  let vendorRoot: String! = "vendor/sdk-workspace"
 
   let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
