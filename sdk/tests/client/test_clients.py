@@ -295,6 +295,41 @@ async def test_other_query_errors_pass_through():
     assert info.value is error
 
 
+async def test_missing_field_in_a_later_error_is_stale():
+    s = session()
+    error = QueryError(
+        [QueryErrorValue("boom"), QueryErrorValue(MISSING_FIELD)], "query"
+    )
+    s.session.fail["output"] = error
+
+    with pytest.raises(StaleClientError) as info:
+        await glow(session=s).output()
+
+    assert MISSING_FIELD in str(info.value)
+
+
+async def test_resolver_error_with_the_phrase_stays_a_query_error():
+    s = session()
+    error = QueryError([QueryErrorValue(MISSING_FIELD, path=["glow"])], "query")
+    s.session.fail["output"] = error
+
+    with pytest.raises(QueryError) as info:
+        await glow(session=s).output()
+
+    assert info.value is error
+
+
+async def test_phrase_inside_a_message_stays_a_query_error():
+    s = session()
+    error = QueryError([QueryErrorValue(f"stdout: {MISSING_FIELD}")], "query")
+    s.session.fail["output"] = error
+
+    with pytest.raises(QueryError) as info:
+        await glow(session=s).output()
+
+    assert info.value is error
+
+
 def test_check_core_accepts_a_matching_digest():
     check_core("glow", "sha256:aa", "sha256:aa")
 

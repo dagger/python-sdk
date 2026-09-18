@@ -4,6 +4,7 @@ import contextlib
 import contextvars
 import dataclasses
 import logging
+import re
 from collections.abc import Iterable, Iterator
 
 from dagger._exceptions import QueryError, StaleClientError
@@ -12,8 +13,11 @@ logger = logging.getLogger(__name__)
 
 GENERATE_HINT = "Run `dagger generate`."
 
-# What the engine answers when the schema lacks a field the bindings have.
-MISSING_FIELD = "cannot query field"
+# What the engine's validator answers when the schema lacks a field the
+# bindings have. Anchored, because a resolver may quote the same words.
+MISSING_FIELD = re.compile(
+    r'^Cannot query field "[^"]*" on type "[^"]*"', re.IGNORECASE
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -62,8 +66,14 @@ def stale_client_error(
     error: QueryError, targets: Iterable[Target]
 ) -> StaleClientError | None:
     """The error a missing field means once the module was loaded."""
-    if MISSING_FIELD not in str(error).lower():
+    # Validation fails before anything runs, so it carries no path; an error
+    # with one comes from a resolver, whatever its message says.
+    missing = next(
+        (e for e in error.errors if not e.path and MISSING_FIELD.match(e.message)),
+        None,
+    )
+    if missing is None:
         return None
     names = ", ".join(sorted(t.name for t in targets))
-    msg = f"{error} The client for {names} is out of date. {GENERATE_HINT}"
+    msg = f"{missing} The client for {names} is out of date. {GENERATE_HINT}"
     return StaleClientError(msg)
