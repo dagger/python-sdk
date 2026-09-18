@@ -146,3 +146,39 @@ def test_close_ends_the_engine_before_it_returns(marks):
 
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "True"
+
+
+MODULE_ENTRYPOINTS = {
+    # The runtime executable's entrypoint.
+    "cli": """
+        import dagger.mod.cli as cli
+        from dagger.client._session import SharedConnection
+
+        async def main(mod=None, register=False):
+            await SharedConnection()._ready()
+
+        cli.main = main
+        cli.app()
+        """,
+    # The generated entrypoint's commands.
+    "python -m dagger.mod": """
+        import anyio
+        import dagger.mod.__main__ as entry
+        from dagger.client._session import SharedConnection
+
+        def call(args):
+            anyio.run(SharedConnection()._ready)
+
+        entry._call = call
+        entry.main(["call", "--output", "/dev/null"])
+        """,
+}
+
+
+@pytest.mark.parametrize("entry", MODULE_ENTRYPOINTS)
+def test_a_module_never_provisions(marks, entry):
+    # Not even when its session is missing from the environment.
+    proc = run(MODULE_ENTRYPOINTS[entry], marks)
+
+    assert "No active engine session to connect to" in proc.stderr
+    assert not (marks / "started").exists()

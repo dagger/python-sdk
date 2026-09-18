@@ -14,6 +14,7 @@ from dagger import telemetry
 from dagger._exceptions import QueryError
 from dagger.client._connection import connect
 from dagger.client._descriptor import registering_types
+from dagger.client._session import mark_module_runtime
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
 from dagger.mod._module import MAIN_OBJECT, Module
 
@@ -26,6 +27,7 @@ IMPORT_PKG: typing.Final[str] = os.getenv("DAGGER_DEFAULT_PYTHON_PACKAGE", "main
 
 def app(mod: Module | None = None, register: bool = False) -> int | None:
     """Entrypoint for a Python Dagger module."""
+    mark_module_runtime()
     telemetry.initialize()
     try:
         return anyio.run(main, mod, register)

@@ -307,8 +307,13 @@ class SharedConnection(BaseConnection):
         async with self._provisioning:
             if self._params:
                 return
+            if _module_runtime:
+                # The engine gives a module its session; one that lacks it
+                # must say so, not download a CLI in the module's container.
+                msg = "No active engine session to connect to"
+                raise ClientConnectionError(msg)
             try:
-                # Not at import: a module's runtime has no provisioning.
+                # Not at import: an older module runtime has no provisioning.
                 from dagger.provisioning._config import Config
                 from dagger.provisioning._engine import provision_default_session
             except ModuleNotFoundError as e:
@@ -424,6 +429,20 @@ class Session(BaseConnection):
                 msg = f"Failed to load client {target.name!r} from {target.ref!r}: {e}"
                 raise ClientLoadError(msg, target=target) from e
             entry.done = True
+
+
+_module_runtime = False
+
+
+def mark_module_runtime() -> None:
+    """Say this process serves a module, so it never provisions an engine.
+
+    The module entrypoints call it first. A module's session comes from the
+    engine that runs it; without this, only that session being there would
+    keep the default session from provisioning one.
+    """
+    global _module_runtime  # noqa: PLW0603
+    _module_runtime = True
 
 
 _default: Session | None = None
