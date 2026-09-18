@@ -948,6 +948,17 @@ type E2e {
     assertContains(partial.after.file(configuredPyproj).contents, "use-uv = false", "omitting useUv should leave it untouched")
     assertContains(partial.after.file(configuredPyproj).contents, "python:3.12-slim", "omitting baseImage should leave it untouched")
 
+    # The global client flag reads and writes like use-uv: unset is null, and
+    # false, the default, writes nothing.
+    assert(appValues.globalClient == null, "globalClient should be reported as unset")
+    let on = app.set(globalClient: true)
+    assert(on.modifiedPaths.length == 1, "setting globalClient modified more than pyproject.toml")
+    assertContains(on.after.file(pyproj).contents, "global-client = true", "set did not write the global client flag")
+    let onWs = ws.withChanges(on)
+    assert(pythonSdk.mod(onWs, path: configModulePath).config.get.globalClient == true, "globalClient should read true once set")
+    let off = pythonSdk.mod(onWs, path: configModulePath).config.set(globalClient: false)
+    assertNotContains(off.after.file(pyproj).contents, "global-client", "setting globalClient to false should remove the flag")
+
     null
   }
 
