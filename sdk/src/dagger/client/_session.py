@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
@@ -11,11 +11,16 @@ from typing_extensions import Self
 from dagger import telemetry
 from dagger._exceptions import (
     ClientConnectionError,
+    ClientLoadError,
+    DaggerError,
     TransportError,
     _query_error_from_response,
 )
 from dagger._managers import ResourceManager
 from dagger.client._config import ConnectConfig
+
+if TYPE_CHECKING:
+    from dagger.client._target import Target
 
 logger = logging.getLogger(__name__)
 
@@ -273,3 +278,81 @@ class SharedConnection(BaseConnection):
         if self._session:
             await super().close()
             self._session = None
+
+
+@dataclass(slots=True)
+class _Load:
+    target: "Target"
+    lock: anyio.Lock = field(default_factory=anyio.Lock)
+    done: bool = False
+
+
+class Session(BaseConnection):
+    """A connection to one engine, and what has been loaded into it.
+
+    Owns the connection, the query transport and the load memo. It has no
+    API field: a client is the way in.
+    """
+
+    def __init__(self, connection: BaseConnection) -> None:
+        self.connection = connection
+        self._loads: dict[str, _Load] = {}
+
+    @property
+    def session(self) -> ClientSession:  # type: ignore[override]
+        return self.connection.session
+
+    async def connect(self) -> Self:
+        await self.connection.connect()
+        return self
+
+    async def close(self) -> None:
+        # A new engine behind the same connection has nothing loaded.
+        self._loads.clear()
+        await self.connection.close()
+
+    async def execute(self, query: str) -> Any:
+        return await self.session.execute(query)
+
+    async def load(self, target: "Target") -> None:
+        """Serve the module a target names, once per session."""
+        entry = self._loads.setdefault(target.name, _Load(target))
+        if entry.target != target:
+            msg = (
+                f"Client {target.name!r} is loaded from {entry.target.ref!r}, "
+                f"not {target.ref!r}"
+            )
+            raise ClientLoadError(msg, target=target)
+        async with entry.lock:
+            if entry.done:
+                return
+            # The loader builds its query with Context, which imports this
+            # module, so it can only be reached from inside a function.
+            from dagger.client._load import load_target
+
+            try:
+                await load_target(self, target)
+            except DaggerError as e:
+                msg = f"Failed to load client {target.name!r} from {target.ref!r}: {e}"
+                raise ClientLoadError(msg, target=target) from e
+            entry.done = True
+
+
+_default: Session | None = None
+
+
+def default_session() -> Session:
+    """The one session per process, over the shared connection."""
+    global _default  # noqa: PLW0603
+    if _default is None:
+        _default = Session(SharedConnection())
+    return _default
+
+
+def as_session(conn: BaseConnection) -> Session:
+    """The session a connection belongs to."""
+    if isinstance(conn, Session):
+        return conn
+    if isinstance(conn, SharedConnection):
+        return default_session()
+    return Session(conn)

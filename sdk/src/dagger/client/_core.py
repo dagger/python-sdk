@@ -21,8 +21,9 @@ import exceptiongroup
 from cattrs.preconf.json import make_converter as make_json_converter
 from typing_extensions import TypeForm
 
-from dagger._exceptions import DaggerError, InvalidQueryError
-from dagger.client._session import BaseConnection, SharedConnection
+from dagger._exceptions import DaggerError, InvalidQueryError, QueryError
+from dagger.client._session import BaseConnection, as_session, default_session
+from dagger.client._target import Target, stale_client_error
 from dagger.client.base import Input, Scalar, Type
 
 from ._guards import (
@@ -178,7 +179,7 @@ def _snapshot(value: Any) -> Any:
 @dataclasses.dataclass(slots=True)
 class Context:
     conn: BaseConnection = dataclasses.field(
-        default_factory=SharedConnection,
+        default_factory=default_session,
         compare=False,
     )
     selections: collections.deque[Field] = dataclasses.field(
@@ -188,6 +189,8 @@ class Context:
         init=False,
         compare=False,
     )
+    # The modules the query needs served first. Every selection keeps them.
+    targets: frozenset[Target] = frozenset()
 
     def __post_init__(self):
         self.converter = make_converter(self)
@@ -261,9 +264,23 @@ class Context:
     async def execute(
         self, return_type: TypeForm[T] | type[T] | None = None
     ) -> T | None:
+        await self.load_targets()
         await self.resolve_ids()
-        result = await self.conn.session.execute(self.build())
+        try:
+            result = await self.conn.session.execute(self.build())
+        except QueryError as e:
+            if self.targets and (stale := stale_client_error(e, self.targets)):
+                raise stale from e
+            raise
         return self.get_value(result, return_type) if return_type else None
+
+    async def load_targets(self) -> None:
+        """Serve every module the query needs, in this context's session."""
+        if not self.targets:
+            return
+        session = as_session(self.conn)
+        for target in sorted(self.targets, key=lambda t: t.name):
+            await session.load(target)
 
     async def execute_object_list(
         self,
