@@ -76,8 +76,9 @@ type Scope {
   """
   let checkRuntimeReads(file: File!, members: [ClientMember!]!): Void {
     if (engineVersion != "") {
-      let runtimeReads = pythonSdkRuntime.scopeMembers(file) rescue {
-        err: Error => [] :: [String!]!
+      # Members are never empty, so a leading newline marks the refusal.
+      let read = pythonSdkRuntime.scopeMembers(file).join("\n") rescue {
+        err: Error => "\n" + err.message
       }
       let uvReads = pyprojectTool
         .withFile(toolPath, file)
@@ -85,18 +86,27 @@ type Scope {
         .stdout
         .split("\n")
         .filter { line => line != "" }
-      let missed = uvReads.filter { member => runtimeReads.filter { r => r == member }.length == 0 }
-      let invented = runtimeReads.filter { member => uvReads.filter { u => u == member }.length == 0 }
-      if (missed.length > 0 or invented.length > 0) {
-        let misses = if (missed.length > 0) { ["misses " + missed.join(", ")] } else { [] :: [String!]! }
-        let invents = if (invented.length > 0) { ["reads " + invented.join(", ") + ", which uv does not"] } else { [] :: [String!]! }
-        raise scopeFileName + " of " + path + " lists its workspace members in a form the module runtime " +
-          "does not read the way uv does (the runtime " + (misses + invents).join("; ") + "), so the module would not build as written. " +
-          "Write the workspace table as an unquoted [tool.uv.workspace] header with members " +
-          "as an array of strings, then run dagger generate again. The runtime does not read " +
-          "a quoted header such as [\"tool\".\"uv\".\"workspace\"], an inline table such as " +
-          "workspace = { members = [...] }, dotted keys such as tool.uv.workspace.members = [...], " +
-          "or anything but strings in members, such as a nested array"
+      let form = "Write the workspace table as an unquoted [tool.uv.workspace] header with members " +
+        "as an array of strings, then run dagger generate again. The runtime does not read " +
+        "a quoted header such as [\"tool\".\"uv\".\"workspace\"], an inline table such as " +
+        "workspace = { members = [...] }, dotted keys such as tool.uv.workspace.members = [...], " +
+        "or anything but strings in members, such as a nested array"
+      if (read.hasPrefix("\n")) {
+        # Its own diagnosis, not the members it then could not read.
+        let m = read.match("(\\S+ is not an array of strings)")
+        let why = if (m == null) { read.trimSpace } else { m.captures[0] ?? "" }
+        raise scopeFileName + " of " + path + " has workspace members the module runtime cannot read: " +
+          why + ", so the module would not build as written. " + form
+      } else {
+        let runtimeReads = read.split("\n").filter { line => line != "" }
+        let missed = uvReads.filter { member => runtimeReads.filter { r => r == member }.length == 0 }
+        let invented = runtimeReads.filter { member => uvReads.filter { u => u == member }.length == 0 }
+        if (missed.length > 0 or invented.length > 0) {
+          let misses = if (missed.length > 0) { ["misses " + missed.join(", ")] } else { [] :: [String!]! }
+          let invents = if (invented.length > 0) { ["reads " + invented.join(", ") + ", which uv does not"] } else { [] :: [String!]! }
+          raise scopeFileName + " of " + path + " lists workspace members the module runtime does not read the way uv does " +
+            "(it " + (misses + invents).join("; ") + "), so the module would not build as written. " + form
+        }
       }
     }
     null

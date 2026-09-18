@@ -281,7 +281,9 @@ type E2e {
       .cwd rescue {
         err: Error => err.message
       }
-    assertContainsAll(nested, ["does not read the way uv does", "such as a nested array", "then run dagger generate again"])
+    assertContainsAll(nested, ["the module runtime cannot read: members is not an array of strings", "such as a nested array", "then run dagger generate again"])
+    # The members it lists are fine; naming them would point away from the cause.
+    assertNotContains(nested, "misses", "the refusal listed the members the runtime did not get to read")
 
     let legacyWs = pythonSdk
       .generateScope(ws.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])
