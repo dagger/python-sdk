@@ -253,19 +253,18 @@ type E2e {
     assertContains(current.after.file(tomlGenerateModulePath + "/dagger-module.toml").contents, "engineVersion = \"v1.0.0-0\"", "regenerating did not preserve engineVersion")
     assertNotContains(current.after.file(tomlGenerateModulePath + "/pyproject.toml").contents, "path = \"sdk\"", "the vendored source survived")
 
-    # Valid TOML that the runtime does not read would generate a module that
-    # then fails to build, so generation refuses it and names the form to use.
-    # The input is a scope generation wrote, with only its header rewritten.
+    # The runtime reads the members as TOML defines them, so a quoted header,
+    # valid TOML, generates, and the runtime reads the members it lists. The
+    # input is a scope generation wrote, with only its header rewritten.
     let pyprojectPath = "/" + tomlGenerateModulePath + "/pyproject.toml"
     let written = currentWs.file(pyprojectPath).contents
     assert(written.contains("\n[tool.uv.workspace]\n"), "generation wrote no [tool.uv.workspace] header to rewrite")
-    let quoted = currentWs.withNewFile(pyprojectPath, written.replace("[tool.uv.workspace]", "[\"tool\".\"uv\".\"workspace\"]"))
-    let refused = pythonSdk
-      .generateScope(quoted.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
-      .cwd rescue {
-        err: Error => err.message
-      }
-    assertContainsAll(refused, ["the module runtime does not read", "an unquoted [tool.uv.workspace] header", "then run dagger generate again"])
+    let quotedToml = written.replace("[tool.uv.workspace]", "[\"tool\".\"uv\".\"workspace\"]")
+    let quoted = pythonSdk
+      .generateScope(currentWs.withNewFile(pyprojectPath, quotedToml).withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    let quotedRead = pythonSdkRuntime.scopeMembers(quoted.file(pyprojectPath))
+    assert(quotedRead.filter { m => m == "sdk" or m == "clients/core" }.length == 2, "the runtime did not read the members under a quoted header: " + quotedRead.join(", "))
 
     # Nor a member the runtime would read and uv would not: a nested array is
     # no member, so the runtime refuses to read it rather than flatten it,
@@ -281,7 +280,7 @@ type E2e {
       .cwd rescue {
         err: Error => err.message
       }
-    assertContainsAll(nested, ["the module runtime cannot read: members is not an array of strings", "such as a nested array", "then run dagger generate again"])
+    assertContainsAll(nested, ["the module runtime cannot read: members is not an array of strings", "Write members as an array of strings, not a nested array", "then run dagger generate again"])
     # The members it lists are fine; naming them would point away from the cause.
     assertNotContains(nested, "misses", "the refusal listed the members the runtime did not get to read")
 
@@ -778,9 +777,21 @@ type E2e {
     # Only the members the project depends on are installed, as `uv sync`
     # installs them: a user member nothing depends on may not even install
     # here, and pip or an unlocked uv must not try.
+    # The dependencies are the ones a real project writes: extras, an escaped
+    # quote in a marker, a literal string with a backslash, and a multi-line
+    # string in [project] holding text that looks like keys (a readme, since
+    # uv_build wants a one-line description). The markers are false, so
+    # nothing is fetched.
     let members = ws
       .withNewFile(pyprojectPath, ws.file(pyprojectPath).contents
-        .replace("dependencies = [\"dagger-io\"]", "dependencies = [\"dagger-io\", \"used[extra]>=0.1\"]")
+        .replace("dependencies = [\"dagger-io\"]",
+          "dependencies = [\n" +
+          "  \"dagger-io\",\n" +
+          "  \"used[extra]>=0.1\",\n" +
+          "  \"tomli; python_version < \\\"3.0\\\"\",  # an escaped quote\n" +
+          "  'tomli; python_version < \"3.0\" and os_name == \"C:\\dir\"',  # a literal string\n" +
+          "]\n" +
+          "readme = { text = \"\"\"\ndependencies = 42\nmembers = [[\"nope\"]]\n\"\"\", content-type = \"text/plain\" }")
         .replace("[tool.uv.sources]\n", "[tool.uv.sources]\nused = { workspace = true }\n") +
         "\n[tool.uv.workspace]\nmembers = [\"tools/used\", \"tools/unused\"]\n")
       .withNewFile("/" + tomlGenerateModulePath + "/tools/used/pyproject.toml", userMember("used", ">=3.10"))

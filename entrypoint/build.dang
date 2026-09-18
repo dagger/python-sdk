@@ -204,57 +204,82 @@ type PythonModuleBuild {
   """
   let localPackages(source: Directory!, cfg: PyConfig!): [String!]! {
     if (cfg.isScope) {
-      # A member may be a glob, which the tree resolves.
-      let dirs = cfg.members.reduce([] :: [String!]!) { found, member =>
-        found + source.glob(member + "/" + projectCfg).map { file => file.trimSuffix("/" + projectCfg) }
-      }
-      let needed = neededMembers(source, dirs, cfg.dependencies.map { req => requirementName(req) }, [] :: [String!]!)
-      dirs.filter { dir => needed.filter { n => n == dir }.length > 0 }.map { dir => "./" + dir }
+      workspaceRead(source)
+        .filter { line => line.hasPrefix("local\t") }
+        .map { line => line.trimPrefix("local\t") }
     } else {
       ["./" + genDir]
     }
   }
 
   """
-  The members named by a list of distributions, and the members those depend
-  on in turn, added to the ones already found.
+  The workspace as TOML defines it, read by tomllib in the pinned default
+  image: `member\t<path>` for each member, then `local\t./<dir>` for each
+  member directory to install. [project] dependencies and a member's are the
+  user's own content, with escapes, literal and multi-line strings, so the
+  regular expressions of pyConfig must not read them. Only the
+  pyproject.toml files go in, so the read is cached until one changes.
   """
-  let neededMembers(source: Directory!, dirs: [String!]!, names: [String!]!, found: [String!]!): [String!]! {
-    let next = dirs.filter { dir =>
-      found.filter { f => f == dir }.length == 0 and
-        names.filter { name => name == memberName(source, dir) }.length > 0
-    }
-    if (next.length == 0) {
-      found
+  let workspaceRead(source: Directory!): [String!]! {
+    let lines = container
+      .from(defaultBaseImage)
+      .withMountedDirectory("/scope", source.filter(include: ["**/" + projectCfg]))
+      .withExec(["python", "-c", workspaceReader, "/scope"])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
+    let errors = lines.filter { line => line.hasPrefix("error\t") }
+    if (errors.length > 0) {
+      raise errors.map { line => line.trimPrefix("error\t") }.join("; ")
     } else {
-      let theirs = next.reduce([] :: [String!]!) { names, dir => names + memberRequirements(source, dir) }
-      neededMembers(source, dirs, theirs, found + next)
+      lines
     }
   }
 
-  let memberProject(source: Directory!, dir: String!): String! {
-    tomlTable(source.file(dir + "/" + projectCfg).contents, "project")
-  }
-
-  let memberName(source: Directory!, dir: String!): String! {
-    distributionName(tomlString(memberProject(source, dir), "name"))
-  }
-
-  let memberRequirements(source: Directory!, dir: String!): [String!]! {
-    tomlStrings(memberProject(source, dir), "dependencies").map { req => requirementName(req) }
-  }
-
-  """
-  The distribution a PEP 508 requirement names, normalized like PEP 503.
-  """
-  let requirementName(requirement: String!): String! {
-    let m = requirement.match("^\\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
-    if (m == null) { "" } else { distributionName(m.captures[0] ?? "") }
-  }
-
-  let distributionName(name: String!): String! {
-    name.toLower.replaceMatches("[-_.]+", "-")
-  }
+  let workspaceReader: String! =
+    "import glob, os, re, sys, tomllib\n" +
+    "root = sys.argv[1]\n" +
+    "def load(rel):\n" +
+    "    with open(os.path.join(root, rel, 'pyproject.toml'), 'rb') as f:\n" +
+    "        return tomllib.load(f)\n" +
+    "def strings(value, key, where):\n" +
+    "    if value is None:\n" +
+    "        return []\n" +
+    "    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):\n" +
+    "        print(f'error\\t{where}: {key} is not an array of strings; write it as one, such as {key} = [\"a\", \"b\"]')\n" +
+    "        sys.exit(0)\n" +
+    "    return value\n" +
+    "def name(requirement):\n" +
+    "    m = re.match(r'\\s*([A-Za-z0-9][A-Za-z0-9._-]*)', requirement)\n" +
+    "    return re.sub(r'[-_.]+', '-', m.group(1).lower()) if m else ''\n" +
+    "try:\n" +
+    "    doc = load('.')\n" +
+    "except tomllib.TOMLDecodeError as e:\n" +
+    "    print(f'error\\tpyproject.toml is not valid TOML: {e}')\n" +
+    "    sys.exit(0)\n" +
+    "members = strings(doc.get('tool', {}).get('uv', {}).get('workspace', {}).get('members'), 'members', 'pyproject.toml')\n" +
+    "wanted = {name(r) for r in strings(doc.get('project', {}).get('dependencies'), 'dependencies', 'pyproject.toml')}\n" +
+    "dirs = []\n" +
+    "for member in members:\n" +
+    "    print('member\\t' + member)\n" +
+    "    for found in sorted(glob.glob(os.path.join(root, member, 'pyproject.toml'))):\n" +
+    "        rel = os.path.relpath(os.path.dirname(found), root)\n" +
+    "        if rel not in dirs:\n" +
+    "            dirs.append(rel)\n" +
+    "projects = {}\n" +
+    "for rel in dirs:\n" +
+    "    project = load(rel).get('project', {})\n" +
+    "    projects[rel] = (name(project.get('name', '')), {name(r) for r in strings(project.get('dependencies'), 'dependencies', rel + '/pyproject.toml')})\n" +
+    "needed = []\n" +
+    "while True:\n" +
+    "    found = [rel for rel in dirs if rel not in needed and projects[rel][0] in wanted]\n" +
+    "    if not found:\n" +
+    "        break\n" +
+    "    needed += found\n" +
+    "    wanted = set().union(*(projects[rel][1] for rel in found))\n" +
+    "for rel in dirs:\n" +
+    "    if rel in needed:\n" +
+    "        print('local\\t./' + rel)\n"
 
   """
   The generated files a module needs before it builds. A scope needs each of
@@ -380,14 +405,15 @@ type PythonModuleBuild {
   """
   Not a TOML parser: regular expressions scoped to a table, for the keys the
   templates and `mod config set` write. Single-line booleans and quoted strings
-  only; arrays, multi-line strings and dotted keys are not seen.
+  only; arrays, multi-line strings and dotted keys are not seen. The workspace
+  members, and the dependencies that pick what to install, are the user's
+  arrays, so tomllib reads them (workspaceRead).
   """
   let pyConfig(source: Directory!): PyConfig! {
     let toml = source.file(projectCfg).contents
     let project = tomlTable(toml, "project")
     let dagger = tomlTable(toml, "tool.dagger")
     let sources = tomlTable(toml, "tool.uv.sources")
-    let workspace = tomlTable(toml, "tool.uv.workspace")
     let indexes = tomlTables(toml, "tool.uv.index")
       .filter { table => tomlString(table, "name") == "" }
 
@@ -398,8 +424,9 @@ type PythonModuleBuild {
       useUv: tomlBool(dagger, "use-uv", true),
       uvVersion: tomlString(dagger, "uv-version"),
       vendorPath: inlineTableString(sources, "dagger-io", "path"),
-      members: tomlStrings(workspace, "members"),
-      dependencies: tomlStrings(project, "dependencies"),
+      members: workspaceRead(source)
+        .filter { line => line.hasPrefix("member\t") }
+        .map { line => line.trimPrefix("member\t") },
       indexURL: indexes
         .filter { table => tomlBool(table, "default", false) }
         .map { table => tomlString(table, "url") }
@@ -445,29 +472,6 @@ type PythonModuleBuild {
   }
 
   """
-  The strings of an array, on one line or over several, comments dropped. A
-  bracket or a `#` inside a string is part of it: `httpx[http2]` does not
-  end the array. Anything else in the array, a nested array or a number,
-  is refused rather than read as strings it is not.
-  """
-  let tomlStrings(table: String!, key: String!): [String!]! {
-    let assigned = table.containsMatch(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*="))
-    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\[((?:\"[^\"\\n]*\"|'[^'\\n]*'|#[^\\n]*|[^\\[\\]{}\"'#])*)\\]"))
-    let inner = if (m == null) { "" } else { m.captures[0] ?? "" }
-    if (assigned == false) {
-      [] :: [String!]!
-    } else if (m == null or inner.replaceMatches("\"[^\"\\n]*\"|'[^'\\n]*'|#[^\\n]*", "").containsMatch("[^\\s,]")) {
-      raise projectCfg + ": " + key + " is not an array of strings; write it as one, such as " + key + " = [\"a\", \"b\"]"
-    } else {
-      inner
-        .matchAll("\"([^\"\\n]*)\"|'([^'\\n]*)'|#[^\\n]*")
-        .filter { item => item.string.hasPrefix("#") == false }
-        .map { item => item.string.trim("\"'") }
-        .filter { item => item != "" }
-    }
-  }
-
-  """
   e.g. `path` in `dagger-io = { path = "sdk", editable = true }`.
   """
   let inlineTableString(table: String!, key: String!, field: String!): String! {
@@ -491,7 +495,6 @@ type PyConfig {
   The `[tool.uv.workspace] members` of a scope; empty in the layout before.
   """
   pub members: [String!]!
-  pub dependencies: [String!]!
   pub indexURL: String!
   pub extraIndexURL: String!
 
@@ -503,7 +506,6 @@ type PyConfig {
     uvVersion: String! = "",
     vendorPath: String! = "",
     members: [String!]! = [],
-    dependencies: [String!]! = [],
     indexURL: String! = "",
     extraIndexURL: String! = "",
   ) {
@@ -514,7 +516,6 @@ type PyConfig {
     self.uvVersion = uvVersion
     self.vendorPath = vendorPath
     self.members = members
-    self.dependencies = dependencies
     self.indexURL = indexURL
     self.extraIndexURL = extraIndexURL
     self
