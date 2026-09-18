@@ -196,6 +196,27 @@ def test_client_imports_the_core_types_it_names():
     assert "TARGET = _Target(name=NAME, ref=REF, pin=PIN)" in code
 
 
+def test_client_checks_core_before_importing_its_symbols():
+    # A stale core that dropped a symbol must fail on check_core, with its
+    # "run dagger generate" message, not on a plain ImportError before it.
+    code = _linter(_LINTER, _GLOW)
+
+    statements = [ast.unparse(node) for node in ast.parse(code).body]
+    digest = statements.index(
+        "from dagger_clients.core import CORE_DIGEST as _installed_core"
+    )
+    check = statements.index("_check_core(NAME, CORE_DIGEST, _installed_core)")
+    symbols = [
+        i
+        for i, statement in enumerate(statements)
+        if statement.startswith("from dagger_clients.core import")
+        and "CORE_DIGEST" not in statement
+    ]
+    assert digest < check
+    assert symbols
+    assert all(check < i for i in symbols)
+
+
 def test_client_entry_function():
     code = _linter(_LINTER)
 

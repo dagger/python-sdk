@@ -332,15 +332,18 @@ def _client_init(
     yield _HEADER.rstrip() % _aliased(
         "Session", "Target", "check_core", "client_root", "client_select"
     )
-    yield f"from {NAMESPACE}.{partition.CORE} import ("
-    yield indent("CORE_DIGEST as _installed_core,")
-    yield from (indent(f"{name},") for name in _core_imports(ctx, module, references))
-    yield ")"
+    yield f"from {NAMESPACE}.{partition.CORE} import CORE_DIGEST as _installed_core"
     yield ""
     yield "from ._target import CORE_DIGEST, NAME, PIN, REF"
     yield ""
-    # Before anything else, so that a stale client fails on its import line.
+    # Before any core symbol is imported: a stale core that dropped one would
+    # otherwise raise a plain ImportError, and the message to regenerate would
+    # never be seen.
     yield "_check_core(NAME, CORE_DIGEST, _installed_core)"
+    yield ""
+    yield f"from {NAMESPACE}.{partition.CORE} import (  # noqa: E402"
+    yield from (indent(f"{name},") for name in _core_imports(ctx, module, references))
+    yield ")"
     yield _block(
         "TARGET = _Target(name=NAME, ref=REF, pin=PIN)",
         '"""The module that this client loads on first use."""',
