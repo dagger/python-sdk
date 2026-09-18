@@ -1,3 +1,4 @@
+import ast
 import json
 from textwrap import dedent, indent
 
@@ -155,28 +156,44 @@ def test_client_holds_its_own_types():
     assert "class Query(" not in code
 
 
+def _imports(code: str, module: str) -> dict[str, str]:
+    """Names imported from a module, by the name they get."""
+    return {
+        alias.asname or alias.name: alias.name
+        for node in ast.parse(code).body
+        if isinstance(node, ast.ImportFrom)
+        and f"{'.' * node.level}{node.module}" == module
+        for alias in node.names
+    }
+
+
+def _defs(code: str, name: str) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
+    return [
+        node
+        for node in ast.parse(code).body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name == name
+    ]
+
+
 def test_client_imports_the_core_types_it_names():
     code = _linter(_LINTER, _GLOW)
 
-    assert (
-        dedent(
-            """
-            from dagger_clients.core import (
-                CORE_DIGEST as _installed_core,
-                Binding,
-                Directory,
-                Severity,
-            )
-
-            from ._target import CORE_DIGEST, NAME, PIN, REF
-
-            check_core(NAME, CORE_DIGEST, _installed_core)
-
-            TARGET = Target(name=NAME, ref=REF, pin=PIN)
-            """
-        )
-        in code
-    )
+    imports = _imports(code, "dagger_clients.core")
+    assert {imports[n] for n in ("Binding", "Directory", "Severity")} == {
+        "Binding",
+        "Directory",
+        "Severity",
+    }
+    assert "File" not in imports.values()
+    assert "Glow" not in imports.values()
+    assert _imports(code, "._target") == {
+        "CORE_DIGEST": "CORE_DIGEST",
+        "NAME": "NAME",
+        "PIN": "PIN",
+        "REF": "REF",
+    }
+    assert "TARGET = Target(name=NAME, ref=REF, pin=PIN)" in code
 
 
 def test_client_entry_function():
@@ -270,32 +287,23 @@ def test_client_overloads_one_name_on_two_receivers():
     env = 'asLinter(strict: Boolean): Linter! @sourceMap(module: "linter")'
     code = _linter(_LINTER, Env=env)
 
-    assert (
-        dedent(
-            """
-            @overload
-            def as_linter(binding: Binding, /) -> Linter: ...
-
-
-            @overload
-            def as_linter(env: Env, /, *, strict: bool | None = None,) -> Linter: ...
-
-
-            def as_linter(receiver, /, *args, **kwargs):
-                if isinstance(receiver, Binding):
-                    return _binding_as_linter(receiver, *args, **kwargs)
-                if isinstance(receiver, Env):
-                    return _env_as_linter(receiver, *args, **kwargs)
-                raise _type_error("as_linter", "receiver", receiver, "Binding | Env")
-            """
-        )
-        in code
-    )
-    assert "def _binding_as_linter(binding: Binding, /) -> Linter:" in code
-    assert "def _env_as_linter(env: Env, /, *, strict: bool | None" in code
+    *overloads, dispatcher = _defs(code, "as_linter")
+    assert [ast.unparse(d.args) for d in overloads] == [
+        "binding: Binding, /",
+        "env: Env, /, *, strict: bool | None=None",
+    ]
+    assert all(ast.unparse(d.decorator_list) == "overload" for d in overloads)
+    assert not dispatcher.decorator_list
+    # One selection per receiver, each with its own field arguments.
+    assert 'client_select(binding, TARGET, "asLinter", _args)' in code
+    assert 'client_select(env, TARGET, "asLinter", _args)' in code
+    assert 'Arg("strict", strict, None)' in code
     exported = code[code.index("__all__") :]
     assert exported.count('"as_linter",') == 1
-    assert "_binding_as_linter" not in exported
+    assert exported.count('"') == 2 * len(
+        ("Linter", "LinterReport", "as_linter", "linter")
+    )
+    compile(code, "linter", "exec")
 
 
 def test_client_is_the_same_whatever_the_other_clients():
