@@ -123,13 +123,22 @@ def _object(obj: ObjectDescription) -> list[str]:
         deprecated = _opt("deprecated", obj.deprecated)
         head = f"typeDef.withObject({_quote(obj.name)}{description}{deprecated})"
     lines = [head]
+    if obj.collection:
+        lines.append(".withCollection")
     lines.extend(
         f".withField({_quote(field.name)}, {_type(field.type)}"
         f"{_opt('description', field.description)}"
         f"{_opt('deprecated', field.deprecated)})"
         for field in obj.fields
     )
+    for field in obj.fields:
+        if field.collection_role == "keys":
+            lines.append(f".withCollectionKeys({_quote(field.name)})")
+        elif field.collection_role == "delta":
+            lines.append(f".withCollectionDelta({_quote(field.name)})")
     for func in obj.functions:
+        if func.collection_get:
+            lines.append(f".withCollectionGet({_quote(func.name)})")
         lines += _wrap("withFunction", _function(func))
     if obj.constructor is not None:
         lines += _wrap("withConstructor", _function(obj.constructor))

@@ -7,6 +7,7 @@ import os
 import textwrap
 import typing
 from collections.abc import Awaitable, Callable, Mapping
+from functools import wraps
 from typing import Any, TypeVar, cast
 
 import anyio
@@ -49,7 +50,14 @@ from dagger.mod._resolver import (
     P,
     R,
 )
-from dagger.mod._types import APIName, FieldDefinition, FunctionDefinition, PythonName
+from dagger.mod._types import (
+    COLLECTION_BASE_ATTR,
+    COLLECTION_BASE_FIELD,
+    APIName,
+    FieldDefinition,
+    FunctionDefinition,
+    PythonName,
+)
 from dagger.mod._utils import (
     asyncify,
     extract_enum_member_doc,
@@ -67,6 +75,8 @@ CHECK_DEF_KEY: typing.Final[str] = "__dagger_check__"
 GENERATOR_DEF_KEY: typing.Final[str] = "__dagger_generate__"
 UP_DEF_KEY: typing.Final[str] = "__dagger_up__"
 AGENT_DEF_KEY: typing.Final[str] = "__dagger_agent__"
+COLLECTION_DEF_KEY: typing.Final[str] = "__dagger_collection__"
+COLLECTION_GET_DEF_KEY: typing.Final[str] = "__dagger_get__"
 MODULE_NAME: typing.Final[str] = os.getenv("DAGGER_MODULE", "")
 MAIN_OBJECT: typing.Final[str] = os.getenv("DAGGER_MAIN_OBJECT", "")
 TYPE_DEF_FILE: typing.Final[str] = os.getenv("DAGGER_MODULE_FILE", "/module.json")
@@ -536,6 +546,51 @@ class Module:
             **kwargs,
         )
 
+    def collection(self, cls: T) -> T:
+        """Mark an exposed object type as a collection."""
+        setattr(cls, COLLECTION_DEF_KEY, True)
+        return cls
+
+    def get(self, func: Func[P, R]) -> Func[P, R]:
+        """Select the exposed item lookup function of a collection."""
+        setattr(func, COLLECTION_GET_DEF_KEY, True)
+        return func
+
+    def keys(
+        self,
+        *,
+        default: Callable[[], Any] | object = ...,
+        name: APIName | None = None,
+        init: bool = True,
+        deprecated: str | None = None,
+    ) -> Any:
+        """Expose the stored keys field of a collection."""
+        return self._collection_field("keys", default, name, init, deprecated)
+
+    def delta(
+        self,
+        *,
+        default: Callable[[], Any] | object = None,
+        name: APIName | None = None,
+        init: bool = False,
+        deprecated: str | None = None,
+    ) -> Any:
+        """Expose a field that receives the collection delta."""
+        return self._collection_field("delta", default, name, init, deprecated)
+
+    def _collection_field(
+        self,
+        role: str,
+        default: Callable[[], Any] | object,
+        name: APIName | None,
+        init: bool,
+        deprecated: str | None,
+    ) -> Any:
+        field = self.field(default=default, name=name, init=init, deprecated=deprecated)
+        meta = dataclasses.replace(field.metadata[FIELD_DEF_KEY], collection_role=role)
+        field.metadata = {**field.metadata, FIELD_DEF_KEY: meta}
+        return field
+
     def check(
         self,
         func: Func[P, R] | None = None,
@@ -736,14 +791,28 @@ class Module:
     @overload
     @dataclass_transform(
         kw_only_default=True,
-        field_specifiers=(function, dataclasses.field, dataclasses.Field),
+        field_specifiers=(
+            function,
+            field,
+            keys,
+            delta,
+            dataclasses.field,
+            dataclasses.Field,
+        ),
     )
     def object_type(self, cls: T, /, *, deprecated: str | None = None) -> T: ...
 
     @overload
     @dataclass_transform(
         kw_only_default=True,
-        field_specifiers=(function, dataclasses.field, dataclasses.Field),
+        field_specifiers=(
+            function,
+            field,
+            keys,
+            delta,
+            dataclasses.field,
+            dataclasses.Field,
+        ),
     )
     def object_type(self, *, deprecated: str | None = None) -> Callable[[T], T]: ...
 
@@ -794,6 +863,25 @@ class Module:
                     )
                     raise BadUsageError(msg)
 
+            # Both decorator orders are supported: @collection can run after
+            # @object_type. Keep opaque engine state as an ordinary private field
+            # so copy.copy, deepcopy, and dataclasses.replace all preserve it.
+            cls.__annotations__ = dict(getattr(cls, "__annotations__", {}))
+            cls.__annotations__[COLLECTION_BASE_ATTR] = str | None
+            setattr(
+                cls,
+                COLLECTION_BASE_ATTR,
+                dataclasses.field(default=None, repr=False, compare=False),
+            )
+            if init := cls.__dict__.get("__init__"):
+
+                @wraps(init)
+                def init_with_state(instance, *args, **kwargs):
+                    base = kwargs.pop(COLLECTION_BASE_ATTR, None)
+                    init(instance, *args, **kwargs)
+                    setattr(instance, COLLECTION_BASE_ATTR, base)
+
+                cls.__init__ = init_with_state
             wrapped = dataclasses.dataclass(kw_only=True)(cls)
             return self._process_type(wrapped, deprecated=deprecated)
 
@@ -838,7 +926,11 @@ class Module:
             return cls
 
         # Register hooks for renaming field names in `mod.field()`.
-        attr_overrides = {}
+        attr_overrides = {
+            COLLECTION_BASE_ATTR: cattrs.gen.override(
+                rename=COLLECTION_BASE_FIELD, omit_if_default=True
+            )
+        }
 
         # Find all fields exposed with `mod.field()`.
         for field in dataclasses.fields(cls):
@@ -970,6 +1062,7 @@ def _describe_object(name: str, obj_type: ObjectType) -> ObjectDescription:
                 ),
                 description=get_doc(field.return_type),
                 deprecated=field.meta.deprecated,
+                collection_role=field.meta.collection_role,
             )
             for field in obj_type.fields.values()
         )
@@ -986,6 +1079,7 @@ def _describe_object(name: str, obj_type: ObjectType) -> ObjectDescription:
     return ObjectDescription(
         name=name,
         interface=obj_type.interface,
+        collection=getattr(obj_type.cls, COLLECTION_DEF_KEY, False),
         description=get_doc(obj_type.cls),
         deprecated=obj_type.deprecated,
         fields=fields,
@@ -1028,6 +1122,7 @@ def _describe_function(
         generator=func.generate,
         service=func.service,
         agent=func.agent,
+        collection_get=getattr(func.wrapped, COLLECTION_GET_DEF_KEY, False),
         args=args,
     )
 
@@ -1075,6 +1170,8 @@ def _object_from(obj: ObjectDescription) -> dagger.TypeDef:
             description=obj.description,
             deprecated=obj.deprecated,
         )
+    if obj.collection:
+        type_def = type_def.with_collection()
     for field in obj.fields:
         type_def = type_def.with_field(
             field.name,
@@ -1082,7 +1179,13 @@ def _object_from(obj: ObjectDescription) -> dagger.TypeDef:
             description=field.description,
             deprecated=field.deprecated,
         )
+        if field.collection_role == "keys":
+            type_def = type_def.with_collection_keys(field.name)
+        elif field.collection_role == "delta":
+            type_def = type_def.with_collection_delta(field.name)
     for func in obj.functions:
+        if func.collection_get:
+            type_def = type_def.with_collection_get(func.name)
         type_def = type_def.with_function(_function_from(func))
     if obj.constructor is not None:
         type_def = type_def.with_constructor(_function_from(obj.constructor))
