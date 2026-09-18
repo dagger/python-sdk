@@ -266,7 +266,7 @@ generated = "client"
 ```
 clients/linter/src/dagger_clients/    no __init__.py: a namespace package
   linter/__init__.py                  generated types, linter(), as_linter()
-  linter/_target.py                   descriptor and the core digest it was generated against
+  linter/_descriptor.py               descriptor and the core digest it was generated against
   linter/py.typed
 ```
 
@@ -503,7 +503,7 @@ query executes.
    generated class carries its descriptor for this.
 
 ```python
-# clients/linter/src/dagger_clients/linter/_target.py (generated)
+# clients/linter/src/dagger_clients/linter/_descriptor.py (generated)
 # Plain data, no import: the descriptor is what generation knew.
 NAME = "linter"
 REF = "./path/to/the/linter/module"     # or "github.com/eunomie/glow"
@@ -511,7 +511,9 @@ PIN = None                              # or the commit the client was generated
 CORE_DIGEST = "sha256:…"
 ```
 
-The package's `__init__.py` builds `TARGET` from those constants.
+The package's `__init__.py` builds `_TARGET` from those constants. The name is
+private: the package's public names are the generated types, and a user of the
+client never handles its descriptor.
 
 The SDK owns the `Target` class and the load query. The query uses the raw query
 builder, not generated core. One field carries both kinds of reference, so the
@@ -611,18 +613,41 @@ dag = Client()
   release.
 
 The SDK finds it with one optional import, which replaces today's `dagger_gen`
-hook (`sdk/src/dagger/__init__.py:12-13`):
+hook (`sdk/src/dagger/__init__.py:12-13`). The import is lazy [confident]:
 
 ```python
 # dagger/__init__.py (hand-written)
-try:
-    from dagger_global import *     # temporary global client, only with the flag
-except ModuleNotFoundError:
-    from dagger.client._session import dag
+def __getattr__(name):            # PEP 562: on first use, never on import
+    if name == "dag":
+        return _sessions.default_session()
+    ...                           # names of dagger_global, if it is installed
 ```
+
+An eager `from dagger_global import *` cannot work. The global client imports
+core and every client, each of those imports `dagger`, so `dagger` would import
+itself whenever a generated package is the first import of the process. A
+module-level `__getattr__` runs after `dagger` is built, which breaks the cycle.
+`__dir__` and `__all__` follow the same route, so completion and star imports
+still see the names.
+
+`dagger.dag` is the default session (8.1). With the flag, the default session
+must be the global client's `dag`, so that a client called without `session=`
+shares its loads. The SDK gives the global client one seam for this:
+`dagger.client._session.set_default_finder(find)`. `dagger/__init__.py` passes a
+function that imports `dagger_global` on first use and returns its `dag`, or
+`None`. Only the global client uses the seam.
+
+Generation: `codegen generate-global -i <schema> …` writes the package. It takes
+the core schema and each client schema, and it fails if their engine versions
+differ.
 
 This is the only place the SDK files name generated code. It is off for a new
 module, and it goes away with the global client.
+
+An SDK older than this design star-imported its bindings from `dagger_gen`.
+Those bindings are no longer loaded. `dagger/__init__.py` finds the module
+without importing it (`importlib.util.find_spec`) and warns, so a user who
+skipped `dagger generate` is told why `dag` lost its API.
 
 ## 10. Type checking and staleness [decided]
 
@@ -857,7 +882,6 @@ removal date is Yves's call.
   root the descriptor was written against.
 - [speculative] How to get core alone. Fallback: strip module-owned types from a
   client schema, with Java's skew guard.
-- [speculative] The engine's introspection JSON carries `@sourceMap(module:)`.
 - [speculative] The module build installs a scope that is a uv workspace root,
   in uv and pip modes.
 - [speculative] A scope inside a tree that already has a uv workspace root above it.
@@ -876,3 +900,18 @@ pyright errors across the namespace; a scope root with and without `[project]`;
 a scope that installs only the client it names, plus core;
 `uv sync --locked --no-dev`; removal and relock; one member's files are identical
 in two scopes.
+
+Verified while building it, against a live engine:
+
+- The engine's introspection JSON carries `@sourceMap(module:)`, and a partition
+  on that directive splits core from the module-owned types.
+- Core's digest does not depend on which clients are generated beside it. The
+  digest comes from the client-facing schema. The module-facing schema gives a
+  different digest, so generation must always read the same view.
+- The global client cannot be imported eagerly from `dagger/__init__.py`. Every
+  generated package imports `dagger`, so the eager import is a cycle. A
+  module-level `__getattr__` (PEP 562) removes it.
+- An engine reports an unknown field with a GraphQL validation error, with no
+  path and with `extensions.code == "GRAPHQL_VALIDATION_FAILED"`. Checked on
+  beta.11 and beta.13. Only that exact signal means "the field is not there";
+  see section 10.
