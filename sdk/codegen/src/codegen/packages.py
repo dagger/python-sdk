@@ -123,8 +123,9 @@ class _ContributedField(_ObjectField):
     ) -> None:
         super().__init__(ctx, name, field, parent)
         self.receiver = format_name(parent.name)
+        self.receiver_is_interface = is_interface_type(parent)
         self.receiver_class = (
-            f"_{parent.name}Client" if is_interface_type(parent) else parent.name
+            f"_{parent.name}Client" if self.receiver_is_interface else parent.name
         )
         if self.receiver in {arg.name for arg in self.args}:
             self.receiver += "_"
@@ -182,15 +183,26 @@ def _render_overloaded(name: str, fields: list[_ContributedField]) -> Iterator[s
     yield from (f.render(f.private_name) for f in fields)
     yield from (_block("@_overload", f"{f.func_signature()} ...") for f in fields)
 
+    # By the exact GraphQL type first: an interface is a runtime-checkable
+    # protocol, so an object that implements it would match structurally and
+    # take the interface's hook, with the wrong arguments. The structural
+    # match is only the fallback for an object that has no hook of its own.
+    def _dispatch(f: _ContributedField, condition: str) -> str:
+        return indent(
+            f"if {condition}:\n    return {f.private_name}(receiver, *args, **kwargs)"
+        )
+
     expected = " | ".join(f.parent_name for f in fields)
     yield _block(
         f"def {name}(receiver, /, *args, **kwargs):",
+        indent(
+            "_name = receiver._graphql_name() if isinstance(receiver, _Type) else None"
+        ),
+        *(_dispatch(f, f'_name == "{f.parent_name}"') for f in fields),
         *(
-            indent(
-                f"if isinstance(receiver, {f.parent_name}):\n"
-                f"    return {f.private_name}(receiver, *args, **kwargs)"
-            )
+            _dispatch(f, f"isinstance(receiver, {f.parent_name})")
             for f in fields
+            if f.receiver_is_interface
         ),
         indent(f'raise _type_error("{name}", "receiver", receiver, "{expected}")'),
     )

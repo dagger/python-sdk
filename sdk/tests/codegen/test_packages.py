@@ -1,14 +1,18 @@
 import ast
 import json
+import sys
+import types
 from textwrap import dedent, indent
 
 import graphql
 import pytest
 from graphql import build_schema
 
+import dagger.client
 from codegen import cli
 from codegen.packages import client_package, core_package, write_package
 from codegen.partition import ClientError, ClientNameError, core_digest
+from dagger.client._core import Context
 
 _CORE = """
     directive @sourceMap(module: String, filename: String)
@@ -427,6 +431,107 @@ def test_client_refuses_a_core_digest_that_is_not_its_schema_core(given: str):
 
     with pytest.raises(ClientError, match=f'"{given}".*{core_digest(schema)}'):
         client_package(schema, "glow", "./glow", core_digest=given)
+
+
+class _Runtime:
+    """Fake of what the generated code needs from dagger.client, recording calls."""
+
+    def __init__(self) -> None:
+        self.selected: list[tuple] = []
+
+    class Session: ...
+
+    class Target:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    def check_core(self, name: str, wanted: str, installed: str) -> None:
+        assert wanted == installed, name
+
+    def client_root(self, cls, target, name, args, *, session=None):
+        return cls(Context())
+
+    def client_select(self, receiver, target, name, args):
+        self.selected.append((receiver, target, name, args))
+        return Context()
+
+
+@pytest.fixture
+def runtime(monkeypatch):
+    """Load generated packages against a fake runtime; returns the loader."""
+    fake = _Runtime()
+    for name in ("Session", "Target", "check_core", "client_root", "client_select"):
+        monkeypatch.setattr(dagger.client, name, getattr(fake, name), raising=False)
+    namespace = types.ModuleType("dagger_clients")
+    monkeypatch.setitem(sys.modules, "dagger_clients", namespace)
+
+    def _module(name: str, code: str) -> types.ModuleType:
+        module = types.ModuleType(name)
+        module.__package__ = name.rpartition(".")[0] or name
+        monkeypatch.setitem(sys.modules, name, module)
+        exec(compile(code, name, "exec"), module.__dict__)
+        return module
+
+    def load(schema: graphql.GraphQLSchema, name: str) -> types.ModuleType:
+        _module("dagger_clients.core", core_package(schema)["__init__.py"])
+        package, files = client_package(schema, name, ".")
+        client = f"dagger_clients.{package}"
+        module = types.ModuleType(client)
+        module.__package__ = client
+        monkeypatch.setitem(sys.modules, client, module)
+        _module(f"{client}._target", files["_target.py"])
+        exec(compile(files["__init__.py"], client, "exec"), module.__dict__)
+        return module
+
+    load.selected = fake.selected  # type: ignore[attr-defined]
+    return load
+
+
+_ANIMALS = """
+    interface Animal {
+        id: ID! @expectedType(name: "Animal")
+        sound: String!
+        asLinter: Linter! @sourceMap(module: "linter")
+    }
+    type Zebra implements Animal {
+        id: ID! @expectedType(name: "Zebra")
+        sound: String!
+        asLinter(strict: Boolean!): Linter! @sourceMap(module: "linter")
+    }
+"""
+
+
+def test_overload_dispatches_on_the_exact_type_of_the_receiver(runtime):
+    # A Zebra is an Animal structurally, so an isinstance chain would pick the
+    # Animal hook first and reject Zebra's own argument.
+    schema = build_schema(_sdl(_LINTER) + _ANIMALS)
+    linter = runtime(schema, "linter")
+    core = sys.modules["dagger_clients.core"]
+    zebra = core.Zebra(Context())
+
+    result = linter.as_linter(zebra, strict=True)
+
+    assert isinstance(result, linter.Linter)
+    receiver, _, name, args = runtime.selected[-1]
+    assert receiver is zebra
+    assert name == "asLinter"
+    assert [(a.name, a.value) for a in args] == [("strict", True)]
+
+
+def test_overload_dispatches_an_implementation_to_its_interface_hook(runtime):
+    # With no hook of its own, a Zebra is still an Animal.
+    animals = _ANIMALS.replace(
+        'asLinter(strict: Boolean!): Linter! @sourceMap(module: "linter")', ""
+    )
+    schema = build_schema(_sdl(_LINTER) + animals)
+    linter = runtime(schema, "linter")
+    core = sys.modules["dagger_clients.core"]
+    zebra = core.Zebra(Context())
+
+    assert isinstance(linter.as_linter(zebra), linter.Linter)
+    assert runtime.selected[-1][0] is zebra
+    with pytest.raises(TypeError, match="as_linter"):
+        linter.as_linter("zebra")
 
 
 def _named(module: str, root: str, constructor: str) -> str:
