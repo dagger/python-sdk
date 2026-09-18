@@ -76,7 +76,11 @@ A Dang entrypoint already in the manifest is kept as written, so a module can
 pin a version of the shared entrypoint, point at a fork, or name one of its
 own. Generation replaces only the static entrypoint it writes itself, told by
 its source, `./sdk/entrypoint`. The manifest is read with a TOML parser, so
-quoting and key order are the user's.
+quoting and key order are the user's. One exception is refused rather than kept: an
+entrypoint this SDK does not write, in a scope with a local client. A local
+client loads only through what the SDK's entrypoint hands the module (below),
+so generation stops and says so instead of writing a module that fails at its
+first call.
 
 Inside an entrypoint `currentModule` is the module it serves, so the
 entrypoint builds that module's container from `currentModule.source`, with

@@ -968,8 +968,12 @@ type E2e {
 
   """The manifest generating the toml-generate fixture leaves, from a seeded workspace."""
   let manifestOf(seeded: Workspace!): String! {
+    manifestWithClients(seeded, [])
+  }
+
+  let manifestWithClients(seeded: Workspace!, clients: [ModuleSource!]!): String! {
     pythonSdk
-      .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: clients)
       .withWorkdir(".")
       .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents
   }
@@ -1056,6 +1060,22 @@ type E2e {
     assertContains(quoted, fork, "a single-quoted Dang entrypoint was replaced: " + quoted)
     assertNotContains(quoted, sharedEntrypointSource, "a single-quoted Dang entrypoint was replaced: " + quoted)
     assertContainsNone(quoted, noRuntime)
+
+    # Never a manifest that cannot run the module: a local client loads only
+    # through what the SDK's entrypoint hands over, so an entrypoint it does
+    # not write, which may not, is refused in a scope with one.
+    let local = [ws.moduleSource("/" + clientDepPath)]
+    let ownWithClient = manifestWithClients(ws.withNewFile(manifestPath, ownPath), local) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(ownWithClient, ["./my-entrypoint", "does not write", "local clients (client-dep)", "Remove the [entrypoint] table"])
+    let pinnedShared = "dagger.io/sdk/python/entrypoint@v1.0.0"
+    let pinnedWithClient = manifestWithClients(ws.withNewFile(manifestPath, head + "\n[entrypoint]\nkind = \"dang\"\nsource = \"" + pinnedShared + "\"\n"), local) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(pinnedWithClient, [pinnedShared, "does not write", "local clients (client-dep)"])
+    let sharedWithClient = manifestWithClients(ws.withNewFile(manifestPath, plain), local)
+    assertContains(sharedWithClient, "source = \"" + sharedEntrypointSource + "\"", "the SDK's own entrypoint was refused with a local client: " + sharedWithClient)
 
     null
   }

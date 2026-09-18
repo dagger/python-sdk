@@ -158,6 +158,9 @@ type PythonSdk {
       # The shared entrypoint's manifest; the static path swaps it for its own
       # as it generates.
       let configured = generateScopeManifest(initialized, scope, name)
+      if (dangEntrypoint == false) {
+        checkHandover(configured, scope, clients)
+      }
       Mod(
         rootPath: scope,
         ws: configured,
@@ -259,6 +262,34 @@ type PythonSdk {
     let refused = listed + source
     if (refused.length > 0) {
       raise file + " has settings an entrypoint manifest cannot carry (" + refused.join(", ") + "); remove them, or keep the module on a runtime of your own"
+    }
+    null
+  }
+
+  """
+  Refuse a manifest that cannot run the module, before anything is written: a
+  Dang entrypoint this SDK does not write, in a scope with a local client.
+
+  The module's code loads a local client only through what the entrypoint
+  hands it with each call (entrypoint/handover.dang). An entrypoint the user
+  chose, a pinned version or a fork, may not send it, and generation cannot
+  tell, so the module would fail at its first call to the client. Replacing
+  the entrypoint would destroy a table the user wrote, so the choice is
+  theirs. Without a local client any entrypoint that runs the module will do.
+  """
+  let checkHandover(ws: Workspace!, scope: String!, clients: [ModuleSource!]!): Void {
+    let manifest = ManifestToml(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
+    let source = manifest.entrypointSource
+    if (manifest.entrypointKind == "dang" and source != sharedEntrypointSource) {
+      let local = clients.{{kind, moduleName}}
+        .filter { client => client.kind != ModuleSourceKind.GIT_SOURCE }
+        .map { client => client.moduleName }
+      if (local.length > 0) {
+        raise "dagger-module.toml names the entrypoint \"" + source + "\", which this SDK does not write, " +
+          "and the scope has local clients (" + local.join(", ") + "); a local client loads only through " +
+          "the clients the SDK's entrypoint hands the module with each call, so the module could not run. " +
+          "Remove the [entrypoint] table to run on the SDK's, \"" + sharedEntrypointSource + "\", or remove the local clients"
+      }
     }
     null
   }
