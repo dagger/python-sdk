@@ -686,7 +686,7 @@ skipped `dagger generate` is told why `dag` lost its API.
 | --- | --- | --- |
 | Type check | `py.typed` and full annotations. A removed or changed function is a type error after `dagger generate`. | No |
 | Import | The client passes its `CORE_DIGEST` and the installed core's digest to an SDK function. A mismatch raises `dagger.StaleClientError` (an `ImportError`) with "run `dagger generate`". While the SDK registers a module's types, it logs a warning instead, so a module with a self client can regenerate (7.3). The SDK receives two strings, so it does not import core. | No |
-| Load and query | A failed load raises `dagger.ClientLoadError` with the descriptor and the cause. A validation error naming a missing field, on a query that needs a descriptor, becomes `StaleClientError`. It must be the validator's own error: an internal error that merely quotes the phrase is the engine failing, not a stale client, and telling the user to regenerate would send them the wrong way. An engine/core mismatch is a warning in phase 1. | Yes |
+| Load and query | A failed load raises `dagger.ClientLoadError` with the descriptor and the cause. An engine below the floor, which has no `serveModule`, fails there too: the cause names the field, and it is never a `StaleClientError`, because regenerating cannot give an engine a field it lacks. Once the module is loaded, a validation error naming a missing field, on a query that needs a descriptor, becomes `StaleClientError`. It must be the validator's own error: an internal error that merely quotes the phrase is the engine failing, not a stale client, and telling the user to regenerate would send them the wrong way. An engine/core mismatch is a warning in phase 1. | Yes |
 
 A CI check that runs `dagger generate` and asserts no diff catches the rest.
 
@@ -828,10 +828,25 @@ Query.serveModule(address: String!, refPin: String): Void
 - A bare name is rejected, so a module cannot enumerate what its caller installed.
 - Both end in `asModule().serve()`.
 
-One call covers every client, so the descriptor keeps one shape: `ref` is the
-address, `pin` is `refPin`. Module code never touches `currentWorkspace`: the
-engine does that internally, which is what makes the call legitimate from a
-module once the guard on `currentWorkspace` lands.
+**The descriptor keeps one shape**: `ref` is the address, `pin` is `refPin`.
+Generated code never branches on which kind of reference it holds.
+
+**The SDK, however, sends one of two queries** [confident]. A module driven by a
+Dang entrypoint runs its Python in an ordinary nested client, which the engine
+gives no module context, so that process finds its workspace from its own
+container rather than from the user's. An absolute workspace path then resolves
+against a container and the load fails. The entrypoint therefore hands the
+module's real workspace to the process, and the SDK uses it:
+
+| The target | The query |
+| --- | --- |
+| Local, in a process an entrypoint handed a workspace | `node(id: <workspace>)` → `moduleSource(path:)` → `asModule` → `serve` |
+| Everything else | `serveModule(address, refPin)` |
+
+The branch lives in the load seam, `sdk/src/dagger/client/_load.py`, and nowhere
+else. It is temporary: a `serveModule` that takes a workspace would let the SDK
+name the workspace it means, and the two would collapse back into one. That is
+filed against the engine.
 
 **What the field still owes the caller's cache** [open]. A load at run time is
 invisible to the cache key of the call that performed it. So a caller keeps its
@@ -883,10 +898,13 @@ a name, every client regenerates rather than keeping the old name.
 
 - The design does not use `[[dependencies]]`, and it does not use
   `currentWorkspace` from module code.
-- Implementation can start now. A git client works on today's engines through
-  `moduleSource`, and moves to one call when the field lands.
-- Local-client end-to-end checks need an engine with the field.
-  `.dagger/modules/engine-e2e` must move to it.
+- The floor is released `v1.0.0-beta.14`, which has the field and drives Dang
+  entrypoints. The SDK's load path for engines without `serveModule` is gone, so
+  an older engine fails the load with `ClientLoadError` naming the missing
+  field — never with advice to regenerate, which could not help.
+- `entrypointClientCallCheck` runs a module through each entrypoint form,
+  calling a local client. Nothing did that before, which is why the entrypoint
+  defect above reached a user rather than a check.
 - A path in a descriptor is written against the workspace root, absolute
   [confident]. A module session resolves it against the same workspace, and
   `/../tmp` is normalised back inside it rather than escaping. Symlinks are not
@@ -1018,10 +1036,12 @@ Verified while building it, against a live engine:
 - A plain program, in a scope with no `[project]` table, calls a client through
   `dagger.connection()`. The engine is provisioned, the module is loaded, and
   the call returns.
-- A module's manifest names its runtime `[runtime] source = "python"`, which
-  means the engine's **builtin** Python SDK. A checkout under development must
-  be named by path, or it generates the new layout and the builtin runtime then
-  refuses it for want of `sdk/src/dagger/client/gen.py`.
+- **The SDK that generates a module must be the one that runs it.** A generated
+  manifest now names only a Dang entrypoint, so the danger is no longer the
+  builtin runtime but a *published* entrypoint older than the layout it is asked
+  to run: it refuses the module for want of `sdk/src/dagger/client/gen.py`. A
+  checkout under development therefore needs its own entrypoint reachable, and
+  an entrypoint source may name only a git ref or a path inside the module.
 - Core's digest does not depend on which clients are generated beside it. The
   digest comes from the client-facing schema. The module-facing schema gives a
   different digest, so generation must always read the same view.
@@ -1030,5 +1050,11 @@ Verified while building it, against a live engine:
   module-level `__getattr__` (PEP 562) removes it.
 - An engine reports an unknown field with a GraphQL validation error, with no
   path and with `extensions.code == "GRAPHQL_VALIDATION_FAILED"`. Checked on
-  beta.11 and beta.13. Only that exact signal means "the field is not there";
-  see section 10.
+  beta.11 and beta.13. Only that exact signal marks a stale client (section 10).
+  It no longer decides how a client loads: the floor is beta.14, which has
+  `serveModule`, and the load path for engines without it is gone.
+- A module driven by a Dang entrypoint runs its Python as an ordinary nested
+  client. The engine attaches module context only to execs it starts itself, so
+  that process reports `currentWorkspace` from its own container and no
+  `currentModule` at all. Whatever module context the code needs, the entrypoint
+  must hand over.
