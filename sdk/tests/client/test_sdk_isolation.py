@@ -134,10 +134,38 @@ def _generated_imports(source: str, module: str) -> list[tuple[int, str]]:
                 # A name the init provides may be generated; a submodule never is.
                 or (base == "dagger" and not _is_submodule(a.name))
             ]
+        elif isinstance(node, ast.Call) and (name := _literal_import(node, package)):
+            bad = [f"{_call_name(node)}({name!r})"] if _is_generated(name) else []
         else:
             continue
         found += [(node.lineno, stmt) for stmt in bad]
     return found
+
+
+def _call_name(call: ast.Call) -> str:
+    func = call.func
+    return func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+
+
+def _literal_import(call: ast.Call, package: str) -> str | None:
+    """The absolute target of ``import_module``/``__import__`` on a literal name.
+
+    A computed name can't be judged statically, so the rule stops at "no
+    static or literal-dynamic import of generated code"; the subprocess
+    import test is what catches the rest.
+    """
+    if _call_name(call) not in ("import_module", "__import__") or not call.args:
+        return None
+    name = call.args[0]
+    if not isinstance(name, ast.Constant) or not isinstance(name.value, str):
+        return None
+    anchor = next(
+        (k.value for k in call.keywords if k.arg == "package"),
+        call.args[1] if len(call.args) > 1 else None,
+    )
+    if isinstance(anchor, ast.Constant) and isinstance(anchor.value, str):
+        package = anchor.value
+    return importlib.util.resolve_name(name.value, package)
 
 
 def _is_package(module: str) -> bool:
@@ -167,11 +195,31 @@ def root_type():
     return Client
 """
 
+DYNAMIC_MUTATION = """
+def f():
+    from importlib import import_module
+    return import_module(".gen", __package__)
+"""
+
 
 @pytest.mark.parametrize(
     ("source", "module"),
     [
         pytest.param(LAZY_MUTATION, "dagger.client.base", id="lazy-relative"),
+        pytest.param(DYNAMIC_MUTATION, "dagger.client.base", id="dynamic-relative"),
+        pytest.param(
+            "import importlib\nimportlib.import_module('dagger_gen')\n",
+            "dagger.log",
+            id="dynamic-attribute",
+        ),
+        pytest.param(
+            "import_module('.gen', package='dagger.client')\n",
+            "dagger.log",
+            id="dynamic-package-kwarg",
+        ),
+        pytest.param(
+            "__import__('dagger.client.gen')\n", "dagger.log", id="dunder-import"
+        ),
         pytest.param("from . import gen\n", "dagger.client.base", id="from-dot"),
         pytest.param("from .. import gen\n", "dagger.client.sub.x", id="from-dotdot"),
         pytest.param(
@@ -222,6 +270,19 @@ def test_guard_rejects_generated_import(source: str, module: str):
         ),
         pytest.param("import dagger_gen_tools\n", "dagger.log", id="prefix-only"),
         pytest.param("import gen\n", "dagger.client.base", id="third-party-gen"),
+        pytest.param(
+            "import_module(name)\n", "dagger.client.base", id="computed-dynamic"
+        ),
+        pytest.param(
+            "import_module('.' + name, __package__)\n",
+            "dagger.client.base",
+            id="computed-relative",
+        ),
+        pytest.param(
+            "import_module('._core', __package__)\n",
+            "dagger.client.base",
+            id="dynamic-sibling",
+        ),
     ],
 )
 def test_guard_accepts_sdk_import(source: str, module: str):
