@@ -179,6 +179,22 @@ INVERSIONS = [
         'assert "Env.as_linter = _linter.as_linter  # type: ignore',
         'assert "Env.as_glow = _linter.as_linter  # type: ignore',
     ),
+    # A method of the global client never hides the Session it is.
+    Inversion(
+        PACKAGES + "test_global_client_refuses_a_core_field_that_hides_the_session",
+        'f"it would hide Session.{field}"',
+        'f"it would hide Query.{field}"',
+    ),
+    Inversion(
+        PACKAGES + "test_global_client_refuses_a_client_that_hides_the_session",
+        """'client "connect": it would hide Session.connect'""",
+        """'client "connect": it would hide Session.close'""",
+    ),
+    Inversion(
+        PACKAGES + "test_global_client_knows_every_name_of_a_session",
+        'if not n.startswith("__")} == SESSION_NAMES',
+        'if not n.startswith("__")} != SESSION_NAMES',
+    ),
     Inversion(
         PACKAGES + "test_global_client_is_temporary_and_says_so",
         'assert "global-client = true" in code',

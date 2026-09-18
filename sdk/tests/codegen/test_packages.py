@@ -11,6 +11,7 @@ from graphql import build_schema
 import dagger.client
 from codegen import cli, partition
 from codegen.packages import (
+    SESSION_NAMES,
     client_package,
     core_package,
     global_package,
@@ -954,6 +955,38 @@ def test_global_client_refuses_two_clients_that_become_one_package():
 
     with pytest.raises(ClientNameError, match='both become the package "my_linter"'):
         global_package(schemas)
+
+
+@pytest.mark.parametrize("field", ["close", "load", "execute"])
+def test_global_client_refuses_a_core_field_that_hides_the_session(field: str):
+    schema = _schema(Query=f"{field}: String!")
+
+    with pytest.raises(ClientError) as info:
+        global_package([schema])
+
+    assert str(info.value) == (
+        f'the global client cannot have a method for "Query.{field}" of core: '
+        f"it would hide Session.{field}"
+    )
+
+
+def test_global_client_refuses_a_client_that_hides_the_session():
+    schema = build_schema(_sdl() + _named("connect", "Connect", "connect"))
+
+    with pytest.raises(ClientError) as info:
+        global_package([schema])
+
+    assert str(info.value) == (
+        'the global client cannot have a method for "Query.connect" of the '
+        'client "connect": it would hide Session.connect'
+    )
+
+
+def test_global_client_knows_every_name_of_a_session():
+    # The generator cannot import the SDK, so it keeps its own list.
+    instance = Session(SharedConnection())
+
+    assert {n for n in dir(instance) if not n.startswith("__")} == SESSION_NAMES
 
 
 def test_global_client_with_no_client():
