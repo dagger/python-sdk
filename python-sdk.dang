@@ -297,14 +297,16 @@ type PythonSdk {
 
   """
   Refuse a manifest that cannot run the module, before anything is written: a
-  Dang entrypoint this SDK does not write, in a scope with a local client.
+  Dang entrypoint this SDK does not write, in a scope with a local client,
+  unless that entrypoint hands clients over the way this SDK's does.
 
   The module's code loads a local client only through what the entrypoint
   hands it with each call (entrypoint/handover.dang). An entrypoint the user
-  chose, a pinned version or a fork, may not send it, and generation cannot
-  tell, so the module would fail at its first call to the client. Replacing
-  the entrypoint would destroy a table the user wrote, so the choice is
-  theirs. Without a local client any entrypoint that runs the module will do.
+  chose, a pinned version or a fork, may not send it, and the module would
+  fail at its first call to the client. Replacing the entrypoint would
+  destroy a table the user wrote, so the choice is theirs; one of the choices
+  is to make their entrypoint hand clients over. Without a local client any
+  entrypoint that runs the module will do.
   """
   let checkHandover(ws: Workspace!, scope: String!, clients: [ModuleSource!]!): Void {
     let manifest = ManifestToml(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
@@ -313,14 +315,68 @@ type PythonSdk {
       let local = clients.{{kind, moduleName}}
         .filter { client => client.kind != ModuleSourceKind.GIT_SOURCE }
         .map { client => client.moduleName }
-      if (local.length > 0) {
+      if (local.length > 0 and handsOverClients(ws, scope, source) == false) {
         raise "dagger-module.toml names the entrypoint \"" + source + "\", which this SDK does not write, " +
           "and the scope has local clients (" + local.join(", ") + "); a local client loads only through " +
-          "the clients the SDK's entrypoint hands the module with each call, so the module could not run. " +
-          "Remove the [entrypoint] table to run on the SDK's, \"" + sharedEntrypointSource + "\", or remove the local clients"
+          "the clients an entrypoint hands the module with each call, and this one does not, so the module could not run. " +
+          "Either update the entrypoint to hand them over: carry this SDK's entrypoint/handover.dang in it unchanged, " +
+          "and add `clients: ClientHandover(workspace: workspace).clients.map { client => {{name: client.name, source: client.source}} }` " +
+          "to the request its call sends, as the SDK's own entrypoint/main.dang does; " +
+          "or remove the [entrypoint] table to run on the SDK's, \"" + sharedEntrypointSource + "\"; " +
+          "or remove the local clients"
       }
     }
     null
+  }
+
+  """
+  Whether an entrypoint hands clients over the way this SDK's does: it carries
+  this SDK's handover.dang unchanged, and another of its files calls it. Read
+  from where the engine reads the entrypoint; one that cannot be read does
+  not.
+  """
+  let handsOverClients(ws: Workspace!, scope: String!, source: String!): Boolean! {
+    handsOverClientsIn(entrypointDirectory(ws, scope, source)) rescue {
+      err: Error => false
+    }
+  }
+
+  let handsOverClientsIn(dir: Directory!): Boolean! {
+    let ours = currentModule.source.file("entrypoint/handover.dang").contents
+    let carried = dir.file("handover.dang").contents == ours
+    let calling = dir.entries
+      .filter { entry => entry.hasSuffix(".dang") and entry != "handover.dang" }
+      .filter { entry => dir.file(entry).contents.contains("ClientHandover(workspace: workspace).clients") }
+    carried and calling.length > 0
+  }
+
+  """
+  The directory an entrypoint source names, resolved as the engine resolves
+  it: a path in the module, an address, or a module reference.
+  """
+  let entrypointDirectory(ws: Workspace!, scope: String!, source: String!): Directory! {
+    if (isLocalEntrypoint(source)) {
+      ws.directory("/" + scopePath(scope, normalizePath(source)))
+    } else if (source.contains("://") == false and source.contains(":")) {
+      address(source).directory
+    } else {
+      let ref = moduleSource(source, disableFindUp: true, allowNotExists: true)
+      ref.contextDirectory.directory(ref.sourceRootSubpath)
+    }
+  }
+
+  """
+  The engine's rule: a path prefix or a dot-free first segment is local, a
+  URL or a host name is not.
+  """
+  let isLocalEntrypoint(source: String!): Boolean! {
+    if (source.hasPrefix(".") or source.hasPrefix("/")) {
+      true
+    } else if (source.contains(":")) {
+      false
+    } else {
+      (source.split("/")[0] ?? "").contains(".") == false
+    }
   }
 
   """

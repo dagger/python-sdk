@@ -1055,7 +1055,28 @@ type E2e {
     let ownWithClient = manifestWithClients(ws.withNewFile(manifestPath, ownPath), local) rescue {
       err: Error => err.message
     }
-    assertContainsAll(ownWithClient, ["./my-entrypoint", "does not write", "local clients (client-dep)", "Remove the [entrypoint] table"])
+    assertContainsAll(ownWithClient, [
+      "./my-entrypoint", "does not write", "local clients (client-dep)",
+      "update the entrypoint to hand them over", "entrypoint/handover.dang", "ClientHandover(workspace: workspace).clients",
+      "remove the [entrypoint] table", "remove the local clients",
+    ])
+    # A fork that does what the refusal asks is accepted, and kept as written.
+    let forkPath = "/" + tomlGenerateModulePath + "/my-entrypoint"
+    let handingFork = manifestWithClients(
+      ws.withNewFile(manifestPath, ownPath).withDirectory(forkPath, ws.directory("/entrypoint")),
+      local,
+    )
+    assertContains(handingFork, "source = \"./my-entrypoint\"", "a fork that hands clients over was refused or replaced: " + handingFork)
+    # Carrying the file is not enough: the fork must call it.
+    let idleFork = manifestWithClients(
+      ws.withNewFile(manifestPath, ownPath)
+        .withNewFile(forkPath + "/handover.dang", ws.file("/entrypoint/handover.dang").contents)
+        .withNewFile(forkPath + "/main.dang", "type Entrypoint {\n}\n"),
+      local,
+    ) rescue {
+      err: Error => err.message
+    }
+    assertContains(idleFork, "update the entrypoint to hand them over", "a fork that never calls the handover was accepted: " + idleFork)
     let pinnedShared = "dagger.io/sdk/python/entrypoint@v1.0.0"
     let pinnedWithClient = manifestWithClients(ws.withNewFile(manifestPath, head + "\n[entrypoint]\nkind = \"dang\"\nsource = \"" + pinnedShared + "\"\n"), local) rescue {
       err: Error => err.message

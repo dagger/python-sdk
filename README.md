@@ -77,10 +77,14 @@ pin a version of the shared entrypoint, point at a fork, or name one of its
 own. Generation replaces only the static entrypoint it writes itself, told by
 its source, `./sdk/entrypoint`. The manifest is read with a TOML parser, so
 quoting and key order are the user's. One exception is refused rather than kept: an
-entrypoint this SDK does not write, in a scope with a local client. A local
-client loads only through what the SDK's entrypoint hands the module (below),
-so generation stops and says so instead of writing a module that fails at its
-first call.
+entrypoint this SDK does not write, in a scope with a local client, that does
+not hand clients over. A local client loads only through what an entrypoint
+hands the module (below), so generation stops and says so instead of writing
+a module that fails at its first call. A fork hands them over by carrying
+`handover.dang` unchanged and sending
+`clients: ClientHandover(workspace: workspace).clients…` with each call, as
+`main.dang` does; generation reads the entrypoint where the engine does and
+accepts it then.
 
 Inside an entrypoint `currentModule` is the module it serves, so the
 entrypoint builds that module's container from `currentModule.source`, with
