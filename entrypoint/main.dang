@@ -31,9 +31,7 @@ type Entrypoint implements ModuleEntrypoint {
 
   The request and the result are the module's own JSON, so the entrypoint
   passes them through without reading them. The request also carries the
-  workspace: the module's code runs in an exec that the engine does not make
-  the module, so its own current workspace is the one found in its container,
-  and a client resolves a local target in this one instead.
+  module's declared local clients, never the workspace (see handover.dang).
   """
   pub call(
     workspace: Workspace!,
@@ -47,7 +45,9 @@ type Entrypoint implements ModuleEntrypoint {
       receiverValue: receiverValue,
       fnName: fnName,
       fnArgs: fnArgs,
-      workspace: (workspace.id :: String!),
+      clients: ClientHandover(workspace: workspace).clients.map { client =>
+        {{name: client.name, source: client.source}}
+      },
     }})
     let result = build.installed
       .withExec(

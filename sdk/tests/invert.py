@@ -215,37 +215,52 @@ INVERSIONS = [
         "assert is_load(load)\n    assert LINTER.ref in load",
         "assert is_load(load)\n    assert LINTER.ref not in load",
     ),
-    # Under a module entrypoint, a local target loads through the workspace
-    # the entrypoint handed over, and nothing else changes query.
+    # Under a module entrypoint, a local target loads through the source the
+    # entrypoint handed over for it, by name, and nothing else changes query.
     Inversion(
-        CLIENTS + "test_handed_workspace_serves_a_local_target_through_it",
+        CLIENTS + "test_handed_client_serves_a_local_target_by_name",
+        '"    ... on ModuleSource {\\n"',
         '"    ... on Workspace {\\n"',
-        '"    ... on Query {\\n"',
     ),
     Inversion(
-        CLIENTS + "test_handed_workspace_leaves_a_git_target_to_serve_module",
-        "assert handed_workspace not in load",
-        "assert handed_workspace in load",
+        CLIENTS + "test_handed_clients_leave_a_git_target_to_serve_module",
+        "assert handed_clients not in load",
+        "assert handed_clients in load",
     ),
     Inversion(
-        CLIENTS + "test_handed_workspace_failure_does_not_fall_back",
+        CLIENTS + "test_undeclared_local_client_fails_naming_it",
+        "assert not s.session.queries",
+        "assert s.session.queries",
+    ),
+    Inversion(
+        CLIENTS + "test_entrypoint_without_a_handover_fails_a_local_target",
+        'assert "handed over no clients" in str(info.value)',
+        'assert "handed over no clients" not in str(info.value)',
+    ),
+    Inversion(
+        CLIENTS + "test_handed_client_failure_does_not_fall_back",
         'assert "serveModule" not in load',
         'assert "serveModule" in load',
     ),
     Inversion(
-        CLIENTS + "test_without_a_handed_workspace_a_local_target_uses_serve_module",
+        CLIENTS + "test_outside_an_entrypoint_a_local_target_uses_serve_module",
         'assert "node(" not in load',
         'assert "node(" in load',
     ),
     Inversion(
-        DISPATCH + "test_command_hands_the_workspace_to_the_load",
-        "assert got == \"'d29ya3NwYWNl'\"",
+        DISPATCH + "test_command_hands_the_clients_to_the_load",
+        "assert got == \"{'linter': 'bW9kdWxlU291cmNl'}\"",
         'assert got == "None"',
     ),
     Inversion(
-        DISPATCH + "test_command_without_a_workspace_hands_none",
+        DISPATCH + "test_command_without_clients_is_still_under_an_entrypoint",
         'read_text()) == "None"',
         'read_text()) != "None"',
+    ),
+    Inversion(
+        DISPATCH + "test_command_refuses_malformed_clients",
+        'assert "clients the entrypoint handed over" in proc.stderr',
+        'assert "clients the entrypoint handed over" not in proc.stderr',
     ),
     # An engine below the floor fails the load; it is no stale client.
     Inversion(

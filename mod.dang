@@ -197,6 +197,7 @@ type Mod {
       .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput])
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
+      .withFile("handover.dang", currentModule.source.file("entrypoint/handover.dang"))
   }
 
   """

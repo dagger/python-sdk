@@ -83,16 +83,25 @@ module to describe itself (`python -m dagger.mod describe`) or to run one call
 (`python -m dagger.mod call`). The types it returns are rebuilt from that
 description in the engine's own session.
 
-Each call also carries the `workspace` the engine handed the entrypoint. The
-module's code runs in an exec the entrypoint starts, which the engine does not
-make the module: its own current workspace is the one found in its container.
-A client to a local module resolves its path in the handed workspace instead
-(`node(id:)` → `moduleSource` → `asModule` → `serve`); a git client goes
-through `serveModule`, as in a plain program.
+The module's code runs in an exec the entrypoint starts, which the engine does
+not make the module: its own current workspace is the one found in its
+container, so a client to a local module cannot resolve its path there. The
+entrypoint resolves the clients the caller's `dagger.toml` declares on the
+module's scope, and each call carries them by name, each as a module source
+over only the files the engine loaded for that client. A client to a local
+module loads through its entry (`node(id:)` → `asModule` → `serve`); a git
+client goes through `serveModule`, as in a plain program.
+
+The caller's workspace never reaches the module's code: an ID is a
+capability, and a module is third-party code. Not the workspace, and not the
+source `Workspace.moduleSource` returns either, because that one reloads its
+context from the workspace when asked for more files. A function that
+declares a `Workspace` parameter still gets one, because its caller passes it.
 
 | File | What it is |
 | --- | --- |
 | `main.dang` | the `ModuleEntrypoint`: `types` and `call` |
+| `handover.dang` | the declared clients each call carries; a static entrypoint carries a copy |
 | `build.dang` | the container build, generated from `runtime/build.dang` |
 
 `build.dang` is generated, not hand-edited: the engine copies only the `.dang`

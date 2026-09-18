@@ -1098,9 +1098,15 @@ type E2e {
   it from `dagger module init` to `dagger call`.
 
   Under an entrypoint a module's code is not the module to the engine, and
-  its own workspace is its container's: the client's target resolves only in
-  the workspace the entrypoint hands over, and the target's entrypoint,
+  its own workspace is its container's: the client's target resolves only
+  through what the entrypoint hands over, and the target's entrypoint,
   called from that process, finds its module only in its own source.
+
+  What it hands over is the declared client and never the caller's
+  workspace: the module's code tries every ID it holds against a file that
+  is only in the caller's workspace, and reads nothing. A function that
+  declares a Workspace parameter still gets the caller's, because the caller
+  passes it.
   """
   pub entrypointClientCallCheck(ws: Workspace!): Void @check {
     entrypointClientCall(ws, "shared", "Shared")
@@ -1124,12 +1130,21 @@ type E2e {
       "        return \"" + greeting + "\"\n"
     let callerSource =
       "from dagger import function, object_type\n" +
-      "from dagger_clients.ep_target_" + form + " import ep_target_" + form + "\n\n\n" +
+      "from dagger_clients.core import Workspace\n" +
+      "from dagger_clients.ep_target_" + form + " import ep_target_" + form + "\n\n" +
+      "from .reach import reach\n\n\n" +
       "@object_type\n" +
       "class EpCaller" + title + ":\n" +
       "    @function\n" +
       "    async def greeting(self) -> str:\n" +
-      "        return await ep_target_" + form + "().greeting()\n"
+      "        return await ep_target_" + form + "().greeting()\n\n" +
+      "    @function\n" +
+      "    async def reach(self) -> str:\n" +
+      "        await ep_target_" + form + "().greeting()\n" +
+      "        return await reach(\"" + callerSecretPath + "\")\n\n" +
+      "    @function\n" +
+      "    async def declared(self, ws: Workspace) -> str:\n" +
+      "        return await ws.file(\"/" + callerSecretPath + "\").contents()\n"
 
     let withTarget = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", target, "--path", targetPath] + static)
       .withNewFile(targetPath + "/src/ep_target_" + form + "/__init__.py", targetSource)
@@ -1143,6 +1158,7 @@ type E2e {
     # entrypoint generated with the client describes it.
     let withClient = cli(targetReady, ["module", "init", "python", "--auto-apply", "--name", caller, "--path", callerPath] + static)
       .withNewFile(callerPath + "/src/ep_caller_" + form + "/__init__.py", callerSource)
+      .withFile(callerPath + "/src/ep_caller_" + form + "/reach.py", ws.file("/" + fixtureRoot + "/handover/reach.py"))
       .withWorkdir(callerPath)
     let added = cli(withClient, ["module", "client", "add", "../" + target, "--sdk", "python", "--auto-apply"])
       .withWorkdir(playgroundRoot)
@@ -1153,8 +1169,22 @@ type E2e {
 
     let called = cli(callerReady, ["-m", callerPath, "call", "greeting"]).stdout
     assertContains(called, greeting, form + ": the module did not call its client: " + called)
+
+    let secret = "only in the caller's workspace, " + form
+    let withSecret = callerReady.withNewFile(callerSecretPath, secret)
+    let reached = cli(withSecret, ["-m", callerPath, "call", "reach"]).stdout
+    assertContains(reached, "reads=[]", form + ": module code read a caller file: " + reached)
+    assertNotContains(reached, secret, form + ": module code read a caller file: " + reached)
+    assertNotContains(reached, "held=0 ", form + ": the module held nothing to try, so this proves nothing: " + reached)
+    let declared = cli(withSecret, ["-m", callerPath, "call", "declared"]).stdout
+    assertContains(declared, secret, form + ": a declared Workspace parameter did not reach the caller's workspace: " + declared)
     null
   }
+
+  """
+  A file at the root of the caller's workspace, which no module is handed.
+  """
+  let callerSecretPath: String! = "review-secret.txt"
 
   """
   The first release that runs Dang entrypoints and serves serveModule, which

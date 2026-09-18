@@ -23,16 +23,16 @@ type Entrypoint implements ModuleEntrypoint {
     fnName: String!,
     fnArgs: JSON!,
   ): JSON! {
-    # The workspace goes with the call: the module's code runs in an exec that
-    # the engine does not make the module, so its own current workspace is
-    # the one found in its container, and a client resolves a local target in
-    # this one instead.
+    # The module's declared local clients go with the call, never the
+    # workspace (see handover.dang).
     let request = JSON.encode({{
       receiverType: receiverType,
       receiverValue: receiverValue,
       fnName: fnName,
       fnArgs: fnArgs,
-      workspace: (workspace.id :: String!),
+      clients: ClientHandover(workspace: workspace).clients.map { client =>
+        {{name: client.name, source: client.source}}
+      },
     }})
     let result = runtime
       .withExec(["python", "-m", "dagger.mod", "call", "--output", "/dagger/result.json"], stdin: request, experimentalPrivilegedNesting: true)
