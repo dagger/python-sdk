@@ -18,9 +18,12 @@
 # at 284cd849, is the last command this script prints rather than runs.
 #
 # Why each module's manifest is rewritten: `[runtime] source = "python"` means
-# the *builtin* Python SDK of the engine, not this checkout. A module that must
-# run on this working tree names the runtime by path instead. A user of a
-# published SDK never does this.
+# the *builtin* Python SDK of the engine, not this checkout, even in a workspace
+# that names its own SDK. So `dagger module init python` generates with this
+# checkout and then the builtin runs the module, which fails on the layout it
+# did not write. A module that must run on this working tree names the runtime
+# by path instead. A user of a published SDK never does this.
+# See hack/designs/2026-09-18-workspace-sdk-runtime.md.
 set -eu
 
 # TRY_SDK runs the walkthrough on another checkout, a branch under review say.
