@@ -193,7 +193,7 @@ type Mod {
   let entrypointDir(generated: Workspace!): Directory! {
     pythonSdkRuntime
       .moduleRuntime(modSource: staging(generated).moduleSource("/" + rootPath), introspectionJson: null)
-      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--path", rootPath, "--output", entrypointOutput])
+      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput])
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
   }

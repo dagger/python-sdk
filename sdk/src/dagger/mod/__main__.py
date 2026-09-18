@@ -28,9 +28,6 @@ def main(argv: list[str] | None = None) -> int:
         help="render the static entrypoint of the module in the current directory",
     )
     entrypoint.add_argument("--name", required=True, help="module name")
-    entrypoint.add_argument(
-        "--path", required=True, help="module directory, relative to the workspace"
-    )
     entrypoint.add_argument("--output", required=True, type=pathlib.Path)
     entrypoint.set_defaults(run=_entrypoint)
 
@@ -70,7 +67,6 @@ def _entrypoint(args: argparse.Namespace) -> None:
     write_entrypoint(
         mod.describe(),
         name=args.name,
-        path=args.path,
         root=pathlib.Path.cwd(),
         output=args.output,
     )

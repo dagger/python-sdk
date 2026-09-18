@@ -41,14 +41,13 @@ def write_entrypoint(
     desc: ModuleDescription,
     *,
     name: str,
-    path: str,
     root: pathlib.Path,
     output: pathlib.Path,
 ) -> None:
     """Write types.dang and main.dang for the module at root."""
     output.mkdir(parents=True, exist_ok=True)
     (output / "types.dang").write_text(render_types(desc))
-    (output / "main.dang").write_text(render_main(name, path, source_files(root)))
+    (output / "main.dang").write_text(render_main(name, source_files(root)))
 
 
 def source_files(root: pathlib.Path) -> list[SourceFile]:
@@ -90,8 +89,7 @@ def render_types(desc: ModuleDescription) -> str:
     return "\n".join(lines)
 
 
-def render_main(name: str, path: str, files: list[SourceFile]) -> str:
-    _check_path(path)
+def render_main(name: str, files: list[SourceFile]) -> str:
     file_lines = "".join(
         f"    SourceFile(path: {_quote(f.path)}, digest: {_quote(f.digest)}),\n"
         for f in files
@@ -99,17 +97,9 @@ def render_main(name: str, path: str, files: list[SourceFile]) -> str:
     return MAIN_TEMPLATE.format(
         header=HEADER,
         name=_quote(name),
-        path=_quote(path),
         files=file_lines,
         skipped=", ".join(_quote(d) for d in sorted(SKIPPED_DIRS)),
     )
-
-
-def _check_path(path: str) -> None:
-    parts = pathlib.PurePosixPath(path).parts
-    if pathlib.PurePosixPath(path).is_absolute() or ".." in parts:
-        msg = f"module path must be relative to the workspace and not escape it: {path}"
-        raise BadUsageError(msg)
 
 
 def _object(obj: ObjectDescription) -> list[str]:
@@ -234,7 +224,6 @@ def _indent(lines: list[str], width: int) -> list[str]:
 MAIN_TEMPLATE = """{header}
 type Entrypoint implements ModuleEntrypoint {{
   let moduleName: String! = {name}
-  let modulePath: String! = {path}
   let skippedDirs: [String!]! = [{skipped}]
   let sourceFiles: [SourceFile!]! = [
 {files}  ]
@@ -250,43 +239,46 @@ type Entrypoint implements ModuleEntrypoint {{
     fnName: String!,
     fnArgs: JSON!,
   ): JSON! {{
+    # The workspace goes with the call: the module's code runs in an exec that
+    # the engine does not make the module, so its own current workspace is
+    # the one found in its container, and a client resolves a local target in
+    # this one instead.
     let request = JSON.encode({{{{
       receiverType: receiverType,
       receiverValue: receiverValue,
       fnName: fnName,
       fnArgs: fnArgs,
+      workspace: (workspace.id :: String!),
     }}}})
-    let result = runtime(workspace)
+    let result = runtime
       .withExec(["python", "-m", "dagger.mod", "call", "--output", "/dagger/result.json"], stdin: request, experimentalPrivilegedNesting: true)
       .file("/dagger/result.json")
       .contents
     (result :: JSON!)
   }}
 
-  let runtime(workspace: Workspace!): Container! {{
-    let module = workspace.directory(if (modulePath == ".") {{ "/" }} else {{ "/" + modulePath }})
-    if (module.exists("pyproject.toml") == false) {{
-      raise "module \\"" + moduleName + "\\" was generated at \\"" + modulePath + "\\" and is not there; run `dagger generate` after moving it"
-    }} else {{
-      let changed = sourceFiles.filter {{ f =>
-        if (f.digest == "") {{
-          module.exists(f.path)
-        }} else {{
-          module.exists(f.path) == false or module.file(f.path).digest(excludeMetadata: true) != f.digest
-        }}
-      }}.map {{ f => f.path }}
-      let added = module.glob("**/*.py").filter {{ p =>
-        isSource(p) and sourceFiles.filter {{ f => f.path == p }}.length == 0
-      }}
-      if ((changed + added).length > 0) {{
-        raise "module \\"" + moduleName + "\\" changed since its entrypoint was generated (" + (changed + added).join(", ") + "); run `dagger generate`"
+  # The module's own source, not the workspace the engine hands over: that is
+  # the caller's, which holds the module only when the module sits in it.
+  let runtime: Container! {{
+    let module = currentModule.source
+    let changed = sourceFiles.filter {{ f =>
+      if (f.digest == "") {{
+        module.exists(f.path)
       }} else {{
-        PythonModuleBuild(
-          contextDir: workspace.directory("/", include: [if (modulePath == ".") {{ "**" }} else {{ modulePath + "/**" }}], exclude: ["**/.venv", "**/__pycache__"]),
-          subPath: modulePath,
-          moduleName: moduleName,
-        ).installed
+        module.exists(f.path) == false or module.file(f.path).digest(excludeMetadata: true) != f.digest
       }}
+    }}.map {{ f => f.path }}
+    let added = module.glob("**/*.py").filter {{ p =>
+      isSource(p) and sourceFiles.filter {{ f => f.path == p }}.length == 0
+    }}
+    if ((changed + added).length > 0) {{
+      raise "module \\"" + moduleName + "\\" changed since its entrypoint was generated (" + (changed + added).join(", ") + "); run `dagger generate`"
+    }} else {{
+      PythonModuleBuild(
+        contextDir: directory.withDirectory(".", module, exclude: ["**/.venv", "**/__pycache__"]),
+        subPath: ".",
+        moduleName: moduleName,
+      ).installed
     }}
   }}
 

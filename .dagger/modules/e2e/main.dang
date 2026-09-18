@@ -1193,8 +1193,11 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
-      "let modulePath: String! = \"" + scope + "\"",
+      "workspace: (workspace.id :: String!)",
+      "let module = currentModule.source",
     ])
+    # Found through its own source, so a moved module needs no regeneration.
+    assertNotContains(main, "modulePath", "the entrypoint still finds the module through the workspace")
     ["pyproject.toml", "src/static_init/__init__.py"].each { path =>
       let digest = changes.after.directory(scope).file(path).digest(excludeMetadata: true)
       assertContains(main, "SourceFile(path: \"" + path + "\", digest: \"" + digest + "\")", "the baked digest of " + path + " is not the engine's")
