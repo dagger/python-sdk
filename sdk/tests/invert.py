@@ -117,6 +117,17 @@ INVERSIONS = [
         'assert _run(BROKEN_GLOBAL_CLIENT, tmp_path) == "dagger_clients.gone\\n"',
         'assert _run(BROKEN_GLOBAL_CLIENT, tmp_path) == "Session\\n"',
     ),
+    # Bindings an earlier version left in dagger_gen are named, not loaded.
+    Inversion(
+        PACKAGE + "test_legacy_bindings_are_named_not_loaded",
+        '"SDK, and they are no longer loaded. Run `dagger generate`.\\n"',
+        '"SDK, and they are no longer loaded. Run `dagger develop`.\\n"',
+    ),
+    Inversion(
+        PACKAGE + "test_no_legacy_bindings_no_warning",
+        'assert _run(IMPORT_WARNINGS) == ""',
+        'assert _run(IMPORT_WARNINGS) != ""',
+    ),
     Inversion(
         PACKAGE + "test_connection_yields_the_global_client",
         "assert session is dagger.dag",

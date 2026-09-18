@@ -134,13 +134,13 @@ NO_GENERATED_CODE = """
 
     class Absent(importlib.abc.MetaPathFinder):
         def find_spec(self, name, path=None, target=None):
-            generated = ("dagger_clients", "dagger_gen", "dagger_global")
-            if name.partition(".")[0] in generated:
-                raise ModuleNotFoundError(name, name=name)
             if name == "dagger.client.gen":
                 raise RuntimeError("the legacy bindings were imported")
 
     sys.meta_path.insert(0, Absent())
+    # Absent both to an import and to find_spec, whatever is installed.
+    for generated in ("dagger_clients", "dagger_gen", "dagger_global"):
+        sys.modules[generated] = None
 
     import dagger
 
@@ -266,6 +266,33 @@ def test_global_client_that_cannot_import_is_not_skipped(tmp_path: pathlib.Path)
     (tmp_path / "dagger_global/__init__.py").write_text("import dagger_clients.gone\n")
 
     assert _run(BROKEN_GLOBAL_CLIENT, tmp_path) == "dagger_clients.gone\n"
+
+
+IMPORT_WARNINGS = """
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        import dagger
+
+    for w in caught:
+        if "dagger" in str(w.message):
+            print(w.category.__name__, w.message)
+"""
+
+
+def test_legacy_bindings_are_named_not_loaded(tmp_path: pathlib.Path):
+    legacy = tmp_path / "dagger_gen.py"
+    legacy.write_text("raise AssertionError('the legacy bindings were loaded')\n")
+
+    assert _run(IMPORT_WARNINGS, tmp_path) == (
+        f"UserWarning {legacy} holds bindings from an earlier version of the "
+        "SDK, and they are no longer loaded. Run `dagger generate`.\n"
+    )
+
+
+def test_no_legacy_bindings_no_warning():
+    assert _run(IMPORT_WARNINGS) == ""
 
 
 CONNECTION_WITH_GLOBAL_CLIENT = """

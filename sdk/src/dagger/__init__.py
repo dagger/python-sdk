@@ -1,8 +1,10 @@
 import contextlib
 import functools as _functools
 import importlib as _importlib
+import importlib.util as _importlib_util
 import types as _types
 import typing as _typing
+import warnings as _warnings
 
 # Make sure to place exceptions first as they're dependencies of other imports.
 from dagger._exceptions import *
@@ -52,6 +54,16 @@ def _global_dag() -> Session | None:
 
 
 _sessions.set_default_finder(_global_dag)
+
+# An earlier version star-imported its one-file bindings from here. Found
+# only, never loaded: without this, dag just loses its API with no word why.
+if (_legacy := _importlib_util.find_spec("dagger_gen")) is not None:
+    _warnings.warn(
+        f"{_legacy.origin} holds bindings from an earlier version of the SDK, "
+        "and they are no longer loaded. Run `dagger generate`.",
+        stacklevel=2,
+    )
+del _legacy
 
 # Module support (only makes sense in a module runtime container)
 with contextlib.suppress(ModuleNotFoundError):
