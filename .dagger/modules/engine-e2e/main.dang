@@ -1,9 +1,9 @@
 """
-Checks the Python SDK against the v1.0.0-beta.13 engine, pinned by commit.
+Checks the Python SDK against a development engine from dagger main, pinned by commit.
 Keep engineCommit and the engine-dev dependency in dagger-module.toml aligned.
 """
 type EngineE2e {
-  let engineCommit: String! = "6bf59d50654ce9244ebeee1cc090b7dce3fe3083"
+  let engineCommit: String! = "284cd849d39a66ee2da8c9800aa4f791844770f0"
   let modulePath: String! = ".dagger/modules/sdk-smoke"
 
   let assert(condition: Boolean!, message: String!): Void {
