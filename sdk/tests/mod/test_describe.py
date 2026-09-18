@@ -6,8 +6,9 @@ from typing import Annotated
 import pytest
 from typing_extensions import Doc, Self
 
-import dagger
-from dagger import DefaultPath, Ignore, Name, dag
+from dagger import DefaultPath, Ignore, Name
+from dagger.client import gen
+from dagger.client.gen import dag
 from dagger.mod import Module
 from dagger.mod._converter import to_typedef, typedef_from
 from dagger.mod._describe import TypeRef, describe_type
@@ -43,7 +44,7 @@ def mod() -> Module:
     class Main:
         """The main object."""
 
-        source: dagger.Directory
+        source: gen.Directory
         greeting: str = m.field(default="hello")
         count: Annotated[int, Doc("How many")] = m.field(default=1, name="howMany")
         extra: InitVar[str] = ""
@@ -63,7 +64,7 @@ def mod() -> Module:
 
         @m.function
         def helpers(
-            self, src: Annotated[dagger.Directory, DefaultPath("."), Ignore([".venv"])]
+            self, src: Annotated[gen.Directory, DefaultPath("."), Ignore([".venv"])]
         ) -> list[Helper]: ...
 
         @m.function
@@ -76,7 +77,7 @@ def mod() -> Module:
         def greeter(self, g: Greeter) -> Greeter: ...
 
         @m.function(deprecated="use shout")
-        def old(self, p: dagger.Platform) -> dagger.JSON: ...
+        def old(self, p: gen.Platform) -> gen.JSON: ...
 
         make_helper = m.function()(Helper)
 
@@ -211,7 +212,7 @@ def test_module_materialisation(selections):
             """Say hello."""
             return who or self.name
 
-    kind = dagger.TypeDefKind.STRING_KIND
+    kind = gen.TypeDefKind.STRING_KIND
     string = dag.type_def().with_kind(kind)
     expected = dag.module().with_object(
         dag.type_def()
@@ -224,7 +225,7 @@ def test_module_materialisation(selections):
                 "who",
                 dag.type_def().with_optional(True).with_kind(kind).with_optional(True),
                 description=None,
-                default_value=dagger.JSON("null"),
+                default_value=gen.JSON("null"),
                 default_path=None,
                 default_address=None,
                 ignore=None,
@@ -238,7 +239,7 @@ def test_module_materialisation(selections):
                 "name",
                 string,
                 description=None,
-                default_value=dagger.JSON('"foo"'),
+                default_value=gen.JSON('"foo"'),
                 default_path=None,
                 default_address=None,
                 ignore=None,

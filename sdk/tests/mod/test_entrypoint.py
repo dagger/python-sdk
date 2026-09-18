@@ -10,8 +10,8 @@ from typing import Annotated
 import pytest
 from typing_extensions import Doc, Self
 
-import dagger
 from dagger import DefaultPath, Ignore, Name
+from dagger.client import gen
 from dagger.mod import Module
 from dagger.mod._entrypoint import (
     _quote,
@@ -55,7 +55,7 @@ def mod() -> Module:
     class Main:
         """The main object."""
 
-        source: dagger.Directory
+        source: gen.Directory
         greeting: str = m.field(default="hello")
         count: Annotated[int, Doc("How many")] = m.field(default=1, name="howMany")
 
@@ -73,7 +73,7 @@ def mod() -> Module:
 
         @m.function
         def helpers(
-            self, src: Annotated[dagger.Directory, DefaultPath("."), Ignore([".venv"])]
+            self, src: Annotated[gen.Directory, DefaultPath("."), Ignore([".venv"])]
         ) -> list[Helper]: ...
 
         @m.function
@@ -83,7 +83,7 @@ def mod() -> Module:
         def greeter(self, g: Greeter) -> Greeter: ...
 
         @m.function(deprecated="use container")
-        def old(self, p: dagger.Platform) -> dagger.JSON: ...
+        def old(self, p: gen.Platform) -> gen.JSON: ...
 
     return m
 

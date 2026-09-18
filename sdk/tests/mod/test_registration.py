@@ -5,7 +5,8 @@ import pytest
 from typing_extensions import Doc, Self
 
 import dagger
-from dagger import dag
+from dagger.client import gen
+from dagger.client.gen import dag
 from dagger.mod import Module
 from dagger.mod._converter import to_typedef
 from dagger.mod._exceptions import BadUsageError
@@ -188,7 +189,7 @@ def test_external_constructor_doc():
         for param in fn.parameters.values():
             assert param.name == "foo"
             assert param.doc == "a foo walks into a bar"
-            assert param.default_value == dagger.JSON('"bar"')
+            assert param.default_value == gen.JSON('"bar"')
 
 
 def test_external_alt_constructor_doc():
@@ -221,7 +222,7 @@ def test_void_return_type(selections):
     func = mod.get_object("Test").functions["void"]
     assert func.return_type is None
     assert selections(to_typedef(func.return_type)) == selections(
-        dag.type_def().with_optional(True).with_kind(dagger.TypeDefKind.VOID_KIND)
+        dag.type_def().with_optional(True).with_kind(gen.TypeDefKind.VOID_KIND)
     )
 
 

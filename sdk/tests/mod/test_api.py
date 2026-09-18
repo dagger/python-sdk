@@ -2,13 +2,13 @@
 
 import pytest
 
-import dagger
-from dagger import dag
+from dagger.client import gen
 from dagger.client._session import SharedConnection
+from dagger.client.gen import dag
 from dagger.mod import _api
 
-Kind = dagger.TypeDefKind
-Policy = dagger.FunctionCachePolicy
+Kind = gen.TypeDefKind
+Policy = gen.FunctionCachePolicy
 
 
 def string(api):
@@ -21,7 +21,7 @@ def func(api):
 
 
 def json(api, value: str):
-    return value if api is _api else dagger.JSON(value)
+    return value if api is _api else gen.JSON(value)
 
 
 TYPE_DEF_CASES = {
@@ -152,7 +152,7 @@ async def _drive(api, session: FakeSession, value) -> list[str]:
 @pytest.mark.anyio
 async def test_function_call_queries_match_generated_bindings(session: FakeSession):
     raw = await _drive(_api, session, '"hi"')
-    generated = await _drive(dag, session, dagger.JSON('"hi"'))
+    generated = await _drive(dag, session, gen.JSON('"hi"'))
 
     assert raw == generated
     assert 'returnValue(value: "\\"hi\\"")' in raw[3]
