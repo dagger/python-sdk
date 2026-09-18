@@ -9,8 +9,9 @@ from typing import Any
 
 import anyio
 
-import dagger
 from dagger import telemetry
+from dagger._exceptions import QueryError
+from dagger.client._session import mark_module_runtime
 from dagger.mod._exceptions import ModuleError
 
 logger = logging.getLogger(__package__)
@@ -18,6 +19,7 @@ logger = logging.getLogger(__package__)
 
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return the exit status."""
+    mark_module_runtime()
     parser = argparse.ArgumentParser(prog="python -m dagger.mod")
     commands = parser.add_subparsers(required=True)
 
@@ -26,9 +28,6 @@ def main(argv: list[str] | None = None) -> int:
         help="render the static entrypoint of the module in the current directory",
     )
     entrypoint.add_argument("--name", required=True, help="module name")
-    entrypoint.add_argument(
-        "--path", required=True, help="module directory, relative to the workspace"
-    )
     entrypoint.add_argument("--output", required=True, type=pathlib.Path)
     entrypoint.set_defaults(run=_entrypoint)
 
@@ -49,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         args.run(args)
-    except (ModuleError, dagger.QueryError) as e:
+    except (ModuleError, QueryError) as e:
         logger.error(str(e))  # noqa: TRY400 - the message is the whole story
         return 2
     except Exception:
@@ -59,24 +58,29 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _entrypoint(args: argparse.Namespace) -> None:
+    from dagger.client._descriptor import registering_types
     from dagger.mod._entrypoint import write_entrypoint
     from dagger.mod.cli import load_module
 
+    with registering_types():
+        mod = load_module()
     write_entrypoint(
-        load_module().describe(),
+        mod.describe(),
         name=args.name,
-        path=args.path,
         root=pathlib.Path.cwd(),
         output=args.output,
     )
 
 
 def _describe(args: argparse.Namespace) -> None:
+    from dagger.client._descriptor import registering_types
     from dagger.mod._describe import describe_json
     from dagger.mod.cli import load_module
 
+    with registering_types():
+        mod = load_module()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(describe_json(load_module().describe()))
+    args.output.write_text(describe_json(mod.describe()))
 
 
 def _call(args: argparse.Namespace) -> None:
@@ -91,8 +95,19 @@ def _call(args: argparse.Namespace) -> None:
 
 
 async def _dispatch(request: dict[str, Any]) -> Any:
+    from dagger.client._load import parse_handed_clients, use_entrypoint_clients
+    from dagger.mod._exceptions import InvalidInputError
     from dagger.mod.cli import load_module
 
+    # The module's declared local clients, which the entrypoint resolved and
+    # this process cannot. Before the user's code is imported, so nothing it
+    # starts can load without them.
+    try:
+        clients = parse_handed_clients(request.get("clients"))
+    except (TypeError, KeyError, ValueError) as e:
+        msg = f"Failed to read the clients the entrypoint handed over: {e}"
+        raise InvalidInputError(msg) from e
+    use_entrypoint_clients(clients)
     return await load_module().dispatch(request)
 
 

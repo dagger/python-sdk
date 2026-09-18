@@ -16,9 +16,9 @@ from cattrs.preconf import is_primitive_enum
 from cattrs.preconf.json import JsonConverter
 from typing_extensions import dataclass_transform, overload
 
-import dagger
-from dagger import dag
+from dagger._exceptions import QueryError
 from dagger.client._core import configure_converter_enum
+from dagger.mod import _api
 from dagger.mod._converter import make_converter, typedef_from
 from dagger.mod._describe import (
     ArgumentDescription,
@@ -98,7 +98,7 @@ class Module:
         return self.main_cls is other.cls
 
     async def serve(self):
-        if await dag.current_function_call().parent_name():
+        if await _api.current_function_call().parent_name():
             result = await self.invoke()
         else:
             try:
@@ -122,7 +122,7 @@ class Module:
                 textwrap.shorten(repr(output), 144),
             )
 
-        await dag.current_function_call().return_value(dagger.JSON(output))
+        await _api.current_function_call().return_value(output)
 
     async def register(self):
         """Register the module and its types with the Dagger API."""
@@ -174,7 +174,7 @@ class Module:
 
         This includes getting the call context from the API and deserializing data.
         """
-        fn_call = dag.current_function_call()
+        fn_call = _api.current_function_call()
         parent_name = await fn_call.parent_name()
 
         if not parent_name:
@@ -202,19 +202,15 @@ class Module:
 
         inputs = {}
         for arg in input_args:
-            # NB: These are already loaded by `input_args`,
-            # the await just returns the cached value.
-            arg_name = await arg.name()
-            arg_value = await arg.value()
             try:
                 # Cattrs can decode JSON strings but use `json` directly
                 # for more granular control over the error.
-                inputs[arg_name] = json.loads(arg_value)
-            except ValueError as e:
+                inputs[arg.name] = json.loads(arg.value)
+            except ValueError as e:  # noqa: PERF203
                 logger.exception("Failed to decode JSON input value")
-                msg = f"Unable to decode input argument '{arg_name}'"
+                msg = f"Unable to decode input argument '{arg.name}'"
                 extra = {
-                    "json_value": arg_value,
+                    "json_value": arg.value,
                 }
                 raise InvalidInputError(msg, extra=extra) from e
 
@@ -359,7 +355,7 @@ class Module:
         except FunctionError:
             # Escape hatch to fully control logging from user code.
             raise
-        except dagger.QueryError as e:
+        except QueryError as e:
             tb = e.__traceback__
             # Exclude the line in "try" above
             if tb:
@@ -1051,8 +1047,8 @@ def _describe_enum(name: str, cls: type[enum.Enum]) -> EnumDescription:
     return EnumDescription(name, get_doc(cls), tuple(members))
 
 
-def _module_from(desc: ModuleDescription) -> dagger.Module:
-    mod = dag.module()
+def _module_from(desc: ModuleDescription) -> _api.Module:
+    mod = _api.module()
     for obj in desc.objects:
         if obj.name == desc.main_object and desc.description:
             mod = mod.with_description(desc.description)
@@ -1065,8 +1061,8 @@ def _module_from(desc: ModuleDescription) -> dagger.Module:
     return mod
 
 
-def _object_from(obj: ObjectDescription) -> dagger.TypeDef:
-    type_def = dag.type_def()
+def _object_from(obj: ObjectDescription) -> _api.TypeDef:
+    type_def = _api.type_def()
     if obj.interface:
         type_def = type_def.with_interface(obj.name, description=obj.description)
     else:
@@ -1089,19 +1085,16 @@ def _object_from(obj: ObjectDescription) -> dagger.TypeDef:
     return type_def
 
 
-def _function_from(func: FunctionDescription) -> dagger.Function:  # noqa: C901
-    func_def = dag.function(func.name, typedef_from(func.returns))
+def _function_from(func: FunctionDescription) -> _api.Function:  # noqa: C901
+    func_def = _api.function(func.name, typedef_from(func.returns))
     if func.description:
         func_def = func_def.with_description(func.description)
     if func.cache == "never":
-        func_def = func_def.with_cache_policy(dagger.FunctionCachePolicy.Never)
+        func_def = func_def.with_cache_policy("Never")
     elif func.cache == "session":
-        func_def = func_def.with_cache_policy(dagger.FunctionCachePolicy.PerSession)
+        func_def = func_def.with_cache_policy("PerSession")
     elif func.cache:
-        func_def = func_def.with_cache_policy(
-            dagger.FunctionCachePolicy.Default,
-            time_to_live=func.cache,
-        )
+        func_def = func_def.with_cache_policy("Default", time_to_live=func.cache)
     if func.deprecated:
         func_def = func_def.with_deprecated(reason=func.deprecated)
     if func.check:
@@ -1120,11 +1113,7 @@ def _function_from(func: FunctionDescription) -> dagger.Function:  # noqa: C901
             arg.name,
             arg_def,
             description=arg.description,
-            default_value=(
-                dagger.JSON(arg.default_value)
-                if arg.default_value is not None
-                else None
-            ),
+            default_value=arg.default_value,
             default_path=arg.default_path,
             default_address=arg.default_address,
             ignore=list(arg.ignore) if arg.ignore is not None else None,
@@ -1133,8 +1122,8 @@ def _function_from(func: FunctionDescription) -> dagger.Function:  # noqa: C901
     return func_def
 
 
-def _enum_from(enum_desc: EnumDescription) -> dagger.TypeDef:
-    enum_def = dag.type_def().with_enum(
+def _enum_from(enum_desc: EnumDescription) -> _api.TypeDef:
+    enum_def = _api.type_def().with_enum(
         enum_desc.name, description=enum_desc.description
     )
     for member in enum_desc.members:

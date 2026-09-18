@@ -65,6 +65,26 @@ func getUseUv(doc map[string]any) (value bool, ok bool) {
 	return value, ok
 }
 
+// getMembers lists the [tool.uv.workspace] members uv reads, one a line.
+// What is not a string, such as a nested array, is not a member.
+func getMembers(doc map[string]any) string {
+	members, _ := table(table(table(doc, "tool"), "uv"), "workspace")["members"].([]any)
+	var out strings.Builder
+	for _, m := range members {
+		if s, ok := m.(string); ok {
+			out.WriteString(s + "\n")
+		}
+	}
+	return out.String()
+}
+
+// getGlobalClient reports the [tool.dagger].global-client flag and whether it
+// was set at all, like getUseUv.
+func getGlobalClient(doc map[string]any) (value bool, ok bool) {
+	value, ok = table(table(doc, "tool"), "dagger")["global-client"].(bool)
+	return value, ok
+}
+
 func getBaseImage(doc map[string]any) string {
 	s, _ := table(table(doc, "tool"), "dagger")["base-image"].(string)
 	return s

@@ -5,7 +5,8 @@ import pytest
 from typing_extensions import Doc, Self
 
 import dagger
-from dagger import dag
+from dagger.client import gen
+from dagger.client.gen import dag
 from dagger.mod import Module
 from dagger.mod._converter import to_typedef
 from dagger.mod._exceptions import BadUsageError
@@ -188,7 +189,7 @@ def test_external_constructor_doc():
         for param in fn.parameters.values():
             assert param.name == "foo"
             assert param.doc == "a foo walks into a bar"
-            assert param.default_value == dagger.JSON('"bar"')
+            assert param.default_value == gen.JSON('"bar"')
 
 
 def test_external_alt_constructor_doc():
@@ -210,7 +211,7 @@ def test_external_alt_constructor_doc():
     assert mod.get_object("Test").functions["external"].doc == "Factory constructor."
 
 
-def test_void_return_type():
+def test_void_return_type(selections):
     mod = Module()
 
     @mod.object_type
@@ -220,13 +221,13 @@ def test_void_return_type():
 
     func = mod.get_object("Test").functions["void"]
     assert func.return_type is None
-    assert to_typedef(func.return_type) == dag.type_def().with_optional(True).with_kind(
-        dagger.TypeDefKind.VOID_KIND
+    assert selections(to_typedef(func.return_type)) == selections(
+        dag.type_def().with_optional(True).with_kind(gen.TypeDefKind.VOID_KIND)
     )
 
 
 @pytest.mark.anyio
-async def test_self_return_type():
+async def test_self_return_type(selections):
     mod = Module()
 
     @mod.object_type
@@ -245,5 +246,7 @@ async def test_self_return_type():
     assert iden.return_type is Test
     assert seq.return_type == list[Test]
     expected = dag.type_def().with_object("Test")
-    assert to_typedef(iden.return_type) == expected
-    assert to_typedef(seq.return_type) == dag.type_def().with_list_of(expected)
+    assert selections(to_typedef(iden.return_type)) == selections(expected)
+    assert selections(to_typedef(seq.return_type)) == selections(
+        dag.type_def().with_list_of(expected)
+    )

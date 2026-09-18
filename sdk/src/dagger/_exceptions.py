@@ -1,7 +1,10 @@
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cattrs
+
+if TYPE_CHECKING:
+    from dagger.client._descriptor import Target
 
 
 class VersionMismatch(Warning):
@@ -32,6 +35,21 @@ class TransportError(ClientError):
 
 class InvalidQueryError(ClientError):
     """Misuse of the query builder."""
+
+
+class ClientLoadError(ClientError):
+    """The module a generated client targets could not be loaded."""
+
+    def __init__(self, *args, target: "Target | None" = None):
+        super().__init__(*args)
+        self.target = target
+
+
+class StaleClientError(ClientError, ImportError):
+    """A generated client no longer matches its core or its module.
+
+    An ImportError, because the check runs when the client is imported.
+    """
 
 
 @dataclasses.dataclass(slots=True)
@@ -164,10 +182,12 @@ class ExecError(QueryError):
 __all__ = [
     "ClientConnectionError",
     "ClientError",
+    "ClientLoadError",
     "DaggerError",
     "ExecError",
     "InvalidQueryError",
     "QueryError",
+    "StaleClientError",
     "TransportError",
     "VersionMismatch",
 ]

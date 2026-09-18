@@ -1,0 +1,124 @@
+"""
+What a module entrypoint hands the module's code with each call: the local
+clients the caller declared on the module's scope, and nothing else.
+
+The module's code runs in an exec that the engine does not make the module, so
+its own current workspace is its container, and a local client cannot resolve
+there. The entrypoint is given the caller's workspace, and resolves each
+declared client in it. The code gets each client as a module source over the
+files the engine loaded for that client: enough to serve it, and no way back
+to the workspace. Not the workspace, which is every caller file; and not the
+source Workspace.moduleSource returns, which keeps the workspace it came from
+and reloads its context from it when asked for more files.
+
+A git client needs no workspace: the code serves it through serveModule.
+
+The shared entrypoint and every static one carry this file as it is, so the
+two forms hand over the same thing.
+
+The list is read from the caller's workspace config at every call, never
+baked into a static entrypoint at generation: a baked list lives in the
+module's own files, which the module's author controls, while the caller's
+config is what the caller agreed to. Do not simplify it into one.
+"""
+type ClientHandover {
+  let workspace: Workspace!
+
+  new(workspace: Workspace!) {
+    self.workspace = workspace
+    self
+  }
+
+  """
+  One entry per declared local client: the module name its descriptor holds,
+  and the ID of a module source over its loaded files.
+  """
+  pub clients: [HandedClient!]! {
+    declared.map { src =>
+      HandedClient(
+        name: src.moduleName,
+        source: (loadedFiles(src).asModuleSource(sourceRootPath: src.sourceRootSubpath).id :: String!),
+      )
+    }
+  }
+
+  """
+  The local clients the caller's workspace declares on this module's scope.
+  The scope is the one registered under this module's name, and only when it
+  holds this module's own files: a module loaded from elsewhere under the same
+  name gets nothing. None when no single scope qualifies.
+  """
+  let declared: [ModuleSource!]! {
+    workspace.sdks.{{name}}.reduce([] :: [ModuleSource!]!) { found, listed =>
+      let sdk = workspace.sdk(name: listed.name)
+      let scopes = sdk.modules.{{name, source}}
+        .filter { module => module.name == currentModule.name }
+        .map { module => normalizePath(module.source) }
+        .filter { scope => isThisModule(scope) }
+      if (scopes.length == 1) {
+        let scope = scopes[0] ?? ""
+        found + sdk.clients.{{name, source}}
+          .filter { client => normalizePath(client.name) == scope and isLocal(client.source) }
+          .map { client => workspace.moduleSource("/" + normalizePath(client.source)) }
+      } else {
+        found
+      }
+    }
+  }
+
+  """
+  Whether a scope holds this module's files, compared by content. The engine
+  re-encodes the manifest it serves a module with, so that one is compared
+  as TOML.
+  """
+  let isThisModule(scope: String!): Boolean! {
+    let theirs = workspace.moduleSource("/" + scope).directory(".")
+    let changes = currentModule.source.changes(from: theirs)
+    let others = changes.modifiedPaths.filter { path => path != manifestName }
+    changes.addedPaths.length == 0 and changes.removedPaths.length == 0 and others.length == 0 and
+      sameToml(currentModule.source.file(manifestName), theirs.file(manifestName))
+  }
+
+  let manifestName: String! = "dagger-module.toml"
+
+  let sameToml(a: File!, b: File!): Boolean! {
+    JSON.encode(TOML.decode(a.contents)) == JSON.encode(TOML.decode(b.contents))
+  }
+
+  """
+  The files the engine loaded for a source, and for its local dependencies,
+  which a directory source resolves inside the same tree. A local
+  dependency's root is a path in the same workspace.
+  """
+  let loadedFiles(src: ModuleSource!): Directory! {
+    src.dependencies.{{kind, sourceRootSubpath}}
+      .filter { dep => dep.kind == ModuleSourceKind.LOCAL_SOURCE }
+      .reduce(src.contextDirectory) { dir, dep =>
+        dir.withDirectory(".", loadedFiles(workspace.moduleSource("/" + normalizePath(dep.sourceRootSubpath))))
+      }
+  }
+
+  """
+  A workspace path, as the workspace config writes a local client; anything
+  else is a git ref.
+  """
+  let isLocal(ref: String!): Boolean! {
+    ref.hasPrefix(".") or ref.hasPrefix("/")
+  }
+
+  let normalizePath(path: String!): String! {
+    let normalized = path.trimPrefix("./").trimPrefix("/").trimSuffix("/")
+    if (normalized == "") { "." } else { normalized }
+  }
+}
+
+type HandedClient {
+  pub name: String!
+  pub source: String!
+
+  new(name: String!, source: String!) {
+    self.name = name
+    self.source = source
+    self
+  }
+}

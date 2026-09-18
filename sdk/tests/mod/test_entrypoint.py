@@ -10,8 +10,8 @@ from typing import Annotated
 import pytest
 from typing_extensions import Doc, Self
 
-import dagger
 from dagger import DefaultPath, Ignore, Name
+from dagger.client import gen
 from dagger.mod import Module
 from dagger.mod._entrypoint import (
     _quote,
@@ -55,7 +55,7 @@ def mod() -> Module:
     class Main:
         """The main object."""
 
-        source: dagger.Directory
+        source: gen.Directory
         greeting: str = m.field(default="hello")
         count: Annotated[int, Doc("How many")] = m.field(default=1, name="howMany")
 
@@ -73,7 +73,7 @@ def mod() -> Module:
 
         @m.function
         def helpers(
-            self, src: Annotated[dagger.Directory, DefaultPath("."), Ignore([".venv"])]
+            self, src: Annotated[gen.Directory, DefaultPath("."), Ignore([".venv"])]
         ) -> list[Helper]: ...
 
         @m.function
@@ -83,7 +83,7 @@ def mod() -> Module:
         def greeter(self, g: Greeter) -> Greeter: ...
 
         @m.function(deprecated="use container")
-        def old(self, p: dagger.Platform) -> dagger.JSON: ...
+        def old(self, p: gen.Platform) -> gen.JSON: ...
 
     return m
 
@@ -113,7 +113,7 @@ def test_types_golden(mod: Module):
 
 
 def test_main_golden(root: pathlib.Path):
-    rendered = render_main("main", ".dagger/modules/main", source_files(root))
+    rendered = render_main("main", source_files(root))
     _assert_golden("main.dang", rendered)
 
 
@@ -129,7 +129,7 @@ def test_source_files(root: pathlib.Path):
 
 
 def test_absent_manifest_is_recorded_without_a_digest(root: pathlib.Path):
-    rendered = render_main("main", ".", source_files(root))
+    rendered = render_main("main", source_files(root))
     assert 'SourceFile(path: "uv.lock", digest: ""),' in rendered
 
 
@@ -172,15 +172,9 @@ def test_refuses_cache_policy():
         render_types(mod.describe())
 
 
-@pytest.mark.parametrize("path", ["/abs", "../up", "a/../../b"])
-def test_path_must_stay_inside(path: str):
-    with pytest.raises(BadUsageError, match="relative"):
-        render_main("main", path, [])
-
-
 def test_write_entrypoint(mod: Module, root: pathlib.Path):
     out = root / "out"
-    write_entrypoint(mod.describe(), name="main", path=".", root=root, output=out)
+    write_entrypoint(mod.describe(), name="main", root=root, output=out)
     assert (out / "types.dang").read_text().startswith("# Code generated")
     assert 'SourceFile(path: "src/main/extra.py"' in (out / "main.dang").read_text()
 
@@ -202,8 +196,6 @@ def test_command(tmp_path: pathlib.Path):
             "entrypoint",
             "--name",
             "hello",
-            "--path",
-            ".dagger/modules/hello",
             "--output",
             "out",
         ],

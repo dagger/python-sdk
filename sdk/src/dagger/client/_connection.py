@@ -1,5 +1,11 @@
-from dagger.client._session import SharedConnection
+from dagger.client._session import Session, default_session
 
-_shared = SharedConnection()
-connect = _shared.connect
-close = _shared.close
+
+async def connect() -> Session:
+    """Open the default session's connection."""
+    return await default_session().connect()
+
+
+async def close() -> None:
+    """Close the default session's connection."""
+    await default_session().close()

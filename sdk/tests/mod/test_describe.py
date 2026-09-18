@@ -6,14 +6,13 @@ from typing import Annotated
 import pytest
 from typing_extensions import Doc, Self
 
-import dagger
-from dagger import DefaultPath, Ignore, Name, dag
+from dagger import DefaultPath, Ignore, Name
+from dagger.client import gen
+from dagger.client.gen import dag
 from dagger.mod import Module
 from dagger.mod._converter import to_typedef, typedef_from
 from dagger.mod._describe import TypeRef, describe_type
 from dagger.mod._module import _module_from
-
-Kind = dagger.TypeDefKind
 
 
 class Color(enum.Enum):
@@ -45,7 +44,7 @@ def mod() -> Module:
     class Main:
         """The main object."""
 
-        source: dagger.Directory
+        source: gen.Directory
         greeting: str = m.field(default="hello")
         count: Annotated[int, Doc("How many")] = m.field(default=1, name="howMany")
         extra: InitVar[str] = ""
@@ -65,7 +64,7 @@ def mod() -> Module:
 
         @m.function
         def helpers(
-            self, src: Annotated[dagger.Directory, DefaultPath("."), Ignore([".venv"])]
+            self, src: Annotated[gen.Directory, DefaultPath("."), Ignore([".venv"])]
         ) -> list[Helper]: ...
 
         @m.function
@@ -78,7 +77,7 @@ def mod() -> Module:
         def greeter(self, g: Greeter) -> Greeter: ...
 
         @m.function(deprecated="use shout")
-        def old(self, p: dagger.Platform) -> dagger.JSON: ...
+        def old(self, p: gen.Platform) -> gen.JSON: ...
 
         make_helper = m.function()(Helper)
 
@@ -98,7 +97,7 @@ def test_objects_and_enums(mod: Module):
     assert [f.name for f in greeter.functions] == ["greet"]
 
     assert helper.description == "A helper."
-    assert helper.fields[0].type == TypeRef(Kind.ENUM_KIND, "Color", "A color.")
+    assert helper.fields[0].type == TypeRef("ENUM_KIND", "Color", "A color.")
     assert helper.constructor is None
 
     assert main.description == "The main object."
@@ -119,8 +118,8 @@ def test_fields(mod: Module):
     main = mod.describe().objects[2]
 
     assert [(f.name, f.type.kind) for f in main.fields] == [
-        ("greeting", Kind.STRING_KIND),
-        ("howMany", Kind.INTEGER_KIND),
+        ("greeting", "STRING_KIND"),
+        ("howMany", "INTEGER_KIND"),
     ]
     assert main.fields[1].description == "How many"
 
@@ -130,9 +129,9 @@ def test_constructor(mod: Module):
 
     assert ctor is not None
     assert ctor.name == ""
-    assert ctor.returns == TypeRef(Kind.OBJECT_KIND, "Main")
+    assert ctor.returns == TypeRef("OBJECT_KIND", "Main")
     assert [a.name for a in ctor.args] == ["source", "greeting", "count", "extra"]
-    assert ctor.args[0].type == TypeRef(Kind.OBJECT_KIND, "Directory")
+    assert ctor.args[0].type == TypeRef("OBJECT_KIND", "Directory")
     assert ctor.args[1].default_value == '"hello"'
     assert ctor.args[2].description == "How many"
     assert ctor.args[3].default_value == '""'
@@ -145,34 +144,34 @@ def test_function_metadata(mod: Module):
     assert shout.description == "Shout it"
     assert shout.cache == "never"
     assert shout.args[0].nullable is True
-    assert shout.args[0].type == TypeRef(Kind.STRING_KIND, optional=True)
+    assert shout.args[0].type == TypeRef("STRING_KIND", optional=True)
     assert shout.args[0].default_value == "null"
     assert shout.args[1].default_value == "1"
 
     assert functions["lint"].check is True
-    assert functions["lint"].returns == TypeRef(Kind.VOID_KIND, optional=True)
+    assert functions["lint"].returns == TypeRef("VOID_KIND", optional=True)
 
     src = functions["helpers"].args[0]
     assert src.default_path == "."
     assert src.ignore == (".venv",)
     assert functions["helpers"].returns == TypeRef(
-        Kind.LIST_KIND, elem=TypeRef(Kind.OBJECT_KIND, "Helper")
+        "LIST_KIND", elem=TypeRef("OBJECT_KIND", "Helper")
     )
 
     assert functions["mob"].returns == TypeRef(
-        Kind.LIST_KIND, elem=TypeRef(Kind.OBJECT_KIND, "Main")
+        "LIST_KIND", elem=TypeRef("OBJECT_KIND", "Main")
     )
     assert functions["maybe"].returns == TypeRef(
-        Kind.LIST_KIND, optional=True, elem=TypeRef(Kind.STRING_KIND)
+        "LIST_KIND", optional=True, elem=TypeRef("STRING_KIND")
     )
-    assert functions["greeter"].returns == TypeRef(Kind.INTERFACE_KIND, "Greeter")
+    assert functions["greeter"].returns == TypeRef("INTERFACE_KIND", "Greeter")
     assert functions["container"].args[0].name == "from"
 
     old = functions["old"]
     assert old.deprecated == "use shout"
-    assert old.args[0].type.kind == Kind.SCALAR_KIND
+    assert old.args[0].type.kind == "SCALAR_KIND"
     assert old.args[0].type.name == "Platform"
-    assert old.returns.kind == Kind.SCALAR_KIND
+    assert old.returns.kind == "SCALAR_KIND"
 
     make_helper = functions["make_helper"]
     assert make_helper.description == "A helper."
@@ -199,7 +198,7 @@ def test_unsupported_type():
         describe_type(int | str)
 
 
-def test_module_materialisation():
+def test_module_materialisation(selections):
     mod = Module("Foo")
 
     @mod.object_type
@@ -213,7 +212,8 @@ def test_module_materialisation():
             """Say hello."""
             return who or self.name
 
-    string = dag.type_def().with_kind(Kind.STRING_KIND)
+    kind = gen.TypeDefKind.STRING_KIND
+    string = dag.type_def().with_kind(kind)
     expected = dag.module().with_object(
         dag.type_def()
         .with_object("Foo", description="Foo doc.", deprecated=None)
@@ -223,12 +223,9 @@ def test_module_materialisation():
             .with_description("Say hello.")
             .with_arg(
                 "who",
-                dag.type_def()
-                .with_optional(True)
-                .with_kind(Kind.STRING_KIND)
-                .with_optional(True),
+                dag.type_def().with_optional(True).with_kind(kind).with_optional(True),
                 description=None,
-                default_value=dagger.JSON("null"),
+                default_value=gen.JSON("null"),
                 default_path=None,
                 default_address=None,
                 ignore=None,
@@ -242,7 +239,7 @@ def test_module_materialisation():
                 "name",
                 string,
                 description=None,
-                default_value=dagger.JSON('"foo"'),
+                default_value=gen.JSON('"foo"'),
                 default_path=None,
                 default_address=None,
                 ignore=None,
@@ -253,4 +250,4 @@ def test_module_materialisation():
 
     desc = mod.describe()
     assert desc.description is None
-    assert _module_from(desc) == expected
+    assert selections(_module_from(desc)) == selections(expected)
