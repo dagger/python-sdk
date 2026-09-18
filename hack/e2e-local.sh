@@ -23,7 +23,7 @@
 # on a shared engine a stuck connection otherwise holds a check until the
 # engine drops it, some twenty minutes later.
 set -eu
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(CDPATH= cd "$(dirname "$0")/.." && /bin/pwd)
 scratch=${E2E_SCRATCH:-$(mktemp -d)}
 module=${E2E_MODULE:-.dagger/modules/e2e}
 logs="$scratch.logs"
@@ -38,7 +38,7 @@ if [ -n "${E2E_WITH:-}" ]; then
   echo "applied $E2E_WITH since $(git -C "$root" rev-parse --short "$base")" >&2
 fi
 cat "$scratch/.dagger/modules/engine-e2e/workspace.toml" > "$scratch/dagger.toml"
-cd "$scratch"
+CDPATH= cd "$scratch"
 [ -d .git ] || git init --quiet
 echo "checks of $module in $scratch" >&2
 if [ $# -eq 0 ]; then
