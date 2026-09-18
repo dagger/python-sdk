@@ -986,7 +986,8 @@ type E2e {
   A stale module-kind entrypoint is replaced, because the engine rejects the
   kind. A Dang entrypoint the user wrote is kept: a pinned version, or a fork.
   A runtime of the user's own is kept as it is, with no entrypoint put in
-  front of it for the engine to follow instead. What only a runtime manifest
+  front of it for the engine to follow instead, and refused beside one. What
+  only a runtime manifest
   can say, which files the module is and where its source sits, is refused
   rather than dropped. The manifests carry their keys in either order and a
   "[" inside a comment, which must not be read as the start of the next table.
@@ -1020,6 +1021,18 @@ type E2e {
     let own = manifestOf(ws.withNewFile(manifestPath, ownRuntime))
     assertContainsAll(own, ["[runtime]", "source = \"../../../../../../runtime\"", "engineVersion = \"v1.0.0-0\""])
     assertNotContains(own, "[entrypoint]", "an entrypoint was put in front of the user's own runtime")
+
+    # A runtime of the user's own beside an entrypoint is refused, whichever
+    # entrypoint: the engine would run the entrypoint on the session's
+    # version, and generation would take core from the runtime's.
+    let bothShared = manifestOf(ws.withNewFile(manifestPath, ownRuntime + "\n[entrypoint]\nkind = \"dang\"\nsource = \"" + sharedEntrypointSource + "\"\n")) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(bothShared, ["both a runtime", "../../../../../../runtime", sharedEntrypointSource, "Remove [entrypoint]"])
+    let bothStatic = manifestOf(ws.withNewFile(manifestPath, ownRuntime + "\n[entrypoint]\nkind = \"dang\"\nsource = \"./sdk/entrypoint\"\n")) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(bothStatic, ["both a runtime", "./sdk/entrypoint"])
 
     let included = manifestOf(ws.withNewFile(manifestPath, head + "include = [\"src\"]\n\n" + runtimeTable)) rescue {
       err: Error => err.message

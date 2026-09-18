@@ -183,12 +183,16 @@ type PythonSdk {
   only a runtime reads: engineVersion, since an entrypoint runs a module on
   the engine's own version. Any other runtime is one the user chose, and the
   manifest keeps it with no entrypoint added, because the engine follows an
-  entrypoint over a runtime.
+  entrypoint over a runtime; for the same reason a manifest with both is
+  refused.
   """
   let generateScopeManifest(ws: Workspace!, scope: String!, name: String!): Workspace! {
     let root = "/" + scope
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
     let hasJson = scopeHasFile(ws, scope, "dagger.json")
+    if (hasToml) {
+      checkOneRunner(ws.file(root + "/dagger-module.toml").contents)
+    }
     let base = if (hasToml and isEntrypointManifest(ws.file(root + "/dagger-module.toml").contents)) {
       # This SDK's static entrypoint manifest holds nothing the shared one keeps.
       sdkHelpers.moduleManifest.withDangEntrypoint(source: sharedEntrypointSource)
@@ -243,6 +247,31 @@ type PythonSdk {
         err: Error => value.field(["source"]).asString
       }
       source != "" and source != "python"
+    }
+  }
+
+  """
+  Refuse a manifest that names both a runtime of the user's own and an
+  entrypoint. The engine runs the entrypoint and never calls the runtime,
+  while generation would take the core it generates against from the
+  runtime's engineVersion: a core that is not the session's. Both tables are
+  the user's, so the user picks one.
+  """
+  let checkOneRunner(toml: String!): Void {
+    let manifest = ManifestToml(toml)
+    let config = tomlConfig(toml)
+    if (manifest.hasEntrypoint and keepsItsRuntime(config)) {
+      raise "dagger-module.toml names both a runtime (" + runtimeSource(config) + ") and an entrypoint (" +
+        manifest.entrypointSource + "); the engine runs the entrypoint and never calls the runtime. " +
+        "Remove [entrypoint] to run on your runtime, or [runtime] to run on the entrypoint"
+    }
+    null
+  }
+
+  let runtimeSource(config: JSONValue!): String! {
+    let value = config.field(["runtime"])
+    value.asString rescue {
+      err: Error => value.field(["source"]).asString
     }
   }
 
