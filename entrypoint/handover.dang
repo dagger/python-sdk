@@ -15,6 +15,11 @@ A git client needs no workspace: the code serves it through serveModule.
 
 The shared entrypoint and every static one carry this file as it is, so the
 two forms hand over the same thing.
+
+The list is read from the caller's workspace config at every call, never
+baked into a static entrypoint at generation: a baked list lives in the
+module's own files, which the module's author controls, while the caller's
+config is what the caller agreed to. Do not simplify it into one.
 """
 type ClientHandover {
   let workspace: Workspace!
