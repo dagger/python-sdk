@@ -1,8 +1,7 @@
 """How the module a target names gets served into a session."""
 
-from dagger._exceptions import QueryError
 from dagger.client._core import Arg, Context
-from dagger.client._descriptor import Target, missing_field
+from dagger.client._descriptor import Target
 from dagger.client._session import Session
 
 # A descriptor has one shape for a git ref and for a workspace path: `ref` is
@@ -61,14 +60,11 @@ async def load_target(session: Session, target: Target) -> None:
     if _is_local(target) and _entrypoint_workspace is not None:
         await _serve_in_workspace(ctx, _entrypoint_workspace, target)
         return
+    # An engine without the field, below this SDK's floor, fails the load
+    # here: a ClientLoadError, not a stale client, since regenerating the
+    # client cannot give the engine a field.
     args = [Arg("address", target.ref), Arg("refPin", target.pin, None)]
-    try:
-        await ctx.root_select("serveModule", args).execute()
-    except QueryError as e:
-        missing = missing_field(e)
-        if missing is None or missing.groups() != ("serveModule", "Query"):
-            raise
-        await _serve_without_the_field(ctx, target)
+    await ctx.root_select("serveModule", args).execute()
 
 
 def _is_local(target: Target) -> bool:
@@ -84,33 +80,4 @@ async def _serve_in_workspace(ctx: Context, workspace_id: str, target: Target) -
         .select("ModuleSource", "asModule", [])
         .select("Module", "serve", [])
         .execute()
-    )
-
-
-# Only for an engine that predates serveModule, which answers that the field
-# does not exist. The field is in dagger/dagger from 284cd849
-# (dagger/dagger#14210), so this serves engines released before a release
-# carries that commit. This is not a design choice: delete it, with the tests
-# that pin its wire shape, once the minimum supported engine has the field.
-# Until then it serves what serveModule would, under the module's own name.
-# The engine's answer is not remembered, on purpose: on such an engine each
-# load pays one failed round trip first, which is cheaper than tracking
-# engine versions for a path that goes away.
-async def _serve_without_the_field(ctx: Context, target: Target) -> None:
-    await (
-        _source(ctx, target)
-        .select("ModuleSource", "asModule", [])
-        .select("Module", "serve", [])
-        .execute()
-    )
-
-
-def _source(ctx: Context, target: Target) -> Context:
-    if _is_local(target):
-        return ctx.root_select("currentWorkspace", []).select(
-            "Workspace", "moduleSource", [Arg("path", target.ref)]
-        )
-    return ctx.root_select(
-        "moduleSource",
-        [Arg("refString", target.ref), Arg("refPin", target.pin, None)],
     )

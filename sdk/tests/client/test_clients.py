@@ -177,40 +177,18 @@ NO_SERVE_MODULE = QueryError(
 )
 
 
-async def test_temporary_fallback_chain_wire_shape():
-    # The one test on a load document: the chain an engine without
-    # serveModule gets. It goes away with the fallback. No name, as with
-    # serveModule, so both engines serve the module under the same one.
+async def test_engine_without_serve_module_fails_the_load_not_as_stale():
+    # An engine below the floor lacks the field. That is the engine's age,
+    # not the client's, so it is no stale client: regenerating cannot help.
     s = session()
     s.session.fail["serveModule"] = NO_SERVE_MODULE
 
-    await glow(session=s).output()
+    with pytest.raises(ClientLoadError) as info:
+        await glow(session=s).output()
 
-    attempt, chain = s.session.loads
-    assert "serveModule" in attempt
-    assert chain == (
-        "query {\n"
-        '  moduleSource(refString: "github.com/eunomie/glow", refPin: "4f1c9e") {\n'
-        "    asModule {\n"
-        "      serve\n"
-        "    }\n"
-        "  }\n"
-        "}"
-    )
-
-
-async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
-    s = session()
-    s.session.fail["serveModule"] = NO_SERVE_MODULE
-
-    await client_root(Glow, LINTER, "linter", [], session=s).output()
-
-    attempt, chain, query = s.session.queries
-    assert "serveModule" in attempt
-    assert "currentWorkspace" in chain
-    assert LINTER.ref in chain
-    assert "withName" not in chain
-    assert query == "query {\n  linter {\n    output\n  }\n}"
+    assert not isinstance(info.value, StaleClientError)
+    assert info.value.__cause__ is NO_SERVE_MODULE
+    assert len(s.session.loads) == 1
 
 
 HANDED = "d29ya3NwYWNl"
@@ -278,56 +256,6 @@ async def test_without_a_handed_workspace_a_local_target_uses_serve_module():
     (load,) = s.session.loads
     assert "serveModule" in load
     assert "node(" not in load
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "serveModule" on type "Query".',
-                path=["x"],
-                extensions=VALIDATION,
-            ),
-            id="resolver-error-with-the-phrase",
-        ),
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "serveModule" on type "Query".',
-                extensions={"code": "INTERNAL_SERVER_ERROR"},
-            ),
-            id="internal-error-with-the-phrase",
-        ),
-        pytest.param(
-            QueryErrorValue('Cannot query field "serveModule" on type "Query".'),
-            id="phrase-without-a-code",
-        ),
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "serveModule" on type "Glow".',
-                extensions=VALIDATION,
-            ),
-            id="serve-module-on-another-type",
-        ),
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "asModule" on type "ModuleSource".',
-                extensions=VALIDATION,
-            ),
-            id="another-missing-field",
-        ),
-        pytest.param(QueryErrorValue("boom"), id="plain-error"),
-    ],
-)
-async def test_other_load_errors_do_not_fall_back(error):
-    s = session()
-    s.session.fail["serveModule"] = QueryError([error], "query")
-
-    with pytest.raises(ClientLoadError) as info:
-        await glow(session=s).output()
-
-    assert len(s.session.loads) == 1
-    assert info.value.__cause__ is s.session.fail["serveModule"]
 
 
 async def test_failed_load_names_the_target_and_the_cause():

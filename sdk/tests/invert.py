@@ -215,27 +215,6 @@ INVERSIONS = [
         "assert is_load(load)\n    assert LINTER.ref in load",
         "assert is_load(load)\n    assert LINTER.ref not in load",
     ),
-    Inversion(
-        CLIENTS + "test_temporary_fallback_chain_wire_shape",
-        'assert "serveModule" in attempt\n    assert chain == (',
-        'assert "serveModule" not in attempt\n    assert chain == (',
-    ),
-    # The fallback pins no name either.
-    Inversion(
-        CLIENTS + "test_temporary_fallback_chain_wire_shape",
-        '"    asModule {\\n"',
-        '"    withName(name: \\"glow\\") {\\n"',
-    ),
-    Inversion(
-        CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
-        'assert "withName" not in chain',
-        'assert "withName" in chain',
-    ),
-    Inversion(
-        CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
-        "assert LINTER.ref in chain",
-        "assert LINTER.ref not in chain",
-    ),
     # Under a module entrypoint, a local target loads through the workspace
     # the entrypoint handed over, and nothing else changes query.
     Inversion(
@@ -268,10 +247,13 @@ INVERSIONS = [
         'read_text()) == "None"',
         'read_text()) != "None"',
     ),
+    # An engine below the floor fails the load; it is no stale client.
     Inversion(
-        CLIENTS + "test_other_load_errors_do_not_fall_back",
-        "assert len(s.session.loads) == 1\n    assert info.value.__cause__",
-        "assert len(s.session.loads) == 2\n    assert info.value.__cause__",
+        CLIENTS + "test_engine_without_serve_module_fails_the_load_not_as_stale",
+        "assert not isinstance(info.value, StaleClientError)\n"
+        "    assert info.value.__cause__ is NO_SERVE_MODULE",
+        "assert isinstance(info.value, StaleClientError)\n"
+        "    assert info.value.__cause__ is NO_SERVE_MODULE",
     ),
     # Only a validation error is a missing field, for the stale check too.
     Inversion(
