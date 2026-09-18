@@ -704,12 +704,23 @@ the check in `.dagger/modules/e2e/main.dang` still holds.
 ## 13. How a client loads its module
 
 A client must load the module it targets, from a client session and from a
-module session. The engine work is in progress. The shape under discussion is
-one field:
+module session. The engine field exists, in `dagger/dagger#14210`, open at the
+time of writing:
 
 ```graphql
-serveModule(ref: String!, name: String, pin: String)
+Query.serveModule(address: String!, refPin: String): Void
 ```
+
+- A git address resolves through `moduleSource(address, refPin, requireKind: GIT)`.
+- A workspace path resolves through `currentWorkspace`, absolute from the
+  workspace root and relative from the cwd.
+- A bare name is rejected, so a module cannot enumerate what its caller installed.
+- Both end in `asModule().serve()`.
+
+One call covers every client, so the descriptor keeps one shape: `ref` is the
+address, `pin` is `refPin`. Module code never touches `currentWorkspace`: the
+engine does that internally, which is what makes the call legitimate from a
+module once the guard on `currentWorkspace` lands.
 
 ### `core.serveModule`, not `dag.serveModule` [provisional]
 
@@ -733,15 +744,25 @@ So: yes to `serveModule`, and please put it on `Query`. Python will read it as c
 | --- | --- |
 | One argument for both kinds of reference: a workspace path and a git URL. | The SDK gets one code path and one descriptor shape. Today it needs two: `moduleSource(refString, refPin)` for git, and a path field for local. |
 | A path resolves in the caller's own context. | This is the property that makes one client work in a module and in a plain program (`dagger/dagger#14148`). A module resolves against its own context root, a client session against its workspace. |
-| A name to pin, `name:`. | The bindings were generated under a name. Pinning it stops a later change in how the engine derives a name from producing a root field the bindings do not have. |
 | A pin for a git reference. | The client records the commit it was generated against, and loads that commit. |
 | Idempotent. | The SDK loads once per session and per client, but a second call must not fail. |
 | The same call in both session kinds. | One code path in the SDK, for a module and for a plain program. |
-| A loud answer, for example the name it served under. | The SDK compares it with the generated name and fails at load time, with the descriptor in the message, instead of at the first query with "cannot query field". |
 | One round trip. | It replaces the chain `moduleSource` → `withName` → `asModule` → `serve`. A first use costs one query. |
 
 With that field, the descriptor holds one reference and an optional pin (8.3),
 and the SDK has one load path for every client.
+
+**No name is pinned, and none is needed.** An earlier revision asked the field
+for a `name:` argument, so that a client could state the name its bindings were
+generated under. That was wrong: nobody chooses that name. `dagger module client
+add` cannot set one, `asModule().serve()` has none, and the engine derives it
+from the module's own config, by the same code, both when the SDK generates
+against that module's schema and when `serveModule` resolves the same address.
+The two agree unless the module renamed itself, and that client is stale by
+definition. The first selection then fails with "cannot query field", which the
+SDK turns into `StaleClientError` telling the user to run `dagger generate`
+(section 10). The cost of not pinning: if the engine ever changes how it derives
+a name, every client regenerates rather than keeping the old name.
 
 - The design does not use `[[dependencies]]`, and it does not use
   `currentWorkspace` from module code.
