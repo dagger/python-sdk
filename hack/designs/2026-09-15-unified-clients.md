@@ -469,12 +469,11 @@ inside a function body.
 - The SDK starts the default session on the first query. In a module and under
   `dagger run`, `SharedConnection` already does this today.
 - In a plain program, the SDK also provisions the engine on the first query, and
-  closes it at exit. **Not implemented yet** [confident]. `SharedConnection`
-  reads the session from the environment, and raises
-  `ClientConnectionError("No active engine session to connect to")` when there
-  is none. A plain program therefore needs `async with dagger.connection():`,
-  which does provision, or `dagger run`. Verified both ways by hand. Check 23
-  fails until the default session provisions by itself.
+  closes it at exit [confident]. The engine is a `dagger session` subprocess
+  that ends when its stdin closes, which is sync, so an `atexit` handler closes
+  it after the program's event loop is gone; `dagger.close()` closes it sooner.
+  The environment comes first, so a module never provisions. Verified by hand:
+  a program that only calls a client exits 0 and leaves no session process.
 - A caller passes `session=` only to use a specific session.
 
 One session per client does not work: an object belongs to one session, and a
@@ -913,8 +912,6 @@ removal date is Yves's call.
 - [speculative] The global client as a second import package of the `sdk/`
   member, and whether mypy and pyright then type `dagger.dag` as the global
   `Client`.
-- [not implemented] The default session provisions the engine on first query and
-  closes it cleanly at exit. See 8.1.
 - **[blocker, not ours to fix] A changed client target returns a cached result.**
   `[[dependencies]]` used to put the target module into the caller's identity, so
   changing the target changed the caller's digest. A unified client records a
