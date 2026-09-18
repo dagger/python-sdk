@@ -1,0 +1,407 @@
+"""
+One SDK scope: a directory whose pyproject.toml is a uv workspace root, with
+the SDK files and the generated clients as its members. A module is a scope;
+so is a plain project. Both get the same tree:
+
+  pyproject.toml    the scope file, edited in place
+  src/              the user's code, never written here
+  sdk/              the SDK files, no generated code
+  clients/core/     the core bindings
+  clients/<name>/   one member per declared client
+"""
+type Scope {
+  """
+  Workspace-root-relative path of the scope.
+  """
+  pub path: String!
+
+  """
+  The workspace the scope belongs to.
+  """
+  let ws: Workspace!
+
+  """
+  The clients declared on the scope, in dagger.toml.
+  """
+  let clients: [ModuleSource!]!
+
+  """
+  Write the commit a Git client was generated against into its descriptor.
+  """
+  let lock: Boolean!
+
+  """
+  The workspace with the scope generated: sdk/, clients/core and one member
+  per client written whole, a client that is no longer declared deleted, and
+  the SDK-owned entries of the scope file set. Everything else is left as it
+  is.
+  """
+  pub generated: Workspace! {
+    let existing = ws.directory(root)
+    let members = clientMembers
+    checkMembers(existing, members)
+    let cleared = staleClients(existing, members).reduce(ws) { target, dir =>
+      target.withoutDirectory(memberPath(clientsDirName + "/" + dir))
+    }
+    let withSdk = replaced(cleared, sdkDirName, sdkMember)
+    let withCore = replaced(withSdk, clientsDirName + "/" + coreDirName, coreMember)
+    let withClients = members.reduce(withCore) { target, member =>
+      replaced(target, clientsDirName + "/" + member.dir, clientMember(member))
+    }
+    withClients.withNewFile(memberPath(scopeFileName), scopeFile(existing, members).contents)
+  }
+
+  let sdkDirName: String! = "sdk"
+  let clientsDirName: String! = "clients"
+  let coreDirName: String! = "core"
+  let scopeFileName: String! = "pyproject.toml"
+  let sdkDistribution: String! = "dagger-io"
+  let coreDistribution: String! = "dagger-clients-core"
+
+  """
+  The bindings of the layout before this one. A module that still has them is
+  being upgraded, and gets the global client so its code keeps working.
+  """
+  let legacyBindingsPath: String! = "sdk/src/dagger/client/gen.py"
+
+  let root: String! {
+    if (path == ".") { "/" } else { "/" + path }
+  }
+
+  let memberPath(rel: String!): String! {
+    if (path == ".") { "/" + rel } else { "/" + path + "/" + rel }
+  }
+
+  """
+  A member is written whole, so nothing of an earlier generation survives in
+  it; merging would keep a file the generator no longer writes.
+  """
+  let replaced(target: Workspace!, rel: String!, files: Directory!): Workspace! {
+    let abs = memberPath(rel)
+    let cleared = if (ws.directory(root).exists(rel)) { target.withoutDirectory(abs) } else { target }
+    cleared.withDirectory(abs, files)
+  }
+
+  """
+  A directory where a member goes, that is not a member, is the user's: the
+  SDK refuses to write over it. sdk/ from the previous layout has no marker
+  and is replaced, which is the upgrade.
+  """
+  let checkMembers(existing: Directory!, members: [ClientMember!]!): Void {
+    let sdkIsUsers = existing.exists(sdkDirName) and
+      isGeneratedMember(existing, sdkDirName) == false and
+      existing.exists(sdkDirName + "/src/dagger/__init__.py") == false
+    if (sdkIsUsers) {
+      raise sdkDirName + "/ exists in " + path + " and is not the SDK's; move it away"
+    }
+    ([coreDirName] + members.map { member => member.dir }).each { dir =>
+      let rel = clientsDirName + "/" + dir
+      if (existing.exists(rel) and isGeneratedMember(existing, rel) == false) {
+        raise rel + "/ exists in " + path + " and is not a generated client; move it away"
+      }
+      null
+    }
+    null
+  }
+
+  """
+  Generated clients under clients/ that the scope no longer declares. Only a
+  marked member is deleted; anything else there is left alone.
+  """
+  let staleClients(existing: Directory!, members: [ClientMember!]!): [String!]! {
+    if (existing.exists(clientsDirName) == false) {
+      [] :: [String!]!
+    } else {
+      let declared = members.map { member => member.dir }
+      existing.directory(clientsDirName).entries
+        .map { entry => entry.trimSuffix("/") }
+        .filter { dir =>
+          dir != coreDirName and
+            declared.filter { name => name == dir }.length == 0 and
+            generatedKind(existing, clientsDirName + "/" + dir) == "client"
+        }
+    }
+  }
+
+  let isGeneratedMember(existing: Directory!, rel: String!): Boolean! {
+    generatedKind(existing, rel) != ""
+  }
+
+  """
+  What `[tool.dagger] generated` says in a member's pyproject.toml, or empty.
+  Not a TOML parser: the marker is a key of one table, on its own line.
+  """
+  let generatedKind(existing: Directory!, rel: String!): String! {
+    let file = rel + "/" + scopeFileName
+    if (existing.exists(file) == false) {
+      ""
+    } else {
+      let m = existing.file(file).contents.match("(?ms)^\\s*\\[tool\\.dagger\\][^\\[]*^\\s*generated\\s*=\\s*\"([^\"]*)\"")
+      if (m == null) { "" } else { m.captures[0] ?? "" }
+    }
+  }
+
+  """
+  One member per declared client. A local module is loaded by its path from
+  the workspace root; a Git one by its ref, pinned when locked.
+  """
+  let clientMembers: [ClientMember!]! {
+    clients.map { client =>
+      let isGit = client.kind == ModuleSourceKind.GIT_SOURCE
+      ClientMember(
+        name: client.moduleName,
+        ref: if (isGit) { client.asString } else { localRef(client.sourceRootSubpath) },
+        pin: if (isGit and lock and client.pin != "") { client.pin } else { null },
+        source: client,
+      )
+    }
+  }
+
+  """
+  A descriptor path starts with "./", so the SDK can tell it from a Git ref.
+  """
+  let localRef(subpath: String!): String! {
+    let trimmed = subpath.trimPrefix("./").trimPrefix("/").trimSuffix("/")
+    if (trimmed == "" or trimmed == ".") { "." } else { "./" + trimmed }
+  }
+
+  """
+  The SDK files: the importable library and its license, with the project
+  file stripped down to what a member needs. No generated code goes in.
+  """
+  let sdkMember: Directory! {
+    currentModule.source
+      .directory("sdk")
+      .filter(include: [
+        "LICENSE",
+        "README.md",
+        "src/**/*.py",
+        "src/**/*.typed",
+        "!" + "src/dagger/client/gen.py",
+      ])
+      .withFile(scopeFileName, sdkPyproject)
+  }
+
+  """
+  pyproject.toml without its development sections: vendored verbatim, it names
+  the absent codegen workspace member and uv refuses to install the library.
+  """
+  let sdkPyproject: File! {
+    codegenBase
+      .withFile(stripScriptPath, currentModule.source.file("helpers/vendor-pyproject/strip_dev_sections.py"))
+      .withExec(["python", stripScriptPath, "pyproject.toml", "/member-pyproject.toml"])
+      .file("/member-pyproject.toml")
+  }
+
+  let coreMember: Directory! {
+    directory
+      .withNewFile(scopeFileName, memberPyproject(coreDistribution, coreDirName, [sdkDistribution], "core"))
+      .withDirectory("src", coreSource)
+  }
+
+  """
+  Core is generated from a module with nothing in it, so its schema is core
+  and nothing else. Every client's schema holds the same core, and the
+  generator checks that when it writes the client.
+  """
+  let coreSource: Directory! {
+    codegenEnv
+      .withMountedFile(schemaPath, coreSchema)
+      .withExec([codegenPython, "-m", "codegen", "generate-core", "-i", schemaPath, "-o", outputPath])
+      .directory(outputPath)
+  }
+
+  let coreSchema: File! {
+    currentModule.source
+      .directory("helpers/core-schema")
+      .asModuleSource
+      .clientSchemaIntrospectionJSON
+  }
+
+  """
+  The digest a client must be generated against, read from core itself so
+  the two can never disagree.
+  """
+  let coreDigest: String! {
+    let m = coreSource.file("dagger_clients/" + coreDirName + "/__init__.py").contents
+      .match("(?m)^CORE_DIGEST = \"([^\"]*)\"")
+    if (m == null) {
+      raise "the generated core carries no CORE_DIGEST"
+    } else {
+      m.captures[0] ?? ""
+    }
+  }
+
+  let clientMember(member: ClientMember!): Directory! {
+    directory
+      .withNewFile(scopeFileName, memberPyproject(member.distribution, member.package, [sdkDistribution, coreDistribution], "client"))
+      .withDirectory("src", clientSource(member))
+  }
+
+  let clientSource(member: ClientMember!): Directory! {
+    let pin = if (member.pin == null) { [] :: [String!]! } else { ["--pin", member.pin ?? ""] }
+    codegenEnv
+      .withMountedFile(schemaPath, member.source.clientSchemaIntrospectionJSON)
+      .withExec([
+        codegenPython, "-m", "codegen", "generate-client",
+        "-i", schemaPath, "-o", outputPath,
+        "--name", member.name, "--ref", member.ref, "--core-digest", coreDigest,
+      ] + pin)
+      .directory(outputPath)
+  }
+
+  """
+  A member holds no path and no source entry, so its files do not depend on
+  the scope. The marker is how the SDK finds its own members again.
+  """
+  let memberPyproject(distribution: String!, package: String!, dependencies: [String!]!, kind: String!): String! {
+    "[project]\n" +
+      "name = \"" + distribution + "\"\n" +
+      "version = \"0.0.0\"\n" +
+      "dependencies = [" + dependencies.map { name => "\"" + name + "\"" }.join(", ") + "]\n" +
+      "\n" +
+      "[build-system]\n" +
+      "requires = [\"uv_build>=0.8.4,<0.12.0\"]\n" +
+      "build-backend = \"uv_build\"\n" +
+      "\n" +
+      "[tool.uv.build-backend]\n" +
+      "module-name = \"dagger_clients." + package + "\"\n" +
+      "\n" +
+      "[tool.dagger]\n" +
+      "generated = \"" + kind + "\"\n"
+  }
+
+  """
+  The scope file with the SDK-owned entries set: the members, one workspace
+  source per member, and a dependency on core and on each client. A scope
+  without one starts from an empty file. Being upgraded writes the global
+  client flag once.
+  """
+  let scopeFile(existing: Directory!, members: [ClientMember!]!): File! {
+    let current = if (existing.exists(scopeFileName)) {
+      existing.file(scopeFileName)
+    } else {
+      directory.withNewFile(scopeFileName, "").file(scopeFileName)
+    }
+    let base = [
+      "--member", sdkDirName,
+      "--member", clientsDirName + "/" + coreDirName,
+      "--source", sdkDistribution,
+      "--source", coreDistribution,
+      "--dependency", coreDistribution,
+    ]
+    let perClient = members.reduce([] :: [String!]!) { flags, member =>
+      flags + [
+        "--member", clientsDirName + "/" + member.dir,
+        "--source", member.distribution,
+        "--dependency", member.distribution,
+      ]
+    }
+    let upgrade = if (existing.exists(legacyBindingsPath)) { ["--global-client", "true"] } else { [] :: [String!]! }
+    let edited = pyprojectTool
+      .withFile(toolPath, current)
+      .withExec(["pyproject", "edit-scope", toolPath] + base + perClient + upgrade)
+      .file(toolPath)
+    if (existing.exists(legacyBindingsPath) or hasGlobalClientFlag(current.contents)) {
+      raise "the global client is not generated yet: " + path + " asks for it with `[tool.dagger] global-client = true` in its pyproject.toml; turn it off with `mod config set --global-client=false` and import from dagger_clients.core instead"
+    }
+    edited
+  }
+
+  let hasGlobalClientFlag(toml: String!): Boolean! {
+    toml.containsMatch("(?ms)^\\s*\\[tool\\.dagger\\][^\\[]*^\\s*global-client\\s*=\\s*true")
+  }
+
+  let pyprojectTool: Container! {
+    container
+      .from("golang:1.25-alpine")
+      .withoutEntrypoint
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withDirectory("/helper", currentModule.source.directory("helpers/pyproject"))
+      .withWorkdir("/helper")
+      .withExec(["go", "build", "-o", "/usr/local/bin/pyproject", "."])
+  }
+
+  let toolPath: String! = "/work/pyproject.toml"
+
+  """
+  The code generator's environment, synced once per SDK version and shared by
+  every scope that generates.
+  """
+  let codegenEnv: Container! {
+    codegenBase.withExec(["uv", "sync", "--frozen", "--no-dev", "--package", "codegen"])
+  }
+
+  let codegenBase: Container! {
+    container
+      .from(codegenImage)
+      .withoutEntrypoint
+      .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
+      .withEnvVariable("UV_LINK_MODE", "copy")
+      .withEnvVariable("UV_COMPILE_BYTECODE", "1")
+      .withDirectory("/sdk", codegenSource)
+      .withWorkdir("/sdk")
+  }
+
+  let codegenPython: String! = "/sdk/.venv/bin/python"
+
+  let codegenSource: Directory! {
+    currentModule.source.directory("sdk").filter(include: [
+      "pyproject.toml",
+      "uv.lock",
+      "src/**/*.py",
+      "src/**/*.typed",
+      "codegen/pyproject.toml",
+      "codegen/**/*.py",
+    ])
+  }
+
+  let stripScriptPath: String! = "/strip-dev-sections.py"
+  let schemaPath: String! = "/schema.json"
+  let outputPath: String! = "/generated"
+
+  # musl runs the generator ~0.3s slower than glibc, but the glibc image is
+  # 25 MiB larger to pull, which costs more on the first generate.
+  let codegenImage: String! = "ghcr.io/astral-sh/uv:python3.14-alpine"
+}
+
+"""
+One client of a scope, as the generator and the scope file see it.
+"""
+type ClientMember {
+  """
+  The module's name in the schema, which is the client's name.
+  """
+  pub name: String!
+
+  """
+  What the client loads: a path from the workspace root, or a Git ref.
+  """
+  pub ref: String!
+
+  """
+  The commit a Git ref is pinned to, or null.
+  """
+  pub pin: String
+
+  let source: ModuleSource!
+
+  """
+  Directory under clients/, and the tail of the distribution name.
+  """
+  pub dir: String! {
+    name.toLower.replace("_", "-").replace(".", "-")
+  }
+
+  pub distribution: String! {
+    "dagger-clients-" + dir
+  }
+
+  """
+  Import package under dagger_clients.
+  """
+  pub package: String! {
+    name.toLower.replace("-", "_").replace(".", "_")
+  }
+}

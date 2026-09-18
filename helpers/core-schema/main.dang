@@ -1,0 +1,4 @@
+"""
+A module with nothing in it, whose client-facing schema is core alone.
+"""
+type CoreSchema {}
