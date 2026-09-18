@@ -336,7 +336,8 @@ class Session(BaseConnection):
         if not name.startswith("_"):
             msg += (
                 f". The API is on the clients now: core().{name}() for a core "
-                f"field, or {name}() from the client's package for a client. "
+                "field (from dagger_clients.core import core), "
+                f"or {name}() from the client's package for a client. "
                 f"To keep dag.{name}() while migrating, set "
                 "global-client = true under [tool.dagger] and run dagger generate."
             )

@@ -49,12 +49,17 @@ INVERSIONS = [
         "and the API is on core() from dagger_clients.core.",
         "and the API is on core() from dagger.client.gen.",
     ),
-    # dag.container() names core().container() and the flag, and the same
-    # message holds for a client.
+    # dag.container() names core().container(), where core comes from and
+    # the flag, and the same message holds for a client.
     Inversion(
         PACKAGE + "test_session_field_points_to_core",
-        '"clients now: core().container() for a core field, or container() from "',
-        '"clients now: core().directory() for a core field, or container() from "',
+        '"clients now: core().container() for a core field "',
+        '"clients now: core().directory() for a core field "',
+    ),
+    Inversion(
+        PACKAGE + "test_session_field_points_to_core",
+        '"(from dagger_clients.core import core), or container() from "',
+        '"(from dagger_clients.glow import core), or container() from "',
     ),
     Inversion(
         PACKAGE + "test_session_field_points_to_core",
@@ -224,6 +229,12 @@ INVERSIONS = [
         ISOLATION + "test_sdk_files_import_without_generated_code",
         "assert proc.returncode == 0, proc.stderr",
         "assert proc.returncode != 0, proc.stderr",
+    ),
+    # The text scan lets through the one help string, exactly.
+    Inversion(
+        ISOLATION + "test_sdk_file_text_names_no_generated_package[client/_session.py]",
+        '"(from dagger_clients.core import core)",',
+        '"(from dagger_clients.core import Container)",',
     ),
     Inversion(
         ISOLATION + "test_package_init_names_only_the_global_client",

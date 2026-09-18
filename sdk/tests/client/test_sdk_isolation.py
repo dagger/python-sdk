@@ -84,13 +84,23 @@ def test_sdk_files_import_without_generated_code():
     assert len(imported) == len(sdk_files()) - 1
 
 
+# The rule is that the SDK imports nothing generated, and the AST scan below
+# enforces it. A help message naming the package a user has to import is not
+# a dependency, so this one string is let through; every other name in the
+# text still fails.
+HELP_TEXT = {
+    pathlib.Path("client/_session.py"): "(from dagger_clients.core import core)",
+}
+
+
 @pytest.mark.parametrize("path", sdk_files(), ids=lambda p: str(p.relative_to(SRC)))
 def test_sdk_file_text_names_no_generated_package(path: pathlib.Path):
     """Catches a name in a string, which no import resolution sees."""
+    allowed = HELP_TEXT.get(path.relative_to(SRC))
     found = [
         f"{path.relative_to(SRC)}:{number}: {line.strip()}"
         for number, line in enumerate(path.read_text().splitlines(), 1)
-        if GENERATED_NAME_RE.search(line)
+        if GENERATED_NAME_RE.search(line.replace(allowed, "") if allowed else line)
     ]
 
     assert not found, "\n".join(found)

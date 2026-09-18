@@ -88,7 +88,8 @@ def test_session_field_points_to_core():
 
     assert str(info.value) == (
         "'Session' object has no attribute 'container'. The API is on the "
-        "clients now: core().container() for a core field, or container() from "
+        "clients now: core().container() for a core field "
+        "(from dagger_clients.core import core), or container() from "
         "the client's package for a client. To keep dag.container() while "
         "migrating, set global-client = true under [tool.dagger] and run "
         "dagger generate."
