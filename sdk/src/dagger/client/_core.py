@@ -194,7 +194,8 @@ class Context:
         init=False,
         compare=False,
     )
-    # The modules the query needs served first. Every selection keeps them.
+    # On the context because it is what survives chained selections and
+    # ID resolution, so it is the only thing that always reaches execute.
     targets: frozenset[Target] = frozenset()
 
     def __post_init__(self):
