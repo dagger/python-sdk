@@ -197,7 +197,7 @@ def test_client_imports_the_core_types_it_names():
         "PIN": "PIN",
         "REF": "REF",
     }
-    assert "TARGET = _Target(name=NAME, ref=REF, pin=PIN)" in code
+    assert "\n_TARGET = _Target(name=NAME, ref=REF, pin=PIN)\n" in code
 
 
 def test_client_checks_core_before_importing_its_symbols():
@@ -237,7 +237,7 @@ def test_client_entry_function():
                     _Arg("source", source),
                     _Arg("config", config, None),
                 ]
-                return _client_root(Linter, TARGET, "linter", _args, session=session)
+                return _client_root(Linter, _TARGET, "linter", _args, session=session)
                 """
             ),
             "    ",
@@ -266,7 +266,7 @@ def test_client_contributed_field():
             """
             def as_linter(binding: Binding, /) -> Linter:
                 _args: list[_Arg] = []
-                _ctx = _client_select(binding, TARGET, "asLinter", _args)
+                _ctx = _client_select(binding, _TARGET, "asLinter", _args)
                 return Linter(_ctx)
             """
         )
@@ -281,7 +281,7 @@ def test_client_contributed_field_executes_a_leaf():
     code = _linter(_LINTER, Env=env)
 
     assert "async def linter_count(env: Env, /) -> int:" in code
-    assert '_ctx = _client_select(env, TARGET, "linterCount", _args)' in code
+    assert '_ctx = _client_select(env, _TARGET, "linterCount", _args)' in code
     assert "return await _ctx.execute(int)" in code
 
 
@@ -292,7 +292,7 @@ def test_client_contributed_field_that_returns_an_id_of_its_receiver():
     assert "async def linted(binding: Binding, /) -> Binding:" in code
     # Through client_select like any contributed field, so that the module is
     # loaded before the query, never straight through the receiver's context.
-    assert '_ctx = _client_select(binding, TARGET, "linted", _args)' in code
+    assert '_ctx = _client_select(binding, _TARGET, "linted", _args)' in code
     assert "binding._ctx" not in code
     assert "return Binding(" in code
 
@@ -305,7 +305,7 @@ def test_client_contributed_field_receiver_avoids_an_argument_name():
     code = _linter(_LINTER, Env=env)
 
     assert "def with_linter(env_: Env, /, *, env: Env | None = None) -> Env:" in code
-    assert '_ctx = _client_select(env_, TARGET, "withLinter", _args)' in code
+    assert '_ctx = _client_select(env_, _TARGET, "withLinter", _args)' in code
 
 
 def test_client_overloads_one_name_on_two_receivers():
@@ -320,8 +320,8 @@ def test_client_overloads_one_name_on_two_receivers():
     assert all(ast.unparse(d.decorator_list) == "_overload" for d in overloads)
     assert not dispatcher.decorator_list
     # One selection per receiver, each with its own field arguments.
-    assert '_client_select(binding, TARGET, "asLinter", _args)' in code
-    assert '_client_select(env, TARGET, "asLinter", _args)' in code
+    assert '_client_select(binding, _TARGET, "asLinter", _args)' in code
+    assert '_client_select(env, _TARGET, "asLinter", _args)' in code
     assert '_Arg("strict", strict, None)' in code
     exported = code[code.index("__all__") :]
     assert exported.count('"as_linter",') == 1
@@ -585,6 +585,23 @@ def test_client_accepts_any_object_for_a_generic_id(runtime):
         linter.linter("source")
 
 
+def test_client_type_named_target_does_not_shadow_the_descriptor(runtime):
+    own = 'type TARGET @sourceMap(module: "linter") { value: Int! }'
+    schema = build_schema(_sdl(_LINTER) + own)
+
+    linter = runtime(schema, "linter")
+    directory = sys.modules["dagger_clients.core"].Directory(Context())
+    linter.linter(directory)
+
+    _, target, _, _ = runtime.rooted[-1]
+    assert isinstance(target, runtime.Target)
+    assert target.kwargs == {"name": "linter", "ref": ".", "pin": None}
+    assert (
+        "class TARGET(_Type):"
+        in client_package(schema, "linter", ".")[1]["__init__.py"]
+    )
+
+
 def _named(module: str, root: str, constructor: str) -> str:
     """A client whose name the engine turned into a type and a constructor."""
     return f"""
@@ -606,7 +623,7 @@ def test_client_name_becomes_a_package():
     )
     # The field name is the engine's, so the SDK never derives it.
     assert (
-        '_client_root(MyProjectDev, TARGET, "myProjectDev", _args, session=session)'
+        '_client_root(MyProjectDev, _TARGET, "myProjectDev", _args, session=session)'
         in files["__init__.py"]
     )
     # The descriptor pins the name as given, which is the one the engine knows.

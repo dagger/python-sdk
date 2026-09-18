@@ -103,7 +103,7 @@ class _EntryField(_ObjectField):
     def func_body(self) -> Iterator[str]:
         yield from self.func_prelude()
         yield (
-            f"return _client_root({self.type}, TARGET, "
+            f"return _client_root({self.type}, _TARGET, "
             f'"{self.graphql_name}", _args, session=session)'
         )
 
@@ -156,7 +156,7 @@ class _ContributedField(_ObjectField):
         yield from list(super().params())[1:]
 
     def select_expr(self) -> str:
-        return f'_client_select({self.receiver}, TARGET, "{self.graphql_name}", _args)'
+        return f'_client_select({self.receiver}, _TARGET, "{self.graphql_name}", _args)'
 
     @joiner
     def func_body(self) -> Iterator[str]:
@@ -359,8 +359,10 @@ def _client_init(
         yield f"from {NAMESPACE}.{partition.CORE} import (  # noqa: E402"
         yield from (indent(f"{name},") for name in imports)
         yield ")"
+    # Private like the helpers: a client type named TARGET would otherwise
+    # replace the descriptor, and the class itself would reach client_root.
     yield _block(
-        "TARGET = _Target(name=NAME, ref=REF, pin=PIN)",
+        "_TARGET = _Target(name=NAME, ref=REF, pin=PIN)",
         '"""The module that this client loads on first use."""',
     )
     yield from _client_body(ctx, owned, entry, contributed)
