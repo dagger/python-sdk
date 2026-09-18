@@ -31,11 +31,13 @@ async def load_target(session: Session, target: Target) -> None:
 # Only for an engine older than serveModule (dagger/dagger#14210), which
 # answers that the field does not exist. This is not a design choice: delete
 # it, with the tests that pin its wire shape, once no supported engine
-# predates the field.
+# predates the field. Until then it serves what serveModule would, under the
+# module's own name. The engine's answer is not remembered, on purpose: on
+# such an engine each load pays one failed round trip first, which is cheaper
+# than tracking engine versions for a path that goes away.
 async def _serve_without_the_field(ctx: Context, target: Target) -> None:
     await (
         _source(ctx, target)
-        .select("ModuleSource", "withName", [Arg("name", target.name)])
         .select("ModuleSource", "asModule", [])
         .select("Module", "serve", [])
         .execute()

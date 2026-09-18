@@ -168,7 +168,8 @@ NO_SERVE_MODULE = QueryError(
 
 
 async def test_engine_without_serve_module_gets_the_old_chain():
-    # Pins the wire shape of the fallback: delete with it.
+    # Pins the wire shape of the fallback: delete with it. No name, as with
+    # serveModule, so both engines serve the module under the same one.
     s = session()
     s.session.fail["serveModule"] = NO_SERVE_MODULE
 
@@ -179,10 +180,8 @@ async def test_engine_without_serve_module_gets_the_old_chain():
     assert chain == (
         "query {\n"
         '  moduleSource(refString: "github.com/eunomie/glow", refPin: "4f1c9e") {\n'
-        '    withName(name: "glow") {\n'
-        "      asModule {\n"
-        "        serve\n"
-        "      }\n"
+        "    asModule {\n"
+        "      serve\n"
         "    }\n"
         "  }\n"
         "}"
@@ -200,10 +199,8 @@ async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
         "query {\n"
         "  currentWorkspace {\n"
         '    moduleSource(path: "./clients/linter") {\n'
-        '      withName(name: "linter") {\n'
-        "        asModule {\n"
-        "          serve\n"
-        "        }\n"
+        "      asModule {\n"
+        "        serve\n"
         "      }\n"
         "    }\n"
         "  }\n"
