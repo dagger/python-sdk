@@ -82,11 +82,21 @@ func editScope(src []byte, edit scopeEdit) ([]byte, error) {
 	return []byte(d.text), nil
 }
 
+// The forms the editor and the module runtime both read. workspaceForm is
+// worded as generation's own refusal of a file the runtime cannot read.
+const (
+	workspaceForm = "Write the workspace table as an unquoted [tool.uv.workspace] header with members as an array of strings"
+	sourcesForm   = "the sources as an unquoted [tool.uv.sources] header with one key per source, such as dagger-io = { workspace = true }"
+	regenerate    = ", then run dagger generate again."
+)
+
 // checkScope reads the result back the way uv will.
 func checkScope(out []byte, edit scopeEdit) error {
 	doc, err := load(out)
 	if err != nil {
-		return fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: %w", err)
+		// The edit broke a file that parsed before, so a table was written in
+		// a shape the line editor does not see; which one, the parser cannot say.
+		return fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: %w. %s, and %s%s", err, workspaceForm, sourcesForm, regenerate)
 	}
 	fail := func(what string) error {
 		return fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: %s", what)
@@ -94,18 +104,18 @@ func checkScope(out []byte, edit scopeEdit) error {
 	uv := table(table(doc, "tool"), "uv")
 	members, _ := table(uv, "workspace")["members"].([]any)
 	if err := checkList(members, edit.Members, edit.ownedMember, normalizeMember); err != nil {
-		return fail("[tool.uv.workspace] members " + err.Error())
+		return fail("[tool.uv.workspace] members " + err.Error() + ". " + workspaceForm + regenerate)
 	}
 	sources := table(uv, "sources")
 	for _, name := range edit.Sources {
 		source, _ := sources[name].(map[string]any)
 		if workspace, _ := source["workspace"].(bool); !workspace || len(source) != 1 {
-			return fail("[tool.uv.sources] lacks " + name + " = { workspace = true }")
+			return fail("[tool.uv.sources] lacks " + name + " = { workspace = true }. Write " + sourcesForm + regenerate)
 		}
 	}
 	for name := range sources {
 		if ownedSource(normalizeDistribution(name)) && !contains(edit.Sources, name, normalizeDistribution) {
-			return fail("[tool.uv.sources] keeps " + name)
+			return fail("[tool.uv.sources] keeps " + name + ". Write " + sourcesForm + regenerate)
 		}
 	}
 	if project := table(doc, "project"); project != nil {

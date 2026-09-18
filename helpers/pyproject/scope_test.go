@@ -343,8 +343,21 @@ name = "my-module"
 [tool.uv]
 workspace = { members = ["sdk"] }
 `
-	if _, err := editScope([]byte(src), coreOnly()); err == nil {
+	_, err := editScope([]byte(src), coreOnly())
+	if err == nil {
 		t.Error("an inline workspace table was edited silently")
+	} else if !strings.Contains(err.Error(), workspaceForm) {
+		t.Errorf("the refusal does not say what to write: %v", err)
+	}
+	for name, src := range map[string]string{
+		"inline sources": "[project]\nname = \"x\"\n\n[tool.uv]\nsources = { dagger-io = { path = \"sdk\" } }\n",
+		"dotted members": "[project]\nname = \"x\"\n\n[tool]\nuv.workspace.members = [\"sdk\"]\n",
+	} {
+		if _, err := editScope([]byte(src), coreOnly()); err == nil {
+			t.Errorf("%s: edited silently", name)
+		} else if !strings.Contains(err.Error(), workspaceForm) || !strings.Contains(err.Error(), sourcesForm) {
+			t.Errorf("%s: the refusal does not say what to write: %v", name, err)
+		}
 	}
 	if _, err := editScope([]byte("not = toml = at all\n"), coreOnly()); err == nil {
 		t.Error("an unparsable file was edited")
