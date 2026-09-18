@@ -630,7 +630,7 @@ module, and it goes away with the global client.
 | --- | --- | --- |
 | Type check | `py.typed` and full annotations. A removed or changed function is a type error after `dagger generate`. | No |
 | Import | The client passes its `CORE_DIGEST` and the installed core's digest to an SDK function. A mismatch raises `dagger.StaleClientError` (an `ImportError`) with "run `dagger generate`". While the SDK registers a module's types, it logs a warning instead, so a module with a self client can regenerate (7.3). The SDK receives two strings, so it does not import core. | No |
-| Load and query | A failed load raises `dagger.ClientLoadError` with the descriptor and the cause. A "cannot query field" error on a query that needs a descriptor becomes `StaleClientError`. An engine/core mismatch is a warning in phase 1. | Yes |
+| Load and query | A failed load raises `dagger.ClientLoadError` with the descriptor and the cause. A validation error naming a missing field, on a query that needs a descriptor, becomes `StaleClientError`. It must be the validator's own error: an internal error that merely quotes the phrase is the engine failing, not a stale client, and telling the user to regenerate would send them the wrong way. An engine/core mismatch is a warning in phase 1. | Yes |
 
 A CI check that runs `dagger generate` and asserts no diff catches the rest.
 
