@@ -411,3 +411,58 @@ dagger-clients-core = { workspace = true }
 		t.Errorf("got:\n%q\nwant:\n%q", got, want)
 	}
 }
+
+func TestEditScopeEditsSourcesWrittenAsTables(t *testing.T) {
+	src := `[project]
+name = "my-module"
+dependencies = ["dagger-io", "dagger-clients-core", "dagger-clients-old"]
+
+[tool.uv.workspace]
+members = ['sdk', 'clients/core', 'clients/old']
+
+[tool.uv.sources.dagger-io]
+path = "sdk"
+editable = true
+
+[tool.uv.sources."dagger-clients-core"]
+workspace = true
+
+[tool.uv.sources.dagger-clients-old]
+workspace = true
+
+[tool.uv.sources.mine]
+path = "../mine"
+
+[tool.mine]
+answer = 42
+`
+	want := `[project]
+name = "my-module"
+dependencies = ["dagger-io", "dagger-clients-core", "dagger-clients-linter"]
+
+[tool.uv.workspace]
+members = ['sdk', 'clients/core', "clients/linter"]
+
+[tool.uv.sources.dagger-io]
+workspace = true
+
+[tool.uv.sources."dagger-clients-core"]
+workspace = true
+
+[tool.uv.sources.mine]
+path = "../mine"
+
+[tool.uv.sources.dagger-clients-linter]
+workspace = true
+
+[tool.mine]
+answer = 42
+`
+	got := mustEdit(t, src, withLinter())
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if again := mustEdit(t, got, withLinter()); again != got {
+		t.Errorf("a second edit changed the file:\n%s", again)
+	}
+}

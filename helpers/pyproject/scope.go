@@ -652,20 +652,26 @@ func stringValue(seg string) (string, bool) {
 }
 
 // editSources points every owned source at the workspace, drops the owned
-// ones that are gone, and keeps the user's.
+// ones that are gone, and keeps the user's. A source is a key of
+// [tool.uv.sources] or a table of its own, [tool.uv.sources.<name>], which is
+// how a file re-marshaled by a TOML library writes it; a new source follows
+// the file's style.
 func (d *document) editSources(want []string) {
-	sec := d.ensureSection("tool.uv.sources")
+	tables := d.editSourceTables(want)
+
 	var stale []int
 	var keep []string
-	for _, l := range d.lines(sec) {
-		key, ok := lineKey(d.text[l.start:l.end])
-		if !ok || !ownedSource(normalizeDistribution(key)) {
-			continue
-		}
-		if contains(want, key, normalizeDistribution) {
-			keep = append(keep, key)
-		} else {
-			stale = append(stale, l.start)
+	if sec := d.section(sourcesTable); sec != nil {
+		for _, l := range d.lines(sec) {
+			key, ok := lineKey(d.text[l.start:l.end])
+			if !ok || !ownedSource(normalizeDistribution(key)) {
+				continue
+			}
+			if contains(want, key, normalizeDistribution) {
+				keep = append(keep, key)
+			} else {
+				stale = append(stale, l.start)
+			}
 		}
 	}
 	// Last first, so the offsets before each deletion hold.
@@ -673,16 +679,93 @@ func (d *document) editSources(want []string) {
 		d.deleteLine(stale[i])
 	}
 	for _, key := range keep {
-		kv := d.findKey(d.section("tool.uv.sources"), key)
+		kv := d.findKey(d.section(sourcesTable), key)
 		if !isWorkspaceSource(d.text[kv.valueStart:kv.valueEnd]) {
 			d.replace(kv.valueStart, kv.valueEnd, "{ workspace = true }")
 		}
 	}
 	for _, w := range want {
-		if !contains(keep, w, normalizeDistribution) {
-			d.insertLine(d.section("tool.uv.sources"), w+" = { workspace = true }")
+		if contains(keep, w, normalizeDistribution) || contains(tables, w, normalizeDistribution) {
+			continue
+		}
+		if d.section(sourcesTable) == nil && len(tables) > 0 {
+			d.appendSourceTable(w)
+			continue
+		}
+		d.insertLine(d.ensureSection(sourcesTable), w+" = { workspace = true }")
+	}
+}
+
+const sourcesTable = "tool.uv.sources"
+
+// sourceTableName is the source a [tool.uv.sources.<name>] table is for.
+func sourceTableName(sec section) (string, bool) {
+	return strings.CutPrefix(sec.name, sourcesTable+".")
+}
+
+// editSourceTables applies editSources to the sources written as tables, one
+// edit at a time because each moves the offsets after it, and returns the
+// names of every source table left.
+func (d *document) editSourceTables(want []string) []string {
+	for d.editOneSourceTable(want) {
+	}
+	var names []string
+	for _, sec := range d.sections() {
+		if name, ok := sourceTableName(sec); ok {
+			names = append(names, name)
 		}
 	}
+	return names
+}
+
+func (d *document) editOneSourceTable(want []string) bool {
+	for _, sec := range d.sections() {
+		name, ok := sourceTableName(sec)
+		if !ok || !ownedSource(normalizeDistribution(name)) {
+			continue
+		}
+		if !contains(want, name, normalizeDistribution) {
+			d.text = d.text[:sec.headerStart] + d.text[sec.bodyEnd:]
+			return true
+		}
+		body := d.text[sec.bodyStart:sec.bodyEnd]
+		if !isWorkspaceTable(body) {
+			// The blank lines that part it from the next table stay.
+			end := sec.bodyStart + len(strings.TrimRight(body, " \t\r\n"))
+			d.replace(sec.bodyStart, end, "workspace = true")
+			return true
+		}
+	}
+	return false
+}
+
+// appendSourceTable adds a source table after the last one, before the blank
+// lines that part it from what follows.
+func (d *document) appendSourceTable(name string) {
+	var last section
+	for _, sec := range d.sections() {
+		if _, ok := sourceTableName(sec); ok {
+			last = sec
+		}
+	}
+	body := d.text[last.bodyStart:last.bodyEnd]
+	at := last.bodyStart + len(strings.TrimRight(body, " \t\r\n"))
+	if at < len(d.text) && d.text[at] == '\n' {
+		at++
+	} else {
+		d.text = d.text[:at] + "\n" + d.text[at:]
+		at++
+	}
+	d.text = d.text[:at] + "\n[" + sourcesTable + "." + name + "]\nworkspace = true\n" + d.text[at:]
+}
+
+func isWorkspaceTable(body string) bool {
+	var source map[string]any
+	if err := toml.Unmarshal([]byte(body), &source); err != nil {
+		return false
+	}
+	workspace, _ := source["workspace"].(bool)
+	return workspace && len(source) == 1
 }
 
 var keyLine = regexp.MustCompile(`^[ \t]*("[^"]*"|'[^']*'|[A-Za-z0-9_-]+)[ \t]*=`)
