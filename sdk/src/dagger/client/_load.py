@@ -1,8 +1,8 @@
 """How the module a target names gets served into a session."""
 
 from dagger.client._core import Arg, Context
+from dagger.client._descriptor import Target
 from dagger.client._session import Session
-from dagger.client._target import Target
 
 # This is the one place that knows how a module is loaded. The engine field
 # this SDK wants, `serveModule(ref, name, pin)`, takes a path or a git ref in

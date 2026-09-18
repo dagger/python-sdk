@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _entrypoint(args: argparse.Namespace) -> None:
-    from dagger.client._target import registering_types
+    from dagger.client._descriptor import registering_types
     from dagger.mod._entrypoint import write_entrypoint
     from dagger.mod.cli import load_module
 
@@ -75,7 +75,7 @@ def _entrypoint(args: argparse.Namespace) -> None:
 
 
 def _describe(args: argparse.Namespace) -> None:
-    from dagger.client._target import registering_types
+    from dagger.client._descriptor import registering_types
     from dagger.mod._describe import describe_json
     from dagger.mod.cli import load_module
 

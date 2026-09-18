@@ -20,7 +20,7 @@ from dagger._managers import ResourceManager
 from dagger.client._config import ConnectConfig
 
 if TYPE_CHECKING:
-    from dagger.client._target import Target
+    from dagger.client._descriptor import Target
 
 logger = logging.getLogger(__name__)
 

@@ -13,7 +13,7 @@ import anyio
 from dagger import telemetry
 from dagger._exceptions import QueryError
 from dagger.client._connection import connect
-from dagger.client._target import registering_types
+from dagger.client._descriptor import registering_types
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
 from dagger.mod._module import MAIN_OBJECT, Module
 

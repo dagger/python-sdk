@@ -4,8 +4,8 @@ import dataclasses
 from typing import TypeVar
 
 from dagger.client._core import Arg, Context
+from dagger.client._descriptor import Target
 from dagger.client._session import Session, default_session
-from dagger.client._target import Target
 from dagger.client.base import Type
 
 T = TypeVar("T", bound=Type)

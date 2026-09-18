@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 import cattrs
 
 if TYPE_CHECKING:
-    from dagger.client._target import Target
+    from dagger.client._descriptor import Target
 
 
 class VersionMismatch(Warning):

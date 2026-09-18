@@ -22,13 +22,13 @@ from cattrs.preconf.json import make_converter as make_json_converter
 from typing_extensions import TypeForm
 
 from dagger._exceptions import DaggerError, InvalidQueryError, QueryError
+from dagger.client._descriptor import Target, stale_client_error
 from dagger.client._session import (
     BaseConnection,
     Session,
     as_session,
     default_session,
 )
-from dagger.client._target import Target, stale_client_error
 from dagger.client.base import Input, Scalar, Type
 
 from ._guards import (
