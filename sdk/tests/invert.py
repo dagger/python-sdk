@@ -63,8 +63,10 @@ INVERSIONS = [
     # dag is the default Session.
     Inversion(
         PACKAGE + "test_dag_is_the_default_session",
-        "assert dagger.dag is default_session()",
-        "assert dagger.dag is not default_session()",
+        "assert type(dagger.dag) is Session\n"
+        "    assert dagger.dag is default_session()",
+        "assert type(dagger.dag) is Session\n"
+        "    assert dagger.dag is not default_session()",
     ),
     # The package imports with no generated code present.
     Inversion(
@@ -86,8 +88,10 @@ INVERSIONS = [
     ),
     Inversion(
         PACKAGE + "test_global_client_makes_dag_the_client",
-        "assert dagger.dag is default_session()",
-        "assert dagger.dag is not default_session()",
+        "assert isinstance(dagger.dag, Session)\n"
+        "    assert dagger.dag is default_session()",
+        "assert isinstance(dagger.dag, Session)\n"
+        "    assert dagger.dag is not default_session()",
     ),
     Inversion(
         PACKAGE + "test_connection_yields_the_global_client",
@@ -205,8 +209,11 @@ INVERSIONS = [
 
 def run(test: str) -> bool:
     """Whether the test passes."""
+    # No bytecode: pytest keys its rewritten test modules on mtime and size,
+    # so an inversion of the same length, restored within the same second,
+    # would otherwise run the inverted code again as the original.
     proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", test],
+        [sys.executable, "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider", test],
         capture_output=True,
         text=True,
         check=False,
