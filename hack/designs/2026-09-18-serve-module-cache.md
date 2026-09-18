@@ -39,8 +39,10 @@ key is unchanged.
 
 Seen on a released `v1.0.0-beta.13` engine through the SDK's fallback load path,
 and on an engine built from `dagger/dagger` at `284cd849` through `serveModule`
-itself. It is not a property of the new field; it is a property of loading a
-module at run time.
+itself. Seen again on released `v1.0.0-beta.14`, with the module driven by a
+Dang entrypoint rather than a runtime. It is not a property of the new field,
+nor of how the module is driven; it is a property of loading a module at run
+time.
 
 ## Why it used to work
 
