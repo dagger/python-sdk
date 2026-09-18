@@ -99,10 +99,13 @@ type EngineE2e {
     let engineSource = git("https://github.com/dagger/dagger")
       .ref(engineCommit)
       .asWorkspace
+    # installClient rather than playground, which engine-dev dropped after
+    # beta.13; both pins have it. The checks need git, which its default
+    # client lacks.
     engineDev(ws: engineSource)
-      .playground
-      .withMountedDirectory("./python-sdk", sdkSource)
-      .withWorkdir("./python-sdk")
+      .installClient(client: container.from("alpine:3.22").withExec(["apk", "add", "--no-cache", "git"]))
+      .withMountedDirectory("/work/python-sdk", sdkSource)
+      .withWorkdir("/work/python-sdk")
       .withExec(["git", "init", "--quiet"])
   }
 }
