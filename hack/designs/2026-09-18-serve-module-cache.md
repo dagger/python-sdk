@@ -48,6 +48,10 @@ module at run time.
 caller's module identity. Change the target, and the caller's digest changed
 with it, so the caller's functions were re-evaluated.
 
+This paragraph is an **inference from the behaviour**, not something read in
+engine code. What is measured is below; the mechanism that used to prevent it is
+the engine's to confirm.
+
 Unified clients remove `[[dependencies]]`. A generated local client records only
 a path:
 
