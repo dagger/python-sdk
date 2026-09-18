@@ -201,6 +201,33 @@ async def test_failed_load_is_retried():
     assert len(s.session.loads) == 2
 
 
+async def test_conflict_names_both_descriptors_pins_included():
+    s = session()
+    repinned = Target(name=GLOW.name, ref=GLOW.ref, pin="9b2d7a")
+
+    await glow(session=s).output()
+    with pytest.raises(ClientLoadError) as info:
+        await client_root(Glow, repinned, "glow", [], session=s).output()
+
+    assert repr(GLOW) in str(info.value)
+    assert repr(repinned) in str(info.value)
+    assert info.value.target == repinned
+
+
+async def test_conflict_after_a_failed_load_does_not_say_loaded():
+    s = session()
+    s.session.fail["serve"] = TransportError("engine went away")
+    other = Target(name="glow", ref="github.com/eunomie/glow-fork")
+
+    with pytest.raises(ClientLoadError):
+        await glow(session=s).output()
+    with pytest.raises(ClientLoadError) as info:
+        await client_root(Glow, other, "glow", [], session=s).output()
+
+    assert "already holds" in str(info.value)
+    assert "loaded" not in str(info.value)
+
+
 async def test_no_target_attaches_nothing():
     s = session()
     s.session.data = {"version": "v1"}

@@ -318,9 +318,11 @@ class Session(BaseConnection):
         """Serve the module a target names, once per session."""
         entry = self._loads.setdefault(target.name, _Load(target))
         if entry.target != target:
+            # Whole descriptors: the two may differ only by pin, and the
+            # first is held from its first attempt, loaded or not.
             msg = (
-                f"Client {target.name!r} is loaded from {entry.target.ref!r}, "
-                f"not {target.ref!r}"
+                f"This session already holds {entry.target!r} "
+                f"and cannot also take {target!r}"
             )
             raise ClientLoadError(msg, target=target)
         async with entry.lock:
