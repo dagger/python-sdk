@@ -469,7 +469,12 @@ inside a function body.
 - The SDK starts the default session on the first query. In a module and under
   `dagger run`, `SharedConnection` already does this today.
 - In a plain program, the SDK also provisions the engine on the first query, and
-  closes it at exit. [speculative] Clean close at exit needs a spike.
+  closes it at exit. **Not implemented yet** [confident]. `SharedConnection`
+  reads the session from the environment, and raises
+  `ClientConnectionError("No active engine session to connect to")` when there
+  is none. A plain program therefore needs `async with dagger.connection():`,
+  which does provision, or `dagger run`. Verified both ways by hand. Check 23
+  fails until the default session provisions by itself.
 - A caller passes `session=` only to use a specific session.
 
 One session per client does not work: an object belongs to one session, and a
@@ -901,8 +906,8 @@ removal date is Yves's call.
 - [speculative] The global client as a second import package of the `sdk/`
   member, and whether mypy and pyright then type `dagger.dag` as the global
   `Client`.
-- [speculative] The default session provisions the engine on first query and
-  closes it cleanly at exit.
+- [not implemented] The default session provisions the engine on first query and
+  closes it cleanly at exit. See 8.1.
 - [speculative] `Module.serve` from a module session on the engine this repo targets.
 - [speculative] Spec decision 4: a client function whose signature names a type
   from another client.
@@ -926,6 +931,17 @@ Verified while building it, against a live engine:
 - Core alone: read the client-facing schema through an empty stand-in module,
   then strip that module out of the schema. Core comes out byte for byte the
   same as without the stand-in.
+- The whole path works with the released CLI on a released engine, outside the
+  check harness (`hack/try-unified-clients.sh`): `dagger module init python`
+  twice, `dagger module client add ../lib`, then a module calling
+  `lib().greeting()` through `dagger_clients.lib`, and `core()` beside it.
+- A plain program, in a scope with no `[project]` table, calls a client through
+  `dagger.connection()`. The engine is provisioned, the module is loaded, and
+  the call returns.
+- A module's manifest names its runtime `[runtime] source = "python"`, which
+  means the engine's **builtin** Python SDK. A checkout under development must
+  be named by path, or it generates the new layout and the builtin runtime then
+  refuses it for want of `sdk/src/dagger/client/gen.py`.
 - Core's digest does not depend on which clients are generated beside it. The
   digest comes from the client-facing schema. The module-facing schema gives a
   different digest, so generation must always read the same view.
