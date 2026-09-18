@@ -1,0 +1,5 @@
+[project]
+name = "dagger-clients-core"
+
+[tool.dagger]
+generated = "core"

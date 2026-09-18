@@ -15,6 +15,7 @@ type E2e {
   let runtimeModulePath: String! = fixtureRoot + "/runtime/app"
   let tomlGenerateModulePath: String! = fixtureRoot + "/toml-generate/app"
   let clientDepPath: String! = fixtureRoot + "/clients/dep"
+  let plainScopePath: String! = fixtureRoot + "/plain"
   let staticTypesModulePath: String! = fixtureRoot + "/static-types"
   let runtimeGreeting: String! = "served by the python-sdk runtime"
   let mixedDiscoveryModulePath: String! = fixtureRoot + "/mixed-discovery/ancestor/work/app"
@@ -110,8 +111,9 @@ type E2e {
 
   """
   findClientRoot answers with the directory of the nearest pyproject.toml as a
-  workspace-root-relative path, with the module rather than its vendored client
-  library, and with null where there is none.
+  workspace-root-relative path, with the scope rather than one of its
+  generated members, with the module rather than its vendored client library
+  from before the marker, and with null where there is none.
   """
   pub findClientRootCheck(ws: Workspace!): Void @check {
     assert(pythonSdk.findClientRoot(ws.withWorkdir(lookupNestedPath)) == lookupModulePath, "findClientRoot should find the module owning a nested path")
@@ -123,8 +125,16 @@ type E2e {
     assert(pythonSdk.findClientRoot(nestedSdkWs.withWorkdir(runtimeModulePath + "/sdk/src/dagger/client")) == runtimeModulePath + "/sdk", "findClientRoot should answer with a nested module named sdk, not lift it into its parent")
     assert(pythonSdk.findClientRoot(ws) == null, "findClientRoot should return null when it finds no client root")
 
+    # A generated member lifts to its scope: the marker tells, not the name.
+    # The members are fixtures on disk, because findUp does not see files
+    # added to the workspace.
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(lookupModulePath + "/clients/linter")) == lookupModulePath, "findClientRoot should lift a generated client to its scope")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(lookupModulePath + "/sdk")) == lookupModulePath, "findClientRoot should lift a marked sdk/ to its scope")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(plainScopePath + "/clients/core")) == plainScopePath, "findClientRoot should lift core to a scope without a module")
+
     null
   }
+
 
   """
   generateScope initializes a module that has no config: the template, a

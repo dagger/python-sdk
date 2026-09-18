@@ -1,0 +1,5 @@
+[project]
+name = "dagger-clients-linter"
+
+[tool.dagger]
+generated = "client"

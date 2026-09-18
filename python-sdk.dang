@@ -34,17 +34,36 @@ type PythonSdk {
 
   """
   Find the Python client root containing the workspace cwd: the directory of
-  the nearest pyproject.toml, relative to the workspace root. A module's
-  vendored client library carries its own pyproject.toml, so the Python module
-  owning it answers instead; a directory with a module config of its own is a
-  module, never a vendored library. Null when there is none.
+  the nearest pyproject.toml, relative to the workspace root. A generated
+  member, marked `[tool.dagger] generated` in its pyproject.toml, belongs to
+  the scope above it, so that scope answers. A module's vendored client
+  library from before the marker carries its own pyproject.toml too, so the
+  Python module owning it answers instead; a directory with a module config
+  of its own is a module, never a vendored library. Null when there is none.
   """
   pub findClientRoot(ws: Workspace!): String {
     let found = ws.findUp("pyproject.toml")
     if (found == null) {
       null
     } else {
-      let scope = normalizePath(found.trimSuffix("pyproject.toml"))
+      clientRootOf(ws, normalizePath(found.trimSuffix("pyproject.toml")))
+    }
+  }
+
+  """
+  The scope that a pyproject.toml belongs to.
+  """
+  let clientRootOf(ws: Workspace!, scope: String!): String! {
+    if (scope != "." and isGeneratedMember(ws, scope)) {
+      # Members sit at most two levels below their scope, but a scope can be
+      # a member of something else, so lift until the file is not a member's.
+      let above = ws.findUp("pyproject.toml", from: "/" + parentPath(scope))
+      if (above == null) {
+        scope
+      } else {
+        clientRootOf(ws, normalizePath(above.trimSuffix("pyproject.toml")))
+      }
+    } else {
       let vendorParent = if (scope == vendorDirName) {
         "."
       } else if (scope.trimSuffix("/" + vendorDirName) != scope) {
@@ -61,6 +80,24 @@ type PythonSdk {
         scope
       }
     }
+  }
+
+  """
+  Whether a scope's pyproject.toml is one this SDK generated: sdk/, core or a
+  client. Not a TOML parser: the marker is a key of one table, on its own line.
+  """
+  let isGeneratedMember(ws: Workspace!, scope: String!): Boolean! {
+    scopeHasFile(ws, scope, "pyproject.toml") and
+      hasGeneratedMarker(ws.file("/" + scopePath(scope, "pyproject.toml")).contents)
+  }
+
+  let hasGeneratedMarker(toml: String!): Boolean! {
+    toml.containsMatch("(?ms)^\\s*\\[tool\\.dagger\\][^\\[]*^\\s*generated\\s*=")
+  }
+
+  let parentPath(path: String!): String! {
+    let parts = path.split("/")
+    if (parts.length < 2) { "." } else { parts.takeFirst(parts.length - 1).join("/") }
   }
 
   """
