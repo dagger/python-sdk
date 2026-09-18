@@ -49,7 +49,7 @@ type Scope {
     let cleared = staleClients(existing, members).reduce(ws) { target, dir =>
       target.withoutDirectory(memberPath(clientsDirName + "/" + dir))
     }
-    let withSdk = replaced(cleared, sdkDirName, sdkMember)
+    let withSdk = replaced(cleared, sdkDirName, sdkMember(members))
     let withCore = replaced(withSdk, clientsDirName + "/" + coreDirName, coreMember)
     let withClients = members.reduce(withCore) { target, member =>
       replaced(target, clientsDirName + "/" + member.dir, clientMember(member))
@@ -66,10 +66,37 @@ type Scope {
   let coreDistribution: String! = "dagger-clients-core"
 
   """
-  The bindings of the layout before this one. A module that still has them is
-  being upgraded, and gets the global client so its code keeps working.
+  The bindings of the layout before this one: vendored with the library, or
+  next to the user's code for a module on a published dagger-io. A module
+  that still has them is being upgraded, and gets the global client so its
+  code keeps working.
   """
   let legacyBindingsPath: String! = "sdk/src/dagger/client/gen.py"
+  let legacyUserBindingsPath: String! = "src/dagger_gen.py"
+
+  let globalPackage: String! = "dagger_global"
+
+  """
+  Whether the scope gets the temporary global client: its scope file asks for
+  it, or it is a module upgraded from the bindings of the layout before,
+  whose code still calls `dag`. Only generation reads the flag.
+  """
+  let globalClient: Boolean! {
+    let existing = ws.directory(root)
+    upgrading or (existing.exists(scopeFileName) and hasGlobalClientFlag(existing.file(scopeFileName).contents))
+  }
+
+  """
+  Whether this generation upgrades a module from the layout before. The
+  vendored bindings go with sdk/, but src/ is the user's and keeps
+  dagger_gen.py, so that one counts only until the scope has its core: a
+  flag turned off afterwards stays off.
+  """
+  let upgrading: Boolean! {
+    let existing = ws.directory(root)
+    existing.exists(legacyBindingsPath) or
+      (existing.exists(legacyUserBindingsPath) and generatedKind(existing, clientsDirName + "/" + coreDirName) != "core")
+  }
 
   let root: String! {
     if (path == ".") { "/" } else { "/" + path }
@@ -219,10 +246,12 @@ type Scope {
 
   """
   The SDK files: the importable library and its license, with the project
-  file stripped down to what a member needs. No generated code goes in.
+  file stripped down to what a member needs. No generated code goes in but
+  the temporary global client, the one generated package the SDK files may
+  import.
   """
-  let sdkMember: Directory! {
-    currentModule.source
+  let sdkMember(members: [ClientMember!]!): Directory! {
+    let files = currentModule.source
       .directory("sdk")
       .filter(include: [
         "LICENSE",
@@ -231,18 +260,50 @@ type Scope {
         "src/**/*.typed",
         "!" + "src/dagger/client/gen.py",
       ])
-      .withFile(scopeFileName, sdkPyproject)
+      .withFile(scopeFileName, sdkPyproject(members))
+    if (globalClient) {
+      files.withDirectory("src/" + globalPackage, globalSource(members))
+    } else {
+      files
+    }
   }
 
   """
   pyproject.toml without its development sections: vendored verbatim, it names
   the absent codegen workspace member and uv refuses to install the library.
+  With the global client, which imports them, it depends on core and on each
+  client.
   """
-  let sdkPyproject: File! {
+  let sdkPyproject(members: [ClientMember!]!): File! {
+    let globalDependencies = if (globalClient) {
+      [coreDistribution] + members.map { member => member.distribution }
+    } else {
+      [] :: [String!]!
+    }
     codegenBase
       .withFile(stripScriptPath, currentModule.source.file("helpers/vendor-pyproject/strip_dev_sections.py"))
-      .withExec(["python", stripScriptPath, "pyproject.toml", "/member-pyproject.toml"])
+      .withExec(["python", stripScriptPath, "pyproject.toml", "/member-pyproject.toml"] + globalDependencies)
       .file("/member-pyproject.toml")
+  }
+
+  """
+  The global client, from the schema each client is generated from, or from
+  core's for a scope without a client. The generator refuses schemas whose
+  cores differ, as it refuses a client generated against another core.
+  """
+  let globalSource(members: [ClientMember!]!): Directory! {
+    let mounted = if (members.length == 0) {
+      codegenEnv.withMountedFile(schemasPath + "/" + coreDirName + ".json", coreSchema)
+    } else {
+      members.reduce(codegenEnv) { ctr, member =>
+        ctr.withMountedFile(schemasPath + "/" + member.dir + ".json", clientSchema(member))
+      }
+    }
+    let names = if (members.length == 0) { [coreDirName] } else { members.map { member => member.dir } }
+    let inputs = names.reduce([] :: [String!]!) { args, name => args + ["-i", schemasPath + "/" + name + ".json"] }
+    mounted
+      .withExec([codegenPython, "-m", "codegen", "generate-global"] + inputs + ["-o", outputPath])
+      .directory(outputPath + "/" + globalPackage)
   }
 
   let coreMember: Directory! {
@@ -302,10 +363,14 @@ type Scope {
       .withDirectory("src", clientSource(member))
   }
 
+  let clientSchema(member: ClientMember!): File! {
+    member.source.withEngineVersion(view).clientSchemaIntrospectionJSON
+  }
+
   let clientSource(member: ClientMember!): Directory! {
     let pin = if (member.pin == null) { [] :: [String!]! } else { ["--pin", member.pin ?? ""] }
     codegenEnv
-      .withMountedFile(schemaPath, member.source.withEngineVersion(view).clientSchemaIntrospectionJSON)
+      .withMountedFile(schemaPath, clientSchema(member))
       .withExec([
         codegenPython, "-m", "codegen", "generate-client",
         "-i", schemaPath, "-o", outputPath,
@@ -339,7 +404,7 @@ type Scope {
   The scope file with the SDK-owned entries set: the members, one workspace
   source per member, and a dependency on core and on each client. A scope
   without one starts from an empty file. Being upgraded writes the global
-  client flag once.
+  client flag once, so turning it off later sticks.
   """
   let scopeFile(existing: Directory!, members: [ClientMember!]!): File! {
     let current = if (existing.exists(scopeFileName)) {
@@ -361,15 +426,11 @@ type Scope {
         "--dependency", member.distribution,
       ]
     }
-    let upgrade = if (existing.exists(legacyBindingsPath)) { ["--global-client", "true"] } else { [] :: [String!]! }
-    let edited = pyprojectTool
+    let upgrade = if (upgrading) { ["--global-client", "true"] } else { [] :: [String!]! }
+    pyprojectTool
       .withFile(toolPath, current)
       .withExec(["pyproject", "edit-scope", toolPath] + base + perClient + upgrade)
       .file(toolPath)
-    if (existing.exists(legacyBindingsPath) or hasGlobalClientFlag(current.contents)) {
-      raise "the global client is not generated yet: " + path + " asks for it with `[tool.dagger] global-client = true` in its pyproject.toml; turn it off with `mod config set --global-client=false` and import from dagger_clients.core instead"
-    }
-    edited
   }
 
   let hasGlobalClientFlag(toml: String!): Boolean! {
@@ -423,6 +484,7 @@ type Scope {
 
   let stripScriptPath: String! = "/strip-dev-sections.py"
   let schemaPath: String! = "/schema.json"
+  let schemasPath: String! = "/schemas"
   let outputPath: String! = "/generated"
 
   # musl runs the generator ~0.3s slower than glibc, but the glibc image is
