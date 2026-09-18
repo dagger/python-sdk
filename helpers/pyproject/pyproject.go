@@ -90,16 +90,6 @@ func setUseUv(doc map[string]any, enabled bool) {
 	ensureTable(ensureTable(doc, "tool"), "dagger")["use-uv"] = false
 }
 
-// setGlobalClient writes the flag, or removes it: off is the default, and
-// generation reads the flag's presence.
-func setGlobalClient(doc map[string]any, enabled bool) {
-	if !enabled {
-		removeDaggerKey(doc, "global-client")
-		return
-	}
-	ensureTable(ensureTable(doc, "tool"), "dagger")["global-client"] = true
-}
-
 func setBaseImage(doc map[string]any, img string) {
 	ensureTable(ensureTable(doc, "tool"), "dagger")["base-image"] = img
 }

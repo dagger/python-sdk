@@ -110,15 +110,38 @@ func checkScope(out []byte, edit scopeEdit) error {
 		}
 	}
 	if edit.GlobalClient != nil {
-		value, ok := table(table(doc, "tool"), "dagger")["global-client"].(bool)
-		if *edit.GlobalClient && !(ok && value) {
-			return fail("[tool.dagger] lacks global-client = true")
-		}
-		if !*edit.GlobalClient && ok {
-			return fail("[tool.dagger] keeps global-client")
-		}
+		return checkGlobalClient(doc, *edit.GlobalClient)
 	}
 	return nil
+}
+
+func checkGlobalClient(doc map[string]any, on bool) error {
+	value, ok := table(table(doc, "tool"), "dagger")["global-client"].(bool)
+	if on && !(ok && value) {
+		return fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: [tool.dagger] lacks global-client = true")
+	}
+	if !on && ok {
+		return fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: [tool.dagger] keeps global-client")
+	}
+	return nil
+}
+
+// editGlobalClient writes or clears the global client flag alone, with the
+// same care as editScope: `mod config set` owns that one key, not the file.
+func editGlobalClient(src []byte, on bool) ([]byte, error) {
+	if _, err := load(src); err != nil {
+		return nil, err
+	}
+	d := &document{text: string(src)}
+	d.editGlobalClient(on)
+	doc, err := load([]byte(d.text))
+	if err != nil {
+		return nil, fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: %w", err)
+	}
+	if err := checkGlobalClient(doc, on); err != nil {
+		return nil, err
+	}
+	return []byte(d.text), nil
 }
 
 func checkList(values []any, want []string, owned func(string) bool, normalize func(string) string) error {

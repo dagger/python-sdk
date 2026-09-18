@@ -143,11 +143,4 @@ func TestGetGlobalClient(t *testing.T) {
 	if v, ok := getGlobalClient(doc); !ok || !v {
 		t.Errorf("should report set and true, got value=%v ok=%v", v, ok)
 	}
-	setGlobalClient(doc, false)
-	if _, ok := getGlobalClient(doc); ok {
-		t.Error("global-client should report unset after clearing")
-	}
-	if v, ok := getUseUv(doc); !ok || v {
-		t.Error("clearing global-client clobbered use-uv")
-	}
 }

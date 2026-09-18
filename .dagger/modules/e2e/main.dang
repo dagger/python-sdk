@@ -1020,6 +1020,7 @@ type E2e {
     assert(pythonSdk.mod(onWs, path: configModulePath).config.get.globalClient == true, "globalClient should read true once set")
     let off = pythonSdk.mod(onWs, path: configModulePath).config.set(globalClient: false)
     assertNotContains(off.after.file(pyproj).contents, "global-client", "setting globalClient to false should remove the flag")
+    assert(off.after.file(pyproj).contents == on.before.file(pyproj).contents, "setting globalClient true then false changed more than the flag")
 
     null
   }

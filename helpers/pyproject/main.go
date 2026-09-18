@@ -15,8 +15,9 @@ func main() {
 }
 
 // run dispatches a subcommand. get-* commands print to stdout (no trailing
-// newline). set-* commands edit the file in place and re-emit it. edit-scope
-// edits the file in place and keeps its formatting.
+// newline). set-* commands edit the file in place and re-emit it.
+// edit-scope and set-global-client edit the file in place and keep its
+// formatting: they touch a scope file that generation also owns.
 //
 // usage: pyproject <command> <file> [value | flags]
 func run(args []string) error {
@@ -29,8 +30,11 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if cmd == "edit-scope" {
+	switch cmd {
+	case "edit-scope":
 		return runEditScope(path, data, args[2:])
+	case "set-global-client":
+		return runSetGlobalClient(path, data, args)
 	}
 	doc, err := load(data)
 	if err != nil {
@@ -74,12 +78,6 @@ func run(args []string) error {
 			return err
 		}
 		setBaseImage(doc, v)
-	case "set-global-client":
-		v, err := value(args)
-		if err != nil {
-			return err
-		}
-		setGlobalClient(doc, v == "true")
 	default:
 		return fmt.Errorf("unknown command: %s", cmd)
 	}
@@ -119,6 +117,28 @@ func runEditScope(path string, data []byte, args []string) error {
 		return fmt.Errorf("edit-scope: --global-client takes true or false, not %q", *globalClient)
 	}
 	out, err := editScope(data, edit)
+	if err != nil {
+		return err
+	}
+	if string(out) == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+// runSetGlobalClient writes or clears the global client flag and nothing
+// else, so clearing it gives back the file as it was before it was set.
+//
+// usage: pyproject set-global-client <file> true|false
+func runSetGlobalClient(path string, data []byte, args []string) error {
+	v, err := value(args)
+	if err != nil {
+		return err
+	}
+	if v != "true" && v != "false" {
+		return fmt.Errorf("set-global-client takes true or false, not %q", v)
+	}
+	out, err := editGlobalClient(data, v == "true")
 	if err != nil {
 		return err
 	}

@@ -120,3 +120,63 @@ func TestRunSetGlobalClient(t *testing.T) {
 		t.Errorf("clearing the flag left it or its table behind:\n%s", data)
 	}
 }
+
+// set-global-client owns one key, not the file: set then cleared, the file
+// comes back byte for byte, with its table order, quoting and inline sources.
+func TestRunSetGlobalClientRoundTripsTheFile(t *testing.T) {
+	for name, src := range map[string]string{
+		"no dagger table": `[project]
+name = 'config'   # single quotes
+dependencies = [
+    "dagger-io",
+    "dagger-clients-core",
+]
+
+[tool.uv.sources]
+dagger-io = { workspace = true }
+dagger-clients-core = { workspace = true }
+
+[tool.uv.workspace]
+members = ["sdk", "clients/core"]
+
+[build-system]
+requires = ["uv_build>=0.8.4,<0.12.0"]
+build-backend = "uv_build"
+`,
+		"a dagger table in the middle": `[project]
+name = "config"
+requires-python = ">=3.12"
+
+[tool.dagger]
+use-uv = false  # a comment of the user's
+base-image = "python:3.12-slim"
+
+[tool.uv.sources]
+dagger-io = { workspace = true }
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := writeTemp(t, src)
+			if err := run([]string{"set-global-client", p, "true"}); err != nil {
+				t.Fatalf("set: %v", err)
+			}
+			data, _ := os.ReadFile(p)
+			if !strings.Contains(string(data), "global-client = true") {
+				t.Fatalf("flag not written:\n%s", data)
+			}
+			if err := run([]string{"set-global-client", p, "false"}); err != nil {
+				t.Fatalf("clear: %v", err)
+			}
+			if data, _ = os.ReadFile(p); string(data) != src {
+				t.Errorf("clearing the flag did not give the file back:\ngot:\n%s\nwant:\n%s", data, src)
+			}
+		})
+	}
+}
+
+func TestRunSetGlobalClientRejectsAnotherValue(t *testing.T) {
+	p := writeTemp(t, sample)
+	if err := run([]string{"set-global-client", p, "yes"}); err == nil {
+		t.Error("expected an error for a value that is not true or false")
+	}
+}
