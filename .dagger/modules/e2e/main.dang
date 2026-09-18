@@ -725,16 +725,13 @@ type E2e {
   }
 
   """
-  A module on this repository's runtime builds and runs, driven through a
-  released CLI. The fixture points `[runtime] source` at `runtime/` by relative
+  A module on this repository's runtime builds and runs, driven through the
+  floor release's CLI. The fixture points `[runtime] source` at `runtime/` by relative
   path, so the runtime in this working tree answers.
   """
   pub runtimeCallCheck(ws: Workspace!): Void @check {
-    let run = sdkSdk
-      .target(ws.directory("/"), ".")
-      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
-    run.assertSuccess
-    assertContains(run.stdout, runtimeGreeting, "the module did not run on this repository's runtime")
+    let called = cli(playground(ws), ["-m", runtimeModulePath, "call", "greeting"]).stdout
+    assertContains(called, runtimeGreeting, "the module did not run on this repository's runtime")
 
     null
   }
@@ -745,14 +742,11 @@ type E2e {
   builtin honours too.
   """
   pub runtimeRequiresGeneratedFilesCheck(ws: Workspace!): Void @check {
-    let stripped = ws
-      .directory("/")
-      .withoutFile(runtimeModulePath + "/sdk/pyproject.toml")
-    let run = sdkSdk
-      .target(stripped, ".")
-      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
-    run.assertFailure
-    assertContains(run.stderr, "run `dagger generate` and commit", "the runtime did not report the missing generated file")
+    let stripped = playgroundTree(ws).withoutFile(runtimeModulePath + "/sdk/pyproject.toml")
+    let refused = playgroundOf(stripped)
+      .withExec(["dagger", "-m", runtimeModulePath, "call", "greeting"], experimentalPrivilegedNesting: true, expect: ReturnType.FAILURE)
+      .stderr
+    assertContains(refused, "run `dagger generate` and commit", "the runtime did not report the missing generated file")
 
     null
   }
@@ -886,7 +880,7 @@ type E2e {
   """
   A module calls the client it declared: its code imports the client and
   calls the client's module through the engine, on this repository's
-  runtime, driven through a released CLI.
+  runtime, driven through the floor release's CLI.
   """
   pub runtimeClientCallCheck(ws: Workspace!): Void @check {
     let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
@@ -898,22 +892,13 @@ type E2e {
       "    @function\n" +
       "    async def greeting(self) -> str:\n" +
       "        return await client_dep().greeting()\n")
-    # The CLI runs in sdk-sdk's workspace, which holds this repository under
-    # vendorRoot, so the scope is generated in that layout: the client's
-    # descriptor names its module from the root the CLI sees.
-    let vendored = directory
-      .withDirectory(vendorRoot, calling.directory("/"))
-      .asWorkspace(cwd: vendorRoot + "/" + tomlGenerateModulePath)
     let generated = pythonSdk
-      .generateScope(vendored, isModule: true, name: "toml-generate-app", clients: [vendored.moduleSource("/" + vendorRoot + "/" + clientDepPath)])
+      .generateScope(calling.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [calling.moduleSource("/" + clientDepPath)])
       .withWorkdir(".")
       # The runtime of this working tree, as the runtime fixture names it.
-      .withNewFile("/" + vendorRoot + "/" + tomlGenerateModulePath + "/dagger-module.toml", runtimeOnlyManifest("toml-generate-app"))
-    let run = sdkSdk
-      .target(generated.directory("/" + vendorRoot), ".")
-      .runInstalled(["call", "-m", vendorRoot + "/" + tomlGenerateModulePath, "greeting"])
-    run.assertSuccess
-    assertContains(run.stdout, "hello from the client dependency", "the module did not call its client")
+      .withNewFile("/" + tomlGenerateModulePath + "/dagger-module.toml", runtimeOnlyManifest("toml-generate-app"))
+    let called = cli(playground(generated), ["-m", tomlGenerateModulePath, "call", "greeting"]).stdout
+    assertContains(called, "hello from the client dependency", "the module did not call its client: " + called)
 
     null
   }
@@ -921,7 +906,7 @@ type E2e {
   """
   An upgraded module's code runs unchanged through the global client: `dag`
   and `dagger.Directory` are core's, on this repository's runtime, driven
-  through a released CLI. No client is called, so no module is loaded.
+  through the floor release's CLI. No client is called, so no module is loaded.
   """
   pub runtimeGlobalClientCallCheck(ws: Workspace!): Void @check {
     let sourcePath = "/" + runtimeModulePath + "/src/runtime_app/__init__.py"
@@ -939,11 +924,8 @@ type E2e {
       .generateScope(legacy.withWorkdir(runtimeModulePath), isModule: true, name: "runtime-app", clients: [])
       .withWorkdir(".")
       .withNewFile("/" + runtimeModulePath + "/dagger-module.toml", runtimeOnlyManifest("runtime-app"))
-    let run = sdkSdk
-      .target(upgraded.directory("/"), ".")
-      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
-    run.assertSuccess
-    assertContains(run.stdout, "served through the global client by dagger_clients.core", "the upgraded module did not run through the global client")
+    let called = cli(playground(upgraded), ["-m", runtimeModulePath, "call", "greeting"]).stdout
+    assertContains(called, "served through the global client by dagger_clients.core", "the upgraded module did not run through the global client: " + called)
 
     null
   }
@@ -955,14 +937,6 @@ type E2e {
   let runtimeOnlyManifest(name: String!): String! {
     "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
   }
-
-  """
-  The fixture as seen from sdk-sdk's scratch workspace, where this repository
-  is vendored.
-  """
-  let runtimeFixturePath: String! = vendorRoot + "/" + fixtureRoot + "/runtime/app"
-
-  let vendorRoot: String! = "vendor/sdk-workspace"
 
   let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
@@ -1234,9 +1208,7 @@ type E2e {
 
   """
   The first release that runs Dang entrypoints and serves serveModule, which
-  is this SDK's floor. Its engine image carries its CLI, and git. The checks
-  through sdk-sdk keep that module's own CLI, which it drives with flags this
-  release no longer takes.
+  is this SDK's floor. Its engine image carries its CLI, and git.
   """
   let floorVersion: String! = "1.0.0-beta.14"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
@@ -1253,10 +1225,24 @@ type E2e {
   rather than pass on an engine the SDK does not claim.
   """
   let playground(ws: Workspace!): Container! {
+    playgroundOf(playgroundTree(ws))
+  }
+
+  """
+  The files of a workspace that the playground mounts.
+  """
+  let playgroundTree(ws: Workspace!): Directory! {
+    ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot])
+  }
+
+  """
+  The playground over a tree a check has changed.
+  """
+  let playgroundOf(tree: Directory!): Container! {
     let ctr = container
       .from(floorImage)
       .withoutEntrypoint
-      .withMountedDirectory(playgroundRoot, ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot]))
+      .withMountedDirectory(playgroundRoot, tree)
       .withWorkdir(playgroundRoot)
       .withExec(["git", "init", "--quiet"])
     checkFloorEngine(ctr)
@@ -1601,11 +1587,9 @@ type E2e {
       .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
       .withWorkdir(".")
     let types = generated.file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang")
-    let run = sdkSdk
-      .target(ws.directory("/").withFile(staticTypesModulePath + "/types.dang", types), ".")
-      .runInstalled(["call", "-m", "vendor/sdk-workspace/" + staticTypesModulePath, "count"])
-    run.assertSuccess
-    assert(run.stdout.trimSpace == "1", "types.dang did not evaluate to the fixture's one type: " + run.stdout)
+    let tree = playgroundTree(ws).withFile(staticTypesModulePath + "/types.dang", types)
+    let counted = cli(playgroundOf(tree), ["-m", staticTypesModulePath, "call", "count"]).stdout
+    assert(counted.trimSpace == "1", "types.dang did not evaluate to the fixture's one type: " + counted)
 
     null
   }
