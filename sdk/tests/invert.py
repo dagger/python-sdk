@@ -174,8 +174,8 @@ INVERSIONS = [
     # Bindings an earlier version left in dagger_gen are named, not loaded.
     Inversion(
         PACKAGE + "test_legacy_bindings_are_named_not_loaded",
-        '"SDK, and they are no longer loaded. Run `dagger generate`.\\n"',
-        '"SDK, and they are no longer loaded. Run `dagger develop`.\\n"',
+        '"it, `dagger generate` removes it; if you wrote it, delete or rename it.\\n"',
+        '"it, `dagger generate` removes it.\\n"',
     ),
     Inversion(
         PACKAGE + "test_no_legacy_bindings_no_warning",

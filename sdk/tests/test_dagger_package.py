@@ -326,8 +326,8 @@ def test_legacy_bindings_are_named_not_loaded(tmp_path: pathlib.Path):
     legacy.write_text("raise AssertionError('the legacy bindings were loaded')\n")
 
     assert _run(IMPORT_WARNINGS, tmp_path) == (
-        f"UserWarning {legacy} holds bindings from an earlier version of the "
-        "SDK, and they are no longer loaded. Run `dagger generate`.\n"
+        f"UserWarning {legacy} is no longer loaded. If an earlier SDK generated "
+        "it, `dagger generate` removes it; if you wrote it, delete or rename it.\n"
     )
 
 

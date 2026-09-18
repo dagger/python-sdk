@@ -57,8 +57,8 @@ _sessions.set_default_finder(_global_dag)
 # only, never loaded: without this, dag just loses its API with no word why.
 if (_legacy := _importlib_util.find_spec("dagger_gen")) is not None:
     _warnings.warn(
-        f"{_legacy.origin} holds bindings from an earlier version of the SDK, "
-        "and they are no longer loaded. Run `dagger generate`.",
+        f"{_legacy.origin} is no longer loaded. If an earlier SDK generated "
+        "it, `dagger generate` removes it; if you wrote it, delete or rename it.",
         stacklevel=2,
     )
 del _legacy
