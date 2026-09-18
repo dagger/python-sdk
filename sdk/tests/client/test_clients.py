@@ -140,14 +140,43 @@ async def test_concurrent_queries_load_once():
     assert len(s.session.loads) == 1
 
 
-async def test_transitional_adapter_wire_shape():
-    # The one test on the load document. It pins the chain the engine has
-    # today and goes away with it, when serveModule lands.
+async def test_load_is_one_call_for_a_git_target():
     s = session()
 
     await glow(session=s).output()
 
     assert s.session.loads == [
+        "query {\n"
+        '  serveModule(address: "github.com/eunomie/glow", refPin: "4f1c9e")\n'
+        "}"
+    ]
+
+
+async def test_load_is_the_same_call_for_a_local_target():
+    s = session()
+
+    await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    load, query = s.session.queries
+    assert load == 'query {\n  serveModule(address: "./clients/linter")\n}'
+    assert query == "query {\n  linter {\n    output\n  }\n}"
+
+
+NO_SERVE_MODULE = QueryError(
+    [QueryErrorValue('Cannot query field "serveModule" on type "Query".')], "query"
+)
+
+
+async def test_engine_without_serve_module_gets_the_old_chain():
+    # Pins the wire shape of the fallback: delete with it.
+    s = session()
+    s.session.fail["serveModule"] = NO_SERVE_MODULE
+
+    await glow(session=s).output()
+
+    attempt, chain = s.session.loads
+    assert "serveModule" in attempt
+    assert chain == (
         "query {\n"
         '  moduleSource(refString: "github.com/eunomie/glow", refPin: "4f1c9e") {\n'
         '    withName(name: "glow") {\n'
@@ -157,18 +186,57 @@ async def test_transitional_adapter_wire_shape():
         "    }\n"
         "  }\n"
         "}"
-    ]
+    )
 
 
-async def test_local_target_loads_before_its_query():
+async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
     s = session()
+    s.session.fail["serveModule"] = NO_SERVE_MODULE
 
     await client_root(Glow, LINTER, "linter", [], session=s).output()
 
-    load, query = s.session.queries
-    assert is_load(load)
-    assert LINTER.ref in load
-    assert query == "query {\n  linter {\n    output\n  }\n}"
+    _, chain, query = s.session.queries
+    assert chain == (
+        "query {\n"
+        "  currentWorkspace {\n"
+        '    moduleSource(path: "./clients/linter") {\n'
+        '      withName(name: "linter") {\n'
+        "        asModule {\n"
+        "          serve\n"
+        "        }\n"
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}"
+    )
+    assert query.startswith("query {\n  linter {")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "serveModule" on type "Query".', path=["x"]
+            ),
+            id="resolver-error-with-the-phrase",
+        ),
+        pytest.param(
+            QueryErrorValue('Cannot query field "asModule" on type "ModuleSource".'),
+            id="another-missing-field",
+        ),
+        pytest.param(QueryErrorValue("boom"), id="plain-error"),
+    ],
+)
+async def test_other_load_errors_do_not_fall_back(error):
+    s = session()
+    s.session.fail["serveModule"] = QueryError([error], "query")
+
+    with pytest.raises(ClientLoadError) as info:
+        await glow(session=s).output()
+
+    assert len(s.session.loads) == 1
+    assert info.value.__cause__ is s.session.fail["serveModule"]
 
 
 async def test_failed_load_names_the_target_and_the_cause():
@@ -372,8 +440,25 @@ async def test_missing_field_becomes_stale_client_error():
     with pytest.raises(StaleClientError, match="dagger generate") as info:
         await glow(session=s).output()
 
-    assert "glow" in str(info.value)
+    assert str(info.value) == (
+        f"{MISSING_FIELD} The client 'glow' from github.com/eunomie/glow at 4f1c9e "
+        "is out of date. Run `dagger generate`."
+    )
     assert info.value.__cause__ is error
+
+
+async def test_stale_message_names_each_client_and_its_address():
+    s = session()
+    s.session.fail["output"] = QueryError([QueryErrorValue(MISSING_FIELD)], "query")
+    receiver = client_root(Glow, LINTER, "linter", [], session=s)
+
+    with pytest.raises(StaleClientError) as info:
+        await Glow(client_select(receiver, GLOW, "asGlow", [])).output()
+
+    assert str(info.value).endswith(
+        "The clients 'glow' from github.com/eunomie/glow at 4f1c9e, "
+        "'linter' from ./clients/linter are out of date. Run `dagger generate`."
+    )
 
 
 async def test_missing_field_without_target_stays_a_query_error():
