@@ -67,23 +67,36 @@ type Scope {
 
   """
   A module's scope file must say to the runtime what it says to uv, or the
-  module generates and then fails to build. The runtime reads the file with
-  regular expressions for the forms the SDK writes, and is not a TOML parser;
-  so rather than widen it, generation asks it what it reads, and refuses a
-  file where it misses a member generation wrote.
+  module generates and then fails to build, or installs a member no one
+  named. The runtime reads the file with regular expressions for the forms
+  the SDK writes, and is not a TOML parser; so rather than widen it,
+  generation asks it which members it reads, asks uv's reading of the TOML,
+  and refuses a file where the two differ either way. A file the runtime
+  refuses to read counts as one where it reads nothing.
   """
   let checkRuntimeReads(file: File!, members: [ClientMember!]!): Void {
     if (engineVersion != "") {
-      let read = pythonSdkRuntime.scopeMembers(file)
-      let wrote = [sdkDirName, clientsDirName + "/" + coreDirName] + members.map { member => clientsDirName + "/" + member.dir }
-      let missed = wrote.filter { member => read.filter { r => r == member }.length == 0 }
-      if (missed.length > 0) {
-        raise scopeFileName + " of " + path + " lists " + missed.join(", ") +
-          " in a form the module runtime does not read, so the module would not build. " +
+      let runtimeReads = pythonSdkRuntime.scopeMembers(file) rescue {
+        err: Error => [] :: [String!]!
+      }
+      let uvReads = pyprojectTool
+        .withFile(toolPath, file)
+        .withExec(["pyproject", "get-members", toolPath])
+        .stdout
+        .split("\n")
+        .filter { line => line != "" }
+      let missed = uvReads.filter { member => runtimeReads.filter { r => r == member }.length == 0 }
+      let invented = runtimeReads.filter { member => uvReads.filter { u => u == member }.length == 0 }
+      if (missed.length > 0 or invented.length > 0) {
+        let misses = if (missed.length > 0) { ["misses " + missed.join(", ")] } else { [] :: [String!]! }
+        let invents = if (invented.length > 0) { ["reads " + invented.join(", ") + ", which uv does not"] } else { [] :: [String!]! }
+        raise scopeFileName + " of " + path + " lists its workspace members in a form the module runtime " +
+          "does not read the way uv does (the runtime " + (misses + invents).join("; ") + "), so the module would not build as written. " +
           "Write the workspace table as an unquoted [tool.uv.workspace] header with members " +
           "as an array of strings, then run dagger generate again. The runtime does not read " +
           "a quoted header such as [\"tool\".\"uv\".\"workspace\"], an inline table such as " +
-          "workspace = { members = [...] }, or dotted keys such as tool.uv.workspace.members = [...]"
+          "workspace = { members = [...] }, dotted keys such as tool.uv.workspace.members = [...], " +
+          "or anything but strings in members, such as a nested array"
       }
     }
     null

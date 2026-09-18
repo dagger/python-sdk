@@ -267,6 +267,22 @@ type E2e {
       }
     assertContainsAll(refused, ["the module runtime does not read", "an unquoted [tool.uv.workspace] header", "then run dagger generate again"])
 
+    # Nor a member the runtime would read and uv would not: a nested array is
+    # no member, so the runtime refuses to read it rather than flatten it,
+    # and generation refuses the file.
+    let nestedToml = written.replace("\"clients/core\"]", "\"clients/core\", [\"clients/unowned\"]]")
+    assert(nestedToml != written, "generation wrote no members array to nest into")
+    let runtimeRead = pythonSdkRuntime.scopeMembers(directory.withNewFile("pyproject.toml", nestedToml).file("pyproject.toml")) rescue {
+      err: Error => ["refused"]
+    }
+    assert(runtimeRead == ["refused"], "the runtime read a nested members array as " + runtimeRead.join(", "))
+    let nested = pythonSdk
+      .generateScope(currentWs.withNewFile(pyprojectPath, nestedToml).withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .cwd rescue {
+        err: Error => err.message
+      }
+    assertContainsAll(nested, ["does not read the way uv does", "such as a nested array", "then run dagger generate again"])
+
     let legacyWs = pythonSdk
       .generateScope(ws.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])
       .withWorkdir(".")

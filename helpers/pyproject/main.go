@@ -65,6 +65,9 @@ func run(args []string) error {
 	case "get-base-image":
 		fmt.Print(getBaseImage(doc))
 		return nil
+	case "get-members":
+		fmt.Print(getMembers(doc))
+		return nil
 	case "get-global-client":
 		if v, ok := getGlobalClient(doc); ok {
 			fmt.Print(boolStr(v))

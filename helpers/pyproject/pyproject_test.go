@@ -144,3 +144,15 @@ func TestGetGlobalClient(t *testing.T) {
 		t.Errorf("should report set and true, got value=%v ok=%v", v, ok)
 	}
 }
+
+func TestGetMembers(t *testing.T) {
+	doc := mustLoad(t, `["tool"."uv"."workspace"]
+members = ["sdk", "clients/core", ["clients/unowned"]]
+`)
+	if got := getMembers(doc); got != "sdk\nclients/core\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := getMembers(mustLoad(t, sample)); got != "" {
+		t.Errorf("a file without a workspace: got %q", got)
+	}
+}

@@ -447,14 +447,19 @@ type PythonModuleBuild {
   """
   The strings of an array, on one line or over several, comments dropped. A
   bracket or a `#` inside a string is part of it: `httpx[http2]` does not
-  end the array.
+  end the array. Anything else in the array, a nested array or a number,
+  is refused rather than read as strings it is not.
   """
   let tomlStrings(table: String!, key: String!): [String!]! {
-    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\[((?:\"[^\"\\n]*\"|'[^'\\n]*'|#[^\\n]*|[^\\]\"'#])*)\\]"))
-    if (m == null) {
+    let assigned = table.containsMatch(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*="))
+    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\[((?:\"[^\"\\n]*\"|'[^'\\n]*'|#[^\\n]*|[^\\[\\]{}\"'#])*)\\]"))
+    let inner = if (m == null) { "" } else { m.captures[0] ?? "" }
+    if (assigned == false) {
       [] :: [String!]!
+    } else if (m == null or inner.replaceMatches("\"[^\"\\n]*\"|'[^'\\n]*'|#[^\\n]*", "").containsMatch("[^\\s,]")) {
+      raise projectCfg + ": " + key + " is not an array of strings; write it as one, such as " + key + " = [\"a\", \"b\"]"
     } else {
-      (m.captures[0] ?? "")
+      inner
         .matchAll("\"([^\"\\n]*)\"|'([^'\\n]*)'|#[^\\n]*")
         .filter { item => item.string.hasPrefix("#") == false }
         .map { item => item.string.trim("\"'") }
