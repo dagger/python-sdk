@@ -180,8 +180,10 @@ func (d *document) sections() []section {
 			current.bodyEnd = pos
 			found = append(found, current)
 			current = section{name: name, headerStart: pos, headerEnd: next, bodyStart: next}
+			pos = next
+			continue
 		}
-		pos = next
+		pos = d.statementEnd(pos, strings.TrimSuffix(d.text[pos:next], "\n"))
 	}
 	current.bodyEnd = len(d.text)
 	return append(found, current)
@@ -347,24 +349,35 @@ func (d *document) lines(sec *section) []line {
 			next = l.end + 1
 		}
 		found = append(found, l)
-		pos = next
-		text := d.text[l.start:l.end]
-		eq := strings.IndexByte(stripComments(text), '=')
-		if isComment(text) || eq < 0 {
-			continue
-		}
-		valueStart := l.start + eq + 1
-		for valueStart < l.end && (d.text[valueStart] == ' ' || d.text[valueStart] == '\t') {
-			valueStart++
-		}
-		if after := valueEnd(d.text, valueStart); after > pos {
-			pos = len(d.text)
-			if nl := strings.IndexByte(d.text[after:], '\n'); nl >= 0 {
-				pos = after + nl + 1
-			}
-		}
+		pos = max(next, d.statementEnd(l.start, d.text[l.start:l.end]))
 	}
 	return found
+}
+
+// statementEnd is the offset of the line after the statement on the line at
+// start, past the lines of a multi-line value: a `[` that opens one of those
+// lines is inside a string or an array, not a table header.
+func (d *document) statementEnd(start int, text string) int {
+	next := start + len(text)
+	if next < len(d.text) {
+		next++
+	}
+	eq := strings.IndexByte(stripComments(text), '=')
+	if isComment(text) || eq < 0 {
+		return next
+	}
+	valueStart := start + eq + 1
+	for valueStart < start+len(text) && (d.text[valueStart] == ' ' || d.text[valueStart] == '\t') {
+		valueStart++
+	}
+	after := valueEnd(d.text, valueStart)
+	if after <= next {
+		return next
+	}
+	if nl := strings.IndexByte(d.text[after:], '\n'); nl >= 0 {
+		return after + nl + 1
+	}
+	return len(d.text)
 }
 
 func isBlank(s string) bool {
@@ -718,14 +731,14 @@ func (d *document) editGlobalClient(on bool) {
 	}
 	d.deleteLine(kv.lineStart)
 	sec = d.section("tool.dagger")
-	for _, l := range d.lines(sec) {
-		if text := d.text[l.start:l.end]; !isBlank(text) && !isComment(text) {
-			return
-		}
+	// A comment left in the table is the user's, and keeps the table.
+	if !isBlank(d.text[sec.bodyStart:sec.bodyEnd]) {
+		return
 	}
-	d.text = d.text[:sec.headerStart] + d.text[sec.bodyEnd:]
-	d.text = strings.TrimRight(d.text, "\n") + "\n"
-	if strings.HasSuffix(d.text, "\n\n") {
-		d.text = strings.TrimSuffix(d.text, "\n")
+	before := d.text[:sec.headerStart]
+	// ensureSection opened a last table with one blank line; take it back.
+	if sec.bodyEnd == len(d.text) && strings.HasSuffix(before, "\n\n") {
+		before = strings.TrimSuffix(before, "\n")
 	}
+	d.text = before + d.text[sec.bodyEnd:]
 }

@@ -345,3 +345,69 @@ dagger-clients-core = { workspace = true }
 		t.Errorf("entries were duplicated:\n%s", got)
 	}
 }
+
+func TestEditScopeReadsNoHeaderInsideAValue(t *testing.T) {
+	src := `[project]
+name = "my-module"
+dependencies = ["dagger-clients-core"]
+
+[tool.mine]
+snippet = """
+[tool.uv.sources]
+dagger-clients-fake = { workspace = true }
+"""
+matrix = [
+  ["a", "b"],
+]
+
+[tool.uv.workspace]
+members = ["sdk", "clients/core"]
+
+[tool.uv.sources]
+dagger-io = { workspace = true }
+dagger-clients-core = { workspace = true }
+`
+	got := mustEdit(t, src, withLinter())
+	want := strings.Replace(src, "members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"clients/linter\"]", 1)
+	want = strings.Replace(want, "dependencies = [\"dagger-clients-core\"]", "dependencies = [\"dagger-clients-core\", \"dagger-clients-linter\"]", 1)
+	want += "dagger-clients-linter = { workspace = true }\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestEditScopeClearingTheFlagKeepsTheUsersComment(t *testing.T) {
+	src := scopeTemplate + "\n[tool.dagger]\n# keep the global client until the lint module migrates\n"
+	on := coreOnly()
+	on.GlobalClient = boolPtr(true)
+	off := coreOnly()
+	off.GlobalClient = boolPtr(false)
+	if got := mustEdit(t, mustEdit(t, src, on), off); got != src {
+		t.Errorf("clearing the flag did not restore the file:\n%s", got)
+	}
+}
+
+func TestEditScopeClearingTheFlagKeepsWhatFollowsTheTable(t *testing.T) {
+	src := `[project]
+name = "my-module"
+dependencies = ["dagger-clients-core"]
+
+[tool.dagger]
+global-client = true
+
+[tool.uv.workspace]
+members = ["sdk", "clients/core"]
+
+[tool.uv.sources]
+dagger-io = { workspace = true }
+dagger-clients-core = { workspace = true }
+
+
+`
+	off := coreOnly()
+	off.GlobalClient = boolPtr(false)
+	want := strings.Replace(src, "[tool.dagger]\nglobal-client = true\n\n", "", 1)
+	if got := mustEdit(t, src, off); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}

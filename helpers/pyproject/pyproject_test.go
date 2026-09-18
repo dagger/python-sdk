@@ -135,7 +135,6 @@ func TestSetBaseImage(t *testing.T) {
 	}
 }
 
-
 func TestGetGlobalClient(t *testing.T) {
 	if _, ok := getGlobalClient(mustLoad(t, sample)); ok {
 		t.Error("sample: global-client should report unset when absent")
