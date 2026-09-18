@@ -1048,6 +1048,156 @@ type E2e {
   }
 
   """
+  The released CLI lists this checkout as the python SDK, initializes a
+  module from it, and runs it. The module's manifest names the shared
+  entrypoint and no runtime; it runs on this checkout's copy of that
+  entrypoint, since the published one predates this layout.
+  """
+  pub cliSdkCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/sdk-smoke"
+    let listed = cli(playground(ws), ["sdk", "list"])
+    assert(listed.stdout.contains("python"), "the development Python SDK was not listed")
+
+    let initialized = cli(listed, ["module", "init", "python", "--auto-apply", "--name", "sdk-smoke", "--path", path])
+      .withExec(["test", "!", "-e", path + "/dagger.json"])
+      .withExec(["test", "-f", path + "/pyproject.toml"])
+      .withExec(["test", "-f", path + "/src/sdk_smoke/__init__.py"])
+      .withExec(["test", "-f", path + "/sdk/pyproject.toml"])
+      .withExec(["test", "-f", path + "/clients/core/src/dagger_clients/core/__init__.py"])
+      .withExec(["test", "!", "-e", path + "/" + legacyBindingsPath])
+    let manifest = initialized.file(playgroundRoot + "/" + path + "/dagger-module.toml").contents
+    assertContainsAll(manifest, ["[entrypoint]", "kind = \"dang\"", "source = \"" + sharedEntrypointSource + "\""])
+    assertContainsNone(manifest, ["[runtime]", "engineVersion"])
+
+    let release = cli(onCheckoutEntrypoint(initialized, ws, path, "sdk-smoke"), ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
+      .stdout
+    assert(release.trimSpace != "", "the generated module did not run")
+
+    cli(initialized, [
+        "module", "init", "python", "--auto-apply",
+        "--name", "sdk-settings",
+        "--path", ".dagger/modules/sdk-settings",
+        "--template", "empty",
+        "--python-version", "3.13",
+        "--use-uv=false",
+        "--base-image", "python:3.13-slim",
+      ])
+      .withExec(["grep", "-q", "class SdkSettings:", ".dagger/modules/sdk-settings/src/sdk_settings/__init__.py"])
+      .withExec(["grep", "-q", ">=3.13", ".dagger/modules/sdk-settings/pyproject.toml"])
+      .withExec(["grep", "-q", "use-uv = false", ".dagger/modules/sdk-settings/pyproject.toml"])
+      .withExec(["grep", "-q", "python:3.13-slim", ".dagger/modules/sdk-settings/pyproject.toml"])
+      .sync
+
+    null
+  }
+
+  """
+  A module on an entrypoint calls a local client whose module is on an
+  entrypoint too, in both forms: this checkout's shared entrypoint, and the
+  one `--dang-entrypoint` generates into the module. The released CLI drives
+  it from `dagger module init` to `dagger call`.
+
+  Under an entrypoint a module's code is not the module to the engine, and
+  its own workspace is its container's: the client's target resolves only in
+  the workspace the entrypoint hands over, and the target's entrypoint,
+  called from that process, finds its module only in its own source.
+  """
+  pub entrypointClientCallCheck(ws: Workspace!): Void @check {
+    entrypointClientCall(ws, "shared", "Shared")
+    entrypointClientCall(ws, "static", "Static")
+    null
+  }
+
+  let entrypointClientCall(ws: Workspace!, form: String!, title: String!): Void {
+    let target = "ep-target-" + form
+    let caller = "ep-caller-" + form
+    let targetPath = ".dagger/modules/" + target
+    let callerPath = ".dagger/modules/" + caller
+    let static = if (form == "static") { ["--dang-entrypoint"] } else { [] :: [String!]! }
+    let greeting = "hello from the " + form + " target"
+    let targetSource =
+      "from dagger import function, object_type\n\n\n" +
+      "@object_type\n" +
+      "class EpTarget" + title + ":\n" +
+      "    @function\n" +
+      "    def greeting(self) -> str:\n" +
+      "        return \"" + greeting + "\"\n"
+    let callerSource =
+      "from dagger import function, object_type\n" +
+      "from dagger_clients.ep_target_" + form + " import ep_target_" + form + "\n\n\n" +
+      "@object_type\n" +
+      "class EpCaller" + title + ":\n" +
+      "    @function\n" +
+      "    async def greeting(self) -> str:\n" +
+      "        return await ep_target_" + form + "().greeting()\n"
+
+    let withTarget = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", target, "--path", targetPath] + static)
+      .withNewFile(targetPath + "/src/ep_target_" + form + "/__init__.py", targetSource)
+    # A static entrypoint carries the digests of the source it was generated from.
+    let targetReady = if (form == "static") {
+      cli(withTarget, ["-y", "call", "python-sdk", "mod", "--path", targetPath, "generate"])
+    } else {
+      onCheckoutEntrypoint(withTarget, ws, targetPath, target)
+    }
+    # The caller's code is in place before its client is added, so the static
+    # entrypoint generated with the client describes it.
+    let withClient = cli(targetReady, ["module", "init", "python", "--auto-apply", "--name", caller, "--path", callerPath] + static)
+      .withNewFile(callerPath + "/src/ep_caller_" + form + "/__init__.py", callerSource)
+      .withWorkdir(callerPath)
+    let added = cli(withClient, ["module", "client", "add", "../" + target, "--sdk", "python", "--auto-apply"])
+      .withWorkdir(playgroundRoot)
+    let callerReady = if (form == "static") { added } else { onCheckoutEntrypoint(added, ws, callerPath, caller) }
+    let manifest = callerReady.file(playgroundRoot + "/" + callerPath + "/dagger-module.toml").contents
+    assertContains(manifest, "[entrypoint]", form + ": the caller is not on an entrypoint: " + manifest)
+    assertNotContains(manifest, "[runtime]", form + ": the caller names a runtime: " + manifest)
+
+    let called = cli(callerReady, ["-m", callerPath, "call", "greeting"]).stdout
+    assertContains(called, greeting, form + ": the module did not call its client: " + called)
+    null
+  }
+
+  """
+  The first release that runs Dang entrypoints and serves serveModule, which
+  is this SDK's floor. Its engine image carries its CLI, and git. The checks
+  through sdk-sdk keep that module's own CLI, which it drives with flags this
+  release no longer takes.
+  """
+  let floorVersion: String! = "1.0.0-beta.14"
+  let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
+
+  let playgroundRoot: String! = "/work/python-sdk"
+
+  """
+  This checkout, with the workspace config that registers it as the python
+  SDK, in a container with the floor release's CLI. The CLI is a nested
+  client of the engine running the checks, and its workspace is this tree.
+  """
+  let playground(ws: Workspace!): Container! {
+    container
+      .from(floorImage)
+      .withoutEntrypoint
+      .withMountedDirectory(playgroundRoot, ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot]))
+      .withWorkdir(playgroundRoot)
+      .withExec(["git", "init", "--quiet"])
+  }
+
+  let cli(ctr: Container!, args: [String!]!): Container! {
+    ctr.withExec(["dagger"] + args, experimentalPrivilegedNesting: true)
+  }
+
+  """
+  A module in the playground on this checkout's shared entrypoint, not the
+  published one its manifest names, which predates this layout. The copy sits
+  inside the module: the engine takes an entrypoint only from a git ref or a
+  path in the module.
+  """
+  let onCheckoutEntrypoint(ctr: Container!, ws: Workspace!, path: String!, name: String!): Container! {
+    ctr
+      .withDirectory(path + "/checkout-entrypoint", ws.directory("/entrypoint"))
+      .withNewFile(path + "/dagger-module.toml", "name = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./checkout-entrypoint\"\n")
+  }
+
+  """
   runtime/build.dang as the shared entrypoint carries it.
 
   The engine copies only the .dang files at the top of an entrypoint
