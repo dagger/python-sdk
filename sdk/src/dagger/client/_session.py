@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -372,28 +373,35 @@ _default: Session | None = None
 _sessions_lock = threading.Lock()
 
 
+def _no_default() -> Session | None:
+    return None
+
+
+_find_default: Callable[[], Session | None] = _no_default
+
+
+def set_default_finder(find: Callable[[], Session | None]) -> None:
+    """Say where to find a default session before making one.
+
+    Only the temporary global client needs this: its ``dag`` is a Session,
+    and it has to be the default one, so that a client called without
+    ``session=`` and ``dagger.connection()`` share its loads.
+    """
+    global _find_default  # noqa: PLW0603
+    _find_default = find
+
+
 def default_session() -> Session:
     """The one session per process, over the shared connection."""
     global _default  # noqa: PLW0603
-    with _sessions_lock:
-        if _default is None:
-            _default = Session()
-        return _default
-
-
-def install_default_session(session: Session) -> None:
-    """Make a session the process default, before anything has used one.
-
-    Only the temporary global client needs this: its ``dag`` is a Session,
-    and it has to be the one over the shared connection, so that a client
-    called without ``session=`` and ``dagger.connection()`` share its loads.
-    """
-    global _default  # noqa: PLW0603
-    with _sessions_lock:
-        if _default is not None and _default is not session:
-            msg = "The default session is already in use"
-            raise RuntimeError(msg)
-        _default = session
+    if _default is None:
+        # Outside the lock: finding it can import generated code, which must
+        # not run while other threads wait on the lock.
+        found = _find_default()
+        with _sessions_lock:
+            if _default is None:
+                _default = Session() if found is None else found
+    return _default
 
 
 def as_session(conn: BaseConnection) -> Session:

@@ -1,4 +1,8 @@
 import contextlib
+import functools as _functools
+import importlib as _importlib
+import types as _types
+import typing as _typing
 
 # Make sure to place exceptions first as they're dependencies of other imports.
 from dagger._exceptions import *
@@ -9,6 +13,7 @@ with contextlib.suppress(ModuleNotFoundError):
 
 # Client connection
 from dagger.client import Session as Session
+from dagger.client import _session as _sessions
 from dagger.client._config import Retry as Retry
 from dagger.client._config import Timeout as Timeout
 from dagger.client._connection import connect as connect
@@ -17,30 +22,50 @@ from dagger.client._connection import close as close
 # The API is generated per scope, into dagger_clients, and the SDK files
 # never import it. The one exception is the temporary global client, which
 # keeps dag.container() and dagger.Container working while a module
-# migrates. Its dag is a Session, so it becomes the default one.
-from dagger.client._session import default_session as _default_session
-from dagger.client._session import install_default_session as _install
+# migrates.
+if _typing.TYPE_CHECKING:
+    try:
+        from dagger_global import *
+    except ModuleNotFoundError:
+        # With the global client, a type checker sees dag as its Client.
+        dag = _sessions.default_session()  # type: ignore[assignment, unused-ignore]
 
-try:
-    from dagger_global import *
-except ModuleNotFoundError as _e:
-    # Only its absence means no flag: a global client that cannot import one
-    # of its clients is broken, not off.
-    if _e.name != "dagger_global":
-        raise
-    # With the global client, a type checker sees dag as its Client.
-    dag = _default_session()  # type: ignore[assignment, unused-ignore]
-# A no-op for the default session itself.
-_install(dag)
-del _default_session, _install
+
+@_functools.cache
+def _global_client() -> _types.ModuleType | None:
+    # On first use, never on import: it imports core and every client, and
+    # each of them imports dagger first, so importing it here would fail
+    # whenever a generated package is the first import of the process.
+    try:
+        return _importlib.import_module("dagger_global")
+    except ModuleNotFoundError as e:
+        # Only its absence means no flag: a global client that cannot import
+        # one of its clients is broken, not off.
+        if e.name != "dagger_global":
+            raise
+        return None
+
+
+def _global_dag() -> Session | None:
+    global_ = _global_client()
+    return None if global_ is None else global_.dag
+
+
+_sessions.set_default_finder(_global_dag)
 
 # Module support (only makes sense in a module runtime container)
 with contextlib.suppress(ModuleNotFoundError):
     from dagger.mod import *
 
 
-def __getattr__(name: str):
-    """Say where a name of the legacy bindings went."""
+def __getattr__(name: str) -> _typing.Any:
+    """Names of the global client, or where a name of the legacy bindings went."""
+    if name == "dag":
+        # The global client's dag when there is one, through _global_dag.
+        return _sessions.default_session()
+    global_ = None if name.startswith("_") else _global_client()
+    if global_ is not None and name in global_.__all__:
+        return getattr(global_, name)
     msg = f"module {__name__!r} has no attribute {name!r}"
     if name == "Client":
         msg += (

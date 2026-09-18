@@ -291,8 +291,11 @@ def test_guard_accepts_sdk_import(source: str, module: str):
     assert not _generated_imports(source, module)
 
 
-def test_package_init_names_generated_code_once():
-    """The init's one generated import is the optional global client."""
+def test_package_init_names_only_the_global_client():
+    """The init's generated imports are the optional global client's.
+
+    One for type checkers, and the lazy one at run time.
+    """
     found = [stmt for _, stmt in _generated_imports(PACKAGE_INIT.read_text(), "dagger")]
 
-    assert found == ["from dagger_global import *"]
+    assert found == ["from dagger_global import *", "import_module('dagger_global')"]

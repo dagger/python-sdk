@@ -209,13 +209,6 @@ def test_global_client_makes_dag_the_client(generated: pathlib.Path):
     assert _run(WITH_GLOBAL_CLIENT, generated) == "ok\n"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "import cycle: dagger imports dagger_global, which imports the clients, "
-        "each of which is still importing dagger; the fix needs a design call"
-    ),
-)
 @pytest.mark.parametrize(
     "first",
     [
@@ -236,9 +229,28 @@ def test_generated_code_imported_before_dagger(generated: pathlib.Path, first: s
     assert _run(script, generated) == "ok\n"
 
 
+CLIENT_BEFORE_DAG = """
+    import dagger_clients.core as core
+
+    root = core.core()
+
+    import dagger
+    import dagger_global
+    assert root._ctx.conn is dagger_global.dag, type(root._ctx.conn)
+    assert dagger.dag is dagger_global.dag
+    print("ok")
+"""
+
+
+def test_client_called_before_dag_gets_the_global_session(generated: pathlib.Path):
+    assert _run(CLIENT_BEFORE_DAG, generated) == "ok\n"
+
+
 BROKEN_GLOBAL_CLIENT = """
+    import dagger
+
     try:
-        import dagger
+        dagger.dag
     except ModuleNotFoundError as e:
         print(e.name)
     else:

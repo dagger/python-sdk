@@ -99,6 +99,18 @@ INVERSIONS = [
         "assert isinstance(dagger.dag, Session)\n"
         "    assert dagger.dag is not default_session()",
     ),
+    # The global client loads on first use, whatever was imported first, and
+    # a client used before dag gets it too.
+    Inversion(
+        PACKAGE + "test_generated_code_imported_before_dagger",
+        "        assert type(dagger.dag) is dagger_global.Client, type(dagger.dag)",
+        "        assert type(dagger.dag) is not dagger_global.Client, type(dagger.dag)",
+    ),
+    Inversion(
+        PACKAGE + "test_client_called_before_dag_gets_the_global_session",
+        "assert root._ctx.conn is dagger_global.dag, type(root._ctx.conn)",
+        "assert root._ctx.conn is not dagger_global.dag, type(root._ctx.conn)",
+    ),
     # A global client that cannot import is an error, not an absent one.
     Inversion(
         PACKAGE + "test_global_client_that_cannot_import_is_not_skipped",
@@ -176,9 +188,9 @@ INVERSIONS = [
         "assert proc.returncode != 0, proc.stderr",
     ),
     Inversion(
-        ISOLATION + "test_package_init_names_generated_code_once",
-        'assert found == ["from dagger_global import *"]',
-        "assert found == []",
+        ISOLATION + "test_package_init_names_only_the_global_client",
+        "\"import_module('dagger_global')\"]",
+        "\"import_module('dagger_gen')\"]",
     ),
     # The generated global client.
     Inversion(
