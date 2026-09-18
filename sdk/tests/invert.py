@@ -37,6 +37,7 @@ CLIENTS = "tests/client/test_clients.py::"
 ISOLATION = "tests/client/test_sdk_isolation.py::"
 PACKAGES = "tests/codegen/test_packages.py::"
 DEFAULT_ENGINE = "tests/client/test_default_engine.py::"
+DISPATCH = "tests/mod/test_dispatch.py::"
 
 INVERSIONS = [
     # The default session provisions an engine only in a plain program, once,
@@ -214,31 +215,60 @@ INVERSIONS = [
         "assert is_load(load)\n    assert LINTER.ref in load",
         "assert is_load(load)\n    assert LINTER.ref not in load",
     ),
+    # Under a module entrypoint, a local target loads through the source the
+    # entrypoint handed over for it, by name, and nothing else changes query.
     Inversion(
-        CLIENTS + "test_temporary_fallback_chain_wire_shape",
-        'assert "serveModule" in attempt\n    assert chain == (',
-        'assert "serveModule" not in attempt\n    assert chain == (',
-    ),
-    # The fallback pins no name either.
-    Inversion(
-        CLIENTS + "test_temporary_fallback_chain_wire_shape",
-        '"    asModule {\\n"',
-        '"    withName(name: \\"glow\\") {\\n"',
+        CLIENTS + "test_handed_client_serves_a_local_target_by_name",
+        '"    ... on ModuleSource {\\n"',
+        '"    ... on Workspace {\\n"',
     ),
     Inversion(
-        CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
-        'assert "withName" not in chain',
-        'assert "withName" in chain',
+        CLIENTS + "test_handed_clients_leave_a_git_target_to_serve_module",
+        "assert handed_clients not in load",
+        "assert handed_clients in load",
     ),
     Inversion(
-        CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
-        "assert LINTER.ref in chain",
-        "assert LINTER.ref not in chain",
+        CLIENTS + "test_undeclared_local_client_fails_naming_it",
+        "assert not s.session.queries",
+        "assert s.session.queries",
     ),
     Inversion(
-        CLIENTS + "test_other_load_errors_do_not_fall_back",
-        "assert len(s.session.loads) == 1\n    assert info.value.__cause__",
-        "assert len(s.session.loads) == 2\n    assert info.value.__cause__",
+        CLIENTS + "test_entrypoint_without_a_handover_fails_a_local_target",
+        'assert "handed over no clients" in str(info.value)',
+        'assert "handed over no clients" not in str(info.value)',
+    ),
+    Inversion(
+        CLIENTS + "test_handed_client_failure_does_not_fall_back",
+        'assert "serveModule" not in load',
+        'assert "serveModule" in load',
+    ),
+    Inversion(
+        CLIENTS + "test_outside_an_entrypoint_a_local_target_uses_serve_module",
+        'assert "node(" not in load',
+        'assert "node(" in load',
+    ),
+    Inversion(
+        DISPATCH + "test_command_hands_the_clients_to_the_load",
+        "assert got == \"{'linter': 'bW9kdWxlU291cmNl'}\"",
+        'assert got == "None"',
+    ),
+    Inversion(
+        DISPATCH + "test_command_without_clients_is_still_under_an_entrypoint",
+        'read_text()) == "None"',
+        'read_text()) != "None"',
+    ),
+    Inversion(
+        DISPATCH + "test_command_refuses_malformed_clients",
+        'assert "clients the entrypoint handed over" in proc.stderr',
+        'assert "clients the entrypoint handed over" not in proc.stderr',
+    ),
+    # An engine below the floor fails the load; it is no stale client.
+    Inversion(
+        CLIENTS + "test_engine_without_serve_module_fails_the_load_not_as_stale",
+        "assert not isinstance(info.value, StaleClientError)\n"
+        "    assert info.value.__cause__ is NO_SERVE_MODULE",
+        "assert isinstance(info.value, StaleClientError)\n"
+        "    assert info.value.__cause__ is NO_SERVE_MODULE",
     ),
     # Only a validation error is a missing field, for the stale check too.
     Inversion(

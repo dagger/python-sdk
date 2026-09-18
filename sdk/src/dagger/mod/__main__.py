@@ -28,9 +28,6 @@ def main(argv: list[str] | None = None) -> int:
         help="render the static entrypoint of the module in the current directory",
     )
     entrypoint.add_argument("--name", required=True, help="module name")
-    entrypoint.add_argument(
-        "--path", required=True, help="module directory, relative to the workspace"
-    )
     entrypoint.add_argument("--output", required=True, type=pathlib.Path)
     entrypoint.set_defaults(run=_entrypoint)
 
@@ -70,7 +67,6 @@ def _entrypoint(args: argparse.Namespace) -> None:
     write_entrypoint(
         mod.describe(),
         name=args.name,
-        path=args.path,
         root=pathlib.Path.cwd(),
         output=args.output,
     )
@@ -99,8 +95,19 @@ def _call(args: argparse.Namespace) -> None:
 
 
 async def _dispatch(request: dict[str, Any]) -> Any:
+    from dagger.client._load import parse_handed_clients, use_entrypoint_clients
+    from dagger.mod._exceptions import InvalidInputError
     from dagger.mod.cli import load_module
 
+    # The module's declared local clients, which the entrypoint resolved and
+    # this process cannot. Before the user's code is imported, so nothing it
+    # starts can load without them.
+    try:
+        clients = parse_handed_clients(request.get("clients"))
+    except (TypeError, KeyError, ValueError) as e:
+        msg = f"Failed to read the clients the entrypoint handed over: {e}"
+        raise InvalidInputError(msg) from e
+    use_entrypoint_clients(clients)
     return await load_module().dispatch(request)
 
 

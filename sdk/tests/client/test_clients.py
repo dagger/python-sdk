@@ -1,6 +1,7 @@
 """The SDK side of a generated client: its session, its target, its load."""
 
 import gc
+import json
 import logging
 import threading
 import time
@@ -28,6 +29,11 @@ from dagger.client import (
     registering_types,
 )
 from dagger.client._core import Arg, Context
+from dagger.client._load import (
+    leave_entrypoint,
+    parse_handed_clients,
+    use_entrypoint_clients,
+)
 from dagger.client._session import BaseConnection, as_session
 from dagger.client.base import Type
 
@@ -176,90 +182,131 @@ NO_SERVE_MODULE = QueryError(
 )
 
 
-async def test_temporary_fallback_chain_wire_shape():
-    # The one test on a load document: the chain an engine without
-    # serveModule gets. It goes away with the fallback. No name, as with
-    # serveModule, so both engines serve the module under the same one.
+async def test_engine_without_serve_module_fails_the_load_not_as_stale():
+    # An engine below the floor lacks the field. That is the engine's age,
+    # not the client's, so it is no stale client: regenerating cannot help.
     s = session()
     s.session.fail["serveModule"] = NO_SERVE_MODULE
-
-    await glow(session=s).output()
-
-    attempt, chain = s.session.loads
-    assert "serveModule" in attempt
-    assert chain == (
-        "query {\n"
-        '  moduleSource(refString: "github.com/eunomie/glow", refPin: "4f1c9e") {\n'
-        "    asModule {\n"
-        "      serve\n"
-        "    }\n"
-        "  }\n"
-        "}"
-    )
-
-
-async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
-    s = session()
-    s.session.fail["serveModule"] = NO_SERVE_MODULE
-
-    await client_root(Glow, LINTER, "linter", [], session=s).output()
-
-    attempt, chain, query = s.session.queries
-    assert "serveModule" in attempt
-    assert "currentWorkspace" in chain
-    assert LINTER.ref in chain
-    assert "withName" not in chain
-    assert query == "query {\n  linter {\n    output\n  }\n}"
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "serveModule" on type "Query".',
-                path=["x"],
-                extensions=VALIDATION,
-            ),
-            id="resolver-error-with-the-phrase",
-        ),
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "serveModule" on type "Query".',
-                extensions={"code": "INTERNAL_SERVER_ERROR"},
-            ),
-            id="internal-error-with-the-phrase",
-        ),
-        pytest.param(
-            QueryErrorValue('Cannot query field "serveModule" on type "Query".'),
-            id="phrase-without-a-code",
-        ),
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "serveModule" on type "Glow".',
-                extensions=VALIDATION,
-            ),
-            id="serve-module-on-another-type",
-        ),
-        pytest.param(
-            QueryErrorValue(
-                'Cannot query field "asModule" on type "ModuleSource".',
-                extensions=VALIDATION,
-            ),
-            id="another-missing-field",
-        ),
-        pytest.param(QueryErrorValue("boom"), id="plain-error"),
-    ],
-)
-async def test_other_load_errors_do_not_fall_back(error):
-    s = session()
-    s.session.fail["serveModule"] = QueryError([error], "query")
 
     with pytest.raises(ClientLoadError) as info:
         await glow(session=s).output()
 
+    assert not isinstance(info.value, StaleClientError)
+    assert info.value.__cause__ is NO_SERVE_MODULE
     assert len(s.session.loads) == 1
-    assert info.value.__cause__ is s.session.fail["serveModule"]
+
+
+HANDED = "bW9kdWxlU291cmNl"
+
+
+@pytest.fixture
+def handed_clients():
+    use_entrypoint_clients({"linter": HANDED})
+    yield HANDED
+    leave_entrypoint()
+
+
+async def test_handed_client_serves_a_local_target_by_name(handed_clients):
+    # Under a module entrypoint this process is not the module, and its own
+    # current workspace is its container: the entrypoint hands over each
+    # declared client as a source, by name, and serveModule is never asked.
+    s = session()
+
+    await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    load, query = s.session.queries
+    assert load == (
+        "query {\n"
+        f'  node(id: "{handed_clients}") {{\n'
+        "    ... on ModuleSource {\n"
+        "      asModule {\n"
+        "        serve\n"
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}"
+    )
+    assert query == "query {\n  linter {\n    output\n  }\n}"
+
+
+async def test_handed_clients_leave_a_git_target_to_serve_module(handed_clients):
+    s = session()
+
+    await glow(session=s).output()
+
+    (load,) = s.session.loads
+    assert "serveModule" in load
+    assert handed_clients not in load
+
+
+@pytest.mark.usefixtures("handed_clients")
+async def test_undeclared_local_client_fails_naming_it():
+    # A local target the caller did not declare on the scope was not handed
+    # over. It never falls back to serveModule, which would resolve the path
+    # in this process's container.
+    s = session()
+    other = Target(name="other", ref="/.dagger/modules/other")
+
+    with pytest.raises(ClientLoadError) as info:
+        await client_root(Glow, other, "other", [], session=s).output()
+
+    assert "'other' is not declared" in str(info.value)
+    assert "dagger generate" in str(info.value)
+    assert not s.session.queries
+
+
+async def test_entrypoint_without_a_handover_fails_a_local_target():
+    # An entrypoint that sends no clients, one from before the handover or
+    # not this SDK's, is still an entrypoint: the path cannot resolve here.
+    use_entrypoint_clients(None)
+    try:
+        s = session()
+        with pytest.raises(ClientLoadError) as info:
+            await client_root(Glow, LINTER, "linter", [], session=s).output()
+        await glow(session=s).output()
+    finally:
+        leave_entrypoint()
+
+    assert "handed over no clients" in str(info.value)
+    assert "dagger generate" in str(info.value)
+    (load,) = s.session.loads
+    assert "serveModule" in load
+    assert GLOW.ref in load
+
+
+@pytest.mark.usefixtures("handed_clients")
+async def test_handed_client_failure_does_not_fall_back():
+    s = session()
+    s.session.fail["asModule"] = QueryError([QueryErrorValue("boom")], "query")
+
+    with pytest.raises(ClientLoadError):
+        await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    (load,) = s.session.loads
+    assert "serveModule" not in load
+
+
+async def test_outside_an_entrypoint_a_local_target_uses_serve_module():
+    s = session()
+
+    await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    (load,) = s.session.loads
+    assert "serveModule" in load
+    assert "node(" not in load
+
+
+def test_handed_clients_parse_from_the_request():
+    handed = [{"name": "linter", "source": HANDED}]
+
+    assert parse_handed_clients(handed) == {"linter": HANDED}
+    assert parse_handed_clients(json.dumps(handed)) == {"linter": HANDED}
+    assert parse_handed_clients([]) == {}
+    assert parse_handed_clients(None) is None
+    with pytest.raises(TypeError):
+        parse_handed_clients({"linter": HANDED})
+    with pytest.raises(TypeError):
+        parse_handed_clients([{"name": "linter", "source": 1}])
 
 
 async def test_failed_load_names_the_target_and_the_cause():

@@ -91,6 +91,10 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "    @function\n"
         "    def boom(self) -> str:\n"
         "        raise RuntimeError('boom')\n"
+        "    @function\n"
+        "    def handed(self) -> str:\n"
+        "        from dagger.client import _load\n"
+        "        return repr(_load._handover and _load._handover.clients)\n"
     )
     return tmp_path
 
@@ -135,3 +139,51 @@ def test_command_failure_writes_nothing(module_dir: pathlib.Path):
     assert proc.returncode == 2
     assert "boom" in proc.stderr
     assert not (module_dir / "out").exists()
+
+
+def test_command_hands_the_clients_to_the_load(module_dir: pathlib.Path):
+    # The entrypoint sends the module's declared local clients with the call,
+    # because this process is not the module and resolves no path of the
+    # caller's itself. Never a workspace: a key for one is not read.
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "handed",
+        "fnArgs": "{}",
+        "clients": [{"name": "linter", "source": "bW9kdWxlU291cmNl"}],
+        "workspace": "d29ya3NwYWNl",
+    }
+    proc = _call(module_dir, request)
+    assert proc.returncode == 0, proc.stderr
+    got = json.loads((module_dir / "out" / "result.json").read_text())
+    assert got == "{'linter': 'bW9kdWxlU291cmNl'}"
+
+
+def test_command_without_clients_is_still_under_an_entrypoint(
+    module_dir: pathlib.Path,
+):
+    # An entrypoint from before the handover sends none. The process is still
+    # one an entrypoint runs, so a local client fails rather than resolving
+    # in this container.
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "handed",
+        "fnArgs": "{}",
+    }
+    proc = _call(module_dir, request)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads((module_dir / "out" / "result.json").read_text()) == "None"
+
+
+def test_command_refuses_malformed_clients(module_dir: pathlib.Path):
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "hi",
+        "fnArgs": '{"who": "you"}',
+        "clients": {"linter": "bW9kdWxlU291cmNl"},
+    }
+    proc = _call(module_dir, request)
+    assert proc.returncode == 2
+    assert "clients the entrypoint handed over" in proc.stderr

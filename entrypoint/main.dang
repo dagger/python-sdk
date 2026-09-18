@@ -3,8 +3,8 @@ The Python SDK's shared module entrypoint.
 
 One copy of this directory, served from this repository, backs every Python
 module that names it in `[entrypoint] kind = "dang"`. Nothing is generated into
-the module: the entrypoint finds the module it serves through the workspace it
-is handed, whose working directory is that module's directory.
+the module: inside an entrypoint `currentModule` is the module it serves, so
+its source holds that module's own files, however the module was loaded.
 
 The module still describes its own types the way it always has. This rebuilds
 them from that description in this session, rather than loading the module the
@@ -13,10 +13,10 @@ reads them from.
 """
 type Entrypoint implements ModuleEntrypoint {
   """
-  Every type the module at the workspace cwd defines.
+  Every type the module defines.
   """
   pub types(workspace: Workspace!): [TypeDef!]! {
-    let desc = json.withContents(describeJSON(workspace))
+    let desc = json.withContents(describeJSON)
     let objects = desc.field(["objects"]).asArray.{{contents}}.map { raw =>
       objectType(json.withContents(raw.contents))
     }
@@ -27,10 +27,11 @@ type Entrypoint implements ModuleEntrypoint {
   }
 
   """
-  Call one constructor or function of the module at the workspace cwd.
+  Call one constructor or function of the module.
 
   The request and the result are the module's own JSON, so the entrypoint
-  passes them through without reading them.
+  passes them through without reading them. The request also carries the
+  module's declared local clients, never the workspace (see handover.dang).
   """
   pub call(
     workspace: Workspace!,
@@ -44,8 +45,11 @@ type Entrypoint implements ModuleEntrypoint {
       receiverValue: receiverValue,
       fnName: fnName,
       fnArgs: fnArgs,
+      clients: ClientHandover(workspace: workspace).clients.map { client =>
+        {{name: client.name, source: client.source}}
+      },
     }})
-    let result = build(workspace).installed
+    let result = build.installed
       .withExec(
         ["python", "-m", "dagger.mod", "call", "--output", callResultPath],
         stdin: request,
@@ -60,8 +64,8 @@ type Entrypoint implements ModuleEntrypoint {
   let callResultPath: String! = "/dagger/result.json"
 
   """The module's type description, as the JSON its own tools already emit."""
-  let describeJSON(workspace: Workspace!): Dagger.JSON! {
-    (build(workspace).installed
+  let describeJSON: Dagger.JSON! {
+    (build.installed
       .withExec(
         ["python", "-m", "dagger.mod", "describe", "--output", describePath],
         experimentalPrivilegedNesting: true,
@@ -70,30 +74,25 @@ type Entrypoint implements ModuleEntrypoint {
       .contents :: Dagger.JSON!)
   }
 
-  """The module this entrypoint was handed: its directory is the workspace cwd."""
-  let build(workspace: Workspace!): PythonModuleBuild! {
-    let path = modulePath(workspace)
+  """
+  The module this entrypoint serves, built from its own source.
+
+  Not from the workspace the engine hands over: that is the caller's, which
+  holds the module only when the module sits in it. A module loaded from git,
+  or served into another module's process, is not in it.
+  """
+  let build: PythonModuleBuild! {
     PythonModuleBuild(
-      contextDir: workspace.directory(
-        "/",
-        include: [if (path == ".") { "**" } else { path + "/**" }],
-        exclude: ["**/.venv", "**/__pycache__"],
-      ),
-      subPath: path,
-      moduleName: moduleName(workspace, path),
+      contextDir: directory.withDirectory(".", currentModule.source, exclude: ["**/.venv", "**/__pycache__"]),
+      subPath: ".",
+      moduleName: moduleName,
     )
   }
 
-  let modulePath(workspace: Workspace!): String! {
-    let cwd = workspace.cwd.trimPrefix("/").trimSuffix("/")
-    if (cwd == "") { "." } else { cwd }
-  }
-
-  let moduleName(workspace: Workspace!, path: String!): String! {
-    let manifest = if (path == ".") { "dagger-module.toml" } else { path + "/dagger-module.toml" }
-    let matched = workspace.file("/" + manifest).contents.match("(?m)^\\s*name\\s*=\\s*\"([^\"]*)\"")
+  let moduleName: String! {
+    let matched = currentModule.source.file("dagger-module.toml").contents.match("(?m)^\\s*name\\s*=\\s*\"([^\"]*)\"")
     if (matched == null) {
-      raise "no module name in " + manifest
+      raise "no module name in dagger-module.toml"
     } else {
       matched.captures[0] ?? ""
     }
