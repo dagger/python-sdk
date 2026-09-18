@@ -93,13 +93,14 @@ dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["sdk", "clients/core", "clients/old", "tools/mine"]
+members = ["sdk", "clients/core", "clients/old", "tools/mine", "clients/tools"]
 
 [tool.uv.sources]
 dagger-io = { workspace = true }
 dagger-clients-core = { workspace = true }
 dagger-clients-old = { workspace = true }
 mine = { workspace = true }
+tools = { workspace = true }
 
 [tool.mine]
 answer = 42
@@ -114,18 +115,42 @@ dependencies = [
 ]
 
 [tool.uv.workspace]
-members = ["sdk", "clients/core", "tools/mine"]
+members = ["sdk", "clients/core", "tools/mine", "clients/tools"]
 
 [tool.uv.sources]
 dagger-io = { workspace = true }
 dagger-clients-core = { workspace = true }
 mine = { workspace = true }
+tools = { workspace = true }
 
 [tool.mine]
 answer = 42
 `
-	if got := mustEdit(t, src, coreOnly()); got != want {
+	// clients/old carried the generated marker; clients/tools is the user's
+	// own member, in the same directory, and stays.
+	edit := coreOnly()
+	edit.Stale = []string{"clients/old"}
+	if got := mustEdit(t, src, edit); got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// A member under clients/ is removed only when the caller names it stale:
+// the marker in its directory is what makes it generation's.
+func TestEditScopeKeepsAnUnnamedMemberUnderClients(t *testing.T) {
+	src := `[project]
+name = "my-module"
+dependencies = ["dagger-io", "dagger-clients-core"]
+
+[tool.uv.workspace]
+members = ["sdk", "clients/core", "clients/tools", "clients/*"]
+
+[tool.uv.sources]
+dagger-io = { workspace = true }
+dagger-clients-core = { workspace = true }
+`
+	if got := mustEdit(t, src, coreOnly()); got != src {
+		t.Errorf("a member generation did not make was touched:\n%s", got)
 	}
 }
 
@@ -458,7 +483,9 @@ workspace = true
 [tool.mine]
 answer = 42
 `
-	got := mustEdit(t, src, withLinter())
+	edit := withLinter()
+	edit.Stale = []string{"clients/old"}
+	got := mustEdit(t, src, edit)
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}

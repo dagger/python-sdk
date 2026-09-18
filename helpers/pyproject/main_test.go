@@ -94,6 +94,19 @@ func TestRunEditScope(t *testing.T) {
 	if strings.Contains(string(data), `path = "sdk"`) {
 		t.Errorf("the vendored source survived:\n%s", data)
 	}
+
+	err = run([]string{
+		"edit-scope", p,
+		"--member", "sdk", "--member", "clients/core", "--stale-member", "clients/linter",
+		"--source", "dagger-io", "--source", "dagger-clients-core",
+		"--dependency", "dagger-clients-core",
+	})
+	if err != nil {
+		t.Fatalf("edit-scope: %v", err)
+	}
+	if data, _ = os.ReadFile(p); strings.Contains(string(data), "linter") {
+		t.Errorf("the stale member survived:\n%s", data)
+	}
 }
 
 func TestRunEditScopeRejectsAnUnknownFlag(t *testing.T) {

@@ -92,13 +92,14 @@ func run(args []string) error {
 // runEditScope sets the SDK-owned entries of a scope pyproject.toml, and
 // leaves the file alone when nothing changes.
 //
-// usage: pyproject edit-scope <file> [--member M]... [--source S]...
+// usage: pyproject edit-scope <file> [--member M]... [--stale-member M]... [--source S]...
 // [--dependency D]... [--global-client true|false]
 func runEditScope(path string, data []byte, args []string) error {
 	flags := flag.NewFlagSet("edit-scope", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	var edit scopeEdit
 	flags.Var((*repeated)(&edit.Members), "member", "a workspace member the SDK generates")
+	flags.Var((*repeated)(&edit.Stale), "stale-member", "a workspace member the SDK generated before and removes now")
 	flags.Var((*repeated)(&edit.Sources), "source", "a distribution that resolves to a workspace member")
 	flags.Var((*repeated)(&edit.Dependencies), "dependency", "a generated distribution the project depends on")
 	globalClient := flags.String("global-client", "", "write (true) or clear (false) the global client flag")

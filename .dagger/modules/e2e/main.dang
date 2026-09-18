@@ -511,8 +511,8 @@ type E2e {
   """
   The SDK owns its entries in the scope file and its members under clients/,
   nothing else: user tables, comments and members survive byte for byte, a
-  directory under clients/ without the marker is never deleted, and one is
-  never written over.
+  user member under clients/ stays in the workspace, a directory under
+  clients/ without the marker is never deleted, and one is never written over.
   """
   pub generateScopeUserContentCheck(ws: Workspace!): Void @check {
     let scope = outputRoot + "/user-content"
@@ -521,12 +521,13 @@ type E2e {
       "# the user's own comment\n" +
       "[project]\nname = \"user-content\"\nversion = \"0.1.0\"\n" +
       "dependencies = [\n    \"dagger-io\",\n    \"httpx>=0.27\",  # a pin of the user's\n]\n\n" +
-      "[tool.uv.workspace]\nmembers = [\"tools/mine\"]\n\n" +
+      "[tool.uv.workspace]\nmembers = [\"tools/mine\", \"clients/tools\"]\n\n" +
       "[tool.uv.sources]\nmine = { workspace = true }\n\n" +
       "[tool.mine]\nanswer = 42\n"
     let seeded = ws
       .withNewFile("/" + scope + "/pyproject.toml", userFile)
       .withNewFile("/" + scope + "/tools/mine/pyproject.toml", "[project]\nname = \"mine\"\n")
+      .withNewFile("/" + scope + "/clients/tools/pyproject.toml", "[project]\nname = \"tools\"\n")
       .withNewFile("/" + scope + "/clients/notes/README.md", "not a member\n")
       .withWorkdir(scope)
     let generated = pythonSdk.generateScope(seeded, isModule: false, name: "user-content", clients: [client]).withWorkdir(".")
@@ -535,6 +536,7 @@ type E2e {
       "# the user's own comment\n[project]\nname = \"user-content\"\n",
       "    \"httpx>=0.27\",  # a pin of the user's\n",
       "\"tools/mine\"",
+      "\"clients/tools\"",
       "mine = { workspace = true }\n",
       "[tool.mine]\nanswer = 42\n",
     ])
@@ -543,6 +545,10 @@ type E2e {
     let removed = pythonSdk.generateScope(generated.withWorkdir(scope), isModule: false, name: "user-content", clients: []).withWorkdir(".")
     assert(removed.directory("/" + scope).exists("clients/notes/README.md"), "removing a client deleted a directory without the marker")
     assert(removed.directory("/" + scope).exists(clientDepMember) == false, "a removed client's member was left behind")
+    let removedFile = removed.file("/" + scope + "/pyproject.toml").contents
+    assertNotContains(removedFile, "\"" + clientDepMember + "\"", "a removed client stayed a workspace member")
+    assertContains(removedFile, "\"clients/tools\"", "removing a client dropped the user's member under clients/")
+    assert(removed.directory("/" + scope).exists("clients/tools/pyproject.toml"), "removing a client deleted the user's member under clients/")
 
     let squatted = ws.withNewFile("/" + scope + "/" + clientDepMember + "/mine.txt", "mine\n").withWorkdir(scope)
     let over = pythonSdk.generateScope(squatted, isModule: false, name: "user-content", clients: [client]).cwd rescue "raised"

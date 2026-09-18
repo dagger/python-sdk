@@ -11,19 +11,23 @@ import (
 
 // scopeEdit is what the SDK owns in a scope pyproject.toml: the workspace
 // members it generates, their sources, and the generated distributions the
-// project depends on. GlobalClient nil leaves the flag as it is.
+// project depends on. Stale names the members generation made before and
+// removes now; GlobalClient nil leaves the flag as it is.
 type scopeEdit struct {
 	Members      []string
+	Stale        []string
 	Sources      []string
 	Dependencies []string
 	GlobalClient *bool
 }
 
-// The SDK owns an entry by its name, not by what is on disk: a stale entry
-// whose directory is already gone must still be removed. sdk/, clients/ and
-// dagger-clients-* are the SDK's namespace; everything else is the user's.
-func ownedMember(path string) bool {
-	return path == "sdk" || strings.HasPrefix(path, "clients/")
+// ownedMember reports whether generation may remove a workspace member. The
+// caller names them: a member under clients/ may be the user's, and only the
+// marker in its directory says otherwise, which the editor cannot see.
+// Sources and dependencies are owned by name, dagger-io and dagger-clients-*
+// being the SDK's namespace.
+func (e scopeEdit) ownedMember(path string) bool {
+	return contains(e.Stale, path, normalizeMember)
 }
 
 func ownedSource(name string) bool {
@@ -62,7 +66,7 @@ func editScope(src []byte, edit scopeEdit) ([]byte, error) {
 	}
 	d := &document{text: string(src)}
 
-	d.editArray("tool.uv.workspace", "members", edit.Members, ownedMember, normalizeMember, true)
+	d.editArray("tool.uv.workspace", "members", edit.Members, edit.ownedMember, normalizeMember, true)
 	d.editSources(edit.Sources)
 	if d.section("project") != nil {
 		d.editArray("project", "dependencies", edit.Dependencies, ownedDependency, dependencyName, false)
@@ -88,7 +92,7 @@ func checkScope(out []byte, edit scopeEdit) error {
 	}
 	uv := table(table(doc, "tool"), "uv")
 	members, _ := table(uv, "workspace")["members"].([]any)
-	if err := checkList(members, edit.Members, ownedMember, normalizeMember); err != nil {
+	if err := checkList(members, edit.Members, edit.ownedMember, normalizeMember); err != nil {
 		return fail("[tool.uv.workspace] members " + err.Error())
 	}
 	sources := table(uv, "sources")

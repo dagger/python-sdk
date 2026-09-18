@@ -46,7 +46,8 @@ type Scope {
     let members = clientMembers
     checkNames(members)
     checkMembers(existing, members)
-    let withoutStale = staleClients(existing, members).reduce(ws) { target, dir =>
+    let stale = staleClients(existing, members)
+    let withoutStale = stale.reduce(ws) { target, dir =>
       target.withoutDirectory(memberPath(clientsDirName + "/" + dir))
     }
     let cleared = if (hasGeneratedUserBindings(existing)) {
@@ -59,7 +60,7 @@ type Scope {
     let withClients = members.reduce(withCore) { target, member =>
       replaced(target, clientsDirName + "/" + member.dir, clientMember(member))
     }
-    relocked(existing, withClients.withNewFile(memberPath(scopeFileName), scopeFile(existing, members).contents))
+    relocked(existing, withClients.withNewFile(memberPath(scopeFileName), scopeFile(existing, members, stale).contents))
   }
 
   let sdkDirName: String! = "sdk"
@@ -431,8 +432,12 @@ type Scope {
   source per member, and a dependency on core and on each client. A scope
   without one starts from an empty file. Being upgraded writes the global
   client flag once, so turning it off later sticks.
+
+  The editor removes only the stale members named here, the ones whose
+  directory carries the generated marker: any other member under clients/
+  is the user's, and stays in the workspace with its directory.
   """
-  let scopeFile(existing: Directory!, members: [ClientMember!]!): File! {
+  let scopeFile(existing: Directory!, members: [ClientMember!]!, stale: [String!]!): File! {
     let current = if (existing.exists(scopeFileName)) {
       existing.file(scopeFileName)
     } else {
@@ -452,10 +457,13 @@ type Scope {
         "--dependency", member.distribution,
       ]
     }
+    let staleFlags = stale.reduce([] :: [String!]!) { flags, dir =>
+      flags + ["--stale-member", clientsDirName + "/" + dir]
+    }
     let upgrade = if (upgrading) { ["--global-client", "true"] } else { [] :: [String!]! }
     pyprojectTool
       .withFile(toolPath, current)
-      .withExec(["pyproject", "edit-scope", toolPath] + base + perClient + upgrade)
+      .withExec(["pyproject", "edit-scope", toolPath] + base + perClient + staleFlags + upgrade)
       .file(toolPath)
   }
 
