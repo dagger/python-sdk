@@ -195,6 +195,9 @@ class BaseConnection:
         return self
 
     async def close(self) -> None:
+        # The transport forgets its served modules; so must the session.
+        if self._as_session is not None:
+            self._as_session.forget()
         await self.session.close()
 
     async def aclose(self) -> None:
@@ -311,9 +314,12 @@ class Session(BaseConnection):
         return self
 
     async def close(self) -> None:
-        # A new engine behind the same connection has nothing loaded.
-        self._loads.clear()
+        self.forget()
         await self.connection.close()
+
+    def forget(self) -> None:
+        """Drop the load memo: a new engine behind the connection has nothing."""
+        self._loads.clear()
 
     async def execute(self, query: str) -> Any:
         return await self.session.execute(query)

@@ -313,6 +313,16 @@ async def test_name_guard_holds_across_wrappers_of_one_connection():
         await over(conn, other).output()
 
 
+async def test_closing_a_bare_connection_forgets_what_was_loaded():
+    conn = FakeConnection()
+
+    await over(conn, GLOW).output()
+    await conn.close()
+    await over(conn, GLOW).output()
+
+    assert len(conn.session.loads) == 2
+
+
 def test_session_dies_with_its_connection():
     conn = FakeConnection()
     gone = weakref.ref(conn)
