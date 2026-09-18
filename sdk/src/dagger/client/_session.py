@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -185,6 +186,9 @@ def _unexpected(response: httpx.Response) -> str:
 
 class BaseConnection:
     session: ClientSession
+    # Kept on the connection so the session dies with it, and so every
+    # execution over one connection shares one load memo and name guard.
+    _as_session: "Session | None" = None
 
     async def connect(self) -> Self:
         await self.session.start()
@@ -341,14 +345,17 @@ class Session(BaseConnection):
 
 
 _default: Session | None = None
+# Sessions are looked up from threads too, before any event loop exists.
+_sessions_lock = threading.Lock()
 
 
 def default_session() -> Session:
     """The one session per process, over the shared connection."""
     global _default  # noqa: PLW0603
-    if _default is None:
-        _default = Session(SharedConnection())
-    return _default
+    with _sessions_lock:
+        if _default is None:
+            _default = Session(SharedConnection())
+        return _default
 
 
 def as_session(conn: BaseConnection) -> Session:
@@ -357,4 +364,7 @@ def as_session(conn: BaseConnection) -> Session:
         return conn
     if isinstance(conn, SharedConnection):
         return default_session()
-    return Session(conn)
+    with _sessions_lock:
+        if conn._as_session is None:  # noqa: SLF001
+            conn._as_session = Session(conn)  # noqa: SLF001
+        return conn._as_session  # noqa: SLF001

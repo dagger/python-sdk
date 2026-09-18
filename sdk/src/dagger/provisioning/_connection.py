@@ -4,7 +4,7 @@ import typing
 
 from dagger import telemetry
 from dagger._managers import ResourceManager
-from dagger.client._session import Session, as_session
+from dagger.client._session import as_session
 from dagger.client.base import root_type
 
 from ._config import Config
@@ -61,7 +61,7 @@ class Connection(ResourceManager):
         logger.debug("Establishing connection with isolated client")
         async with self.get_stack() as stack:
             engine = await Engine(self.cfg, stack).provision()
-            session = Session(engine.get_client_connection())
+            session = as_session(engine.get_client_connection())
             await engine.setup_client(session)
             return root_type().from_connection(session)
 

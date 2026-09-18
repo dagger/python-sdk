@@ -1,7 +1,10 @@
 """The SDK side of a generated client: its session, its target, its load."""
 
+import gc
 import logging
 import threading
+import time
+import weakref
 
 import anyio
 import anyio.lowlevel
@@ -24,8 +27,8 @@ from dagger.client import (
     default_session,
     registering_types,
 )
-from dagger.client._core import Arg
-from dagger.client._session import BaseConnection
+from dagger.client._core import Arg, Context
+from dagger.client._session import BaseConnection, as_session
 from dagger.client.base import Type
 
 pytestmark = pytest.mark.anyio
@@ -257,6 +260,75 @@ def test_selections_keep_the_target():
 def test_default_session_when_none_given():
     assert glow()._ctx.conn is default_session()
     assert default_session() is default_session()
+
+
+def test_default_session_is_created_once_under_contention(monkeypatch):
+    from dagger.client import _session
+
+    in_init = threading.Event()
+
+    class SlowSession(Session):
+        def __init__(self, connection):
+            in_init.set()
+            # Long enough for the other thread to read the default meanwhile.
+            time.sleep(0.1)
+            super().__init__(connection)
+
+    monkeypatch.setattr(_session, "_default", None)
+    monkeypatch.setattr(_session, "Session", SlowSession)
+    seen: list[Session] = []
+
+    def second():
+        in_init.wait()
+        seen.append(default_session())
+
+    thread = threading.Thread(target=second)
+    thread.start()
+    seen.append(default_session())
+    thread.join()
+
+    assert seen[0] is seen[1]
+
+
+def test_one_session_per_connection():
+    conn = FakeConnection()
+
+    assert as_session(conn) is as_session(conn)
+
+
+def over(conn: BaseConnection, target: Target) -> Glow:
+    """A client built on a bare connection, the way a root type does."""
+    ctx = Context(conn, targets=frozenset([target])).root_select("glow", [])
+    return Glow(ctx)
+
+
+async def test_executions_through_one_connection_load_once():
+    conn = FakeConnection()
+
+    await over(conn, GLOW).output()
+    await over(conn, GLOW).output()
+
+    assert len(conn.session.loads) == 1
+
+
+async def test_name_guard_holds_across_wrappers_of_one_connection():
+    conn = FakeConnection()
+    other = Target(name="glow", ref="github.com/eunomie/glow-fork")
+
+    await over(conn, GLOW).output()
+    with pytest.raises(ClientLoadError):
+        await over(conn, other).output()
+
+
+def test_session_dies_with_its_connection():
+    conn = FakeConnection()
+    gone = weakref.ref(conn)
+    as_session(conn)
+
+    del conn
+    gc.collect()
+
+    assert gone() is None
 
 
 def test_client_select_keeps_the_receiver_session():
