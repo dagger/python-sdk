@@ -335,19 +335,30 @@ def test_target_is_plain_data():
 
 
 def test_target_with_a_pin_and_a_given_core_digest():
+    schema = _schema(_GLOW)
     _, files = client_package(
-        _schema(_GLOW),
+        schema,
         "glow",
         "github.com/eunomie/glow",
         "4f1c9e",
-        core_digest="sha256:given",
+        core_digest=core_digest(schema),
     )
 
     assert 'NAME = "glow"' in files["_target.py"]
     assert 'REF = "github.com/eunomie/glow"' in files["_target.py"]
     assert 'PIN = "4f1c9e"' in files["_target.py"]
-    assert 'CORE_DIGEST = "sha256:given"' in files["_target.py"]
+    assert f'CORE_DIGEST = "{core_digest(schema)}"' in files["_target.py"]
     assert "import" not in files["_target.py"]
+
+
+@pytest.mark.parametrize("given", ["", "sha256:other"])
+def test_client_refuses_a_core_digest_that_is_not_its_schema_core(given: str):
+    # Otherwise check_core would bless a client generated against other core
+    # types, which is the version skew it is there to catch.
+    schema = _schema(_GLOW)
+
+    with pytest.raises(ClientError, match=f'"{given}".*{core_digest(schema)}'):
+        client_package(schema, "glow", "./glow", core_digest=given)
 
 
 def _named(module: str, root: str, constructor: str) -> str:
@@ -490,7 +501,7 @@ def test_cli_generates_packages(tmp_path, introspection):
             *("--name", "linter"),
             *("--ref", "github.com/acme/linter"),
             *("--pin", "4f1c9e"),
-            *("--core-digest", "sha256:from-core"),
+            *("--core-digest", digest.removeprefix("CORE_DIGEST = ").strip('"')),
         ]
     )
     cli.main(
@@ -518,9 +529,31 @@ def test_cli_generates_packages(tmp_path, introspection):
     assert "Linter" not in core
     assert "def as_linter(binding: Binding, /) -> Linter:" in client
     assert 'PIN = "4f1c9e"' in target
-    assert 'CORE_DIGEST = "sha256:from-core"' in target
+    assert digest in target
     # Without the flag, the digest is the one of the same schema's core.
     assert digest in (out / "dagger_clients/glow/_target.py").read_text()
+
+
+def test_cli_refuses_a_core_digest_of_another_core(tmp_path, introspection, capsys):
+    args = ["generate-client", "-i", str(introspection), "-o", str(tmp_path)]
+
+    with pytest.raises(SystemExit):
+        cli.main([*args, "--name", "glow", "--ref", ".", "--core-digest", "sha256:x"])
+
+    assert '"sha256:x"' in capsys.readouterr().err
+    assert not (tmp_path / "dagger_clients").exists()
+
+
+@pytest.mark.parametrize("flag", ["--name", "--ref"])
+def test_cli_refuses_an_empty_name_or_ref(tmp_path, introspection, capsys, flag):
+    args = ["generate-client", "-i", str(introspection), "-o", str(tmp_path)]
+    given = {"--name": "glow", "--ref": ".", flag: ""}
+
+    with pytest.raises(SystemExit):
+        cli.main([*args, *(a for f, v in given.items() for a in (f, v))])
+
+    assert f"argument {flag}" in capsys.readouterr().err
+    assert not (tmp_path / "dagger_clients").exists()
 
 
 def test_cli_reads_what_write_package_writes(tmp_path):

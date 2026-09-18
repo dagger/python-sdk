@@ -49,11 +49,13 @@ def main(argv: list[str] | None = None):
     client_parser.add_argument(
         "--name",
         required=True,
+        type=non_empty,
         help="name of the client, which is the module's name in the schema",
     )
     client_parser.add_argument(
         "--ref",
         required=True,
+        type=non_empty,
         help="where the client loads its module from: a workspace path or a git ref",
     )
     client_parser.add_argument("--pin", help="commit that a git ref is pinned to")
@@ -73,6 +75,13 @@ def main(argv: list[str] | None = None):
         args.run(args)
     except partition.ClientError as e:
         parser.error(str(e))
+
+
+def non_empty(value: str) -> str:
+    if not value:
+        msg = "must not be empty"
+        raise argparse.ArgumentTypeError(msg)
+    return value
 
 
 def add_introspection_argument(subparser: argparse.ArgumentParser):

@@ -389,10 +389,20 @@ def client_package(  # noqa: PLR0913
     """Package name and files of one client, whatever the other clients are."""
     partition.check_attribution(schema)
     module, package = _find_module(schema, name)
+    # The client's schema holds core, so the digest it must match is known.
+    # A given one that differs would bless a client generated against other
+    # core types, which is the skew that check_core is there to catch.
+    expected = partition.core_digest(
+        schema, legacy_sdk_compat=legacy_sdk_compat(schema_version)
+    )
     if core_digest is None:
-        core_digest = partition.core_digest(
-            schema, legacy_sdk_compat=legacy_sdk_compat(schema_version)
+        core_digest = expected
+    elif core_digest != expected:
+        msg = (
+            f'the core digest "{core_digest}" given for the client "{name}" '
+            f"is not that of its schema's core, {expected}"
         )
+        raise partition.ClientError(msg)
     return package, {
         "__init__.py": _client_init(schema, module, package, schema_version),
         "_target.py": _target(name, ref, pin, core_digest),
