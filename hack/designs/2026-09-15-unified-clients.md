@@ -266,7 +266,7 @@ generated = "client"
 ```
 clients/linter/src/dagger_clients/    no __init__.py: a namespace package
   linter/__init__.py                  generated types, linter(), as_linter()
-  linter/_descriptor.py               descriptor and the core digest it was generated against
+  linter/_target.py                   descriptor and the core digest it was generated against
   linter/py.typed
 ```
 
@@ -503,10 +503,10 @@ query executes.
    generated class carries its descriptor for this.
 
 ```python
-# clients/linter/src/dagger_clients/linter/_descriptor.py (generated)
+# clients/linter/src/dagger_clients/linter/_target.py (generated)
 # Plain data, no import: the descriptor is what generation knew.
 NAME = "linter"
-REF = "./path/to/the/linter/module"     # or "github.com/eunomie/glow"
+REF = "/path/to/the/linter/module"      # from the workspace root, or "github.com/eunomie/glow"
 PIN = None                              # or the commit the client was generated against
 CORE_DIGEST = "sha256:…"
 ```
@@ -691,11 +691,19 @@ module config is written.
    file with the workspace and the sources.
 2. SDK files: write `sdk/` with the hand-written SDK only. In an existing
    module, this replaces the vendored `sdk/` and its `gen.py`.
-3. Core: generate once from the client-facing schema into `clients/core`.
-   [speculative] How to get core alone.
+3. Core: generate once from the client-facing schema into `clients/core`. The
+   schema is read through an empty stand-in module, because the engine serves a
+   client-facing schema to a module, not to nothing. That stand-in is then
+   stripped out, or the next step would see it as a client of its own.
 4. Clients: for each declared client, read `clientSchemaIntrospectionJSON`,
    partition by `@sourceMap`, write the descriptor (the workspace path, or the
    ref and the pin), write `clients/<name>`. A self client takes the same path.
+   Every schema, core's and each client's, is read **in the scope's engine-version
+   view** [confident]. The engine serves a module's schema in the view of that
+   module's own declared version, and two views give two different cores, which
+   the digest check would then refuse. The cost is that a client to an older
+   module is read at the scope's version, not at the version that module
+   declares.
 5. Removed clients: delete each directory under `clients/` that carries
    `[tool.dagger] generated = "client"` and is no longer declared.
 6. SDK-owned entries: set the `members` entries, one `{ workspace = true }`
@@ -739,6 +747,10 @@ Query.serveModule(address: String!, refPin: String): Void
 - A git address resolves through `moduleSource(address, refPin, requireKind: GIT)`.
 - A workspace path resolves through `currentWorkspace`, absolute from the
   workspace root and relative from the cwd.
+- **A descriptor writes the absolute form, `/clients/…`, never `./clients/…`**
+  [confident]. The relative form resolves against the cwd of whoever runs the
+  code, so a program started from its own scope directory would load a different
+  module, or none. The absolute form names one place in the workspace.
 - A bare name is rejected, so a module cannot enumerate what its caller installed.
 - Both end in `asModule().serve()`.
 
@@ -880,8 +892,6 @@ removal date is Yves's call.
 - [speculative] Regeneration of a module with a self client does not block.
 - [speculative] A module session resolves a descriptor path against the same
   root the descriptor was written against.
-- [speculative] How to get core alone. Fallback: strip module-owned types from a
-  client schema, with Java's skew guard.
 - [speculative] The module build installs a scope that is a uv workspace root,
   in uv and pip modes.
 - [speculative] A scope inside a tree that already has a uv workspace root above it.
@@ -904,7 +914,15 @@ in two scopes.
 Verified while building it, against a live engine:
 
 - The engine's introspection JSON carries `@sourceMap(module:)`, and a partition
-  on that directive splits core from the module-owned types.
+  on that directive splits core from the module-owned types. **One gap** [known
+  limitation]: in an engine view before v1.0.0, a module's own `XID` scalar and
+  its `loadXFromID` field carry no `@sourceMap`, so the partition counts them as
+  core. Core then differs from the core the scope generated, and the client is
+  refused as skew. A client in a scope older than v1.0.0 cannot be generated
+  until the partition treats those two shapes as module-owned.
+- Core alone: read the client-facing schema through an empty stand-in module,
+  then strip that module out of the schema. Core comes out byte for byte the
+  same as without the stand-in.
 - Core's digest does not depend on which clients are generated beside it. The
   digest comes from the client-facing schema. The module-facing schema gives a
   different digest, so generation must always read the same view.
