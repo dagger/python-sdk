@@ -26,7 +26,7 @@ logs="$scratch.logs"
 mkdir -p "$logs"
 rsync -a --delete \
   --exclude .git --exclude .venv --exclude __pycache__ \
-  --exclude .dagger/modules/e2e/out --exclude .dagger/modules/uc-probe \
+  --exclude .dagger/modules/e2e/out \
   "$root/" "$scratch/"
 if [ -n "${E2E_WITH:-}" ]; then
   base=$(git -C "$root" merge-base HEAD "$E2E_WITH")
