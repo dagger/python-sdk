@@ -253,11 +253,13 @@ type Scope {
   }
 
   """
-  A descriptor path starts with "./", so the SDK can tell it from a Git ref.
+  A descriptor path starts with "/": serveModule reads it from the workspace
+  root, where "./" would be read from the cwd of whatever code runs the
+  client. The leading "/" also tells it from a Git ref.
   """
   let localRef(subpath: String!): String! {
     let trimmed = subpath.trimPrefix("./").trimPrefix("/").trimSuffix("/")
-    if (trimmed == "" or trimmed == ".") { "." } else { "./" + trimmed }
+    if (trimmed == "" or trimmed == ".") { "/" } else { "/" + trimmed }
   }
 
   """

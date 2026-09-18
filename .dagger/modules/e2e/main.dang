@@ -302,7 +302,7 @@ type E2e {
     let target = with.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents
     assertContainsAll(target, [
       "NAME = \"client-dep\"",
-      "REF = \"./" + clientDepPath + "\"",
+      "REF = \"/" + clientDepPath + "\"",
       "PIN = None",
       "CORE_DIGEST = \"" + coreDigestOf(with, tomlGenerateModulePath) + "\"",
     ])
@@ -562,7 +562,7 @@ type E2e {
       .withWorkdir(".")
     let generated = pythonSdk.mod(scoped, path: tomlGenerateModulePath).generated
     assertScopeTree(generated, tomlGenerateModulePath)
-    assertContains(generated.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents, "REF = \"./" + clientDepPath + "\"", "mod generate missed the scope's client")
+    assertContains(generated.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents, "REF = \"/" + clientDepPath + "\"", "mod generate missed the scope's client")
     let viaScope = pythonSdk
       .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + clientDepPath)])
       .withWorkdir(".")
@@ -1092,7 +1092,7 @@ type E2e {
     # A client is a member of the scope, not a dependency the manifest must
     # carry, so the static path takes one like the runtime path.
     let withClient = static.generateScope(scoped, isModule: true, name: name, clients: [ws.moduleSource("/" + clientDepPath)])
-    assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"./" + clientDepPath + "\"", "a static entrypoint refused a client")
+    assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"/" + clientDepPath + "\"", "a static entrypoint refused a client")
     assertContains(withClient.file("dagger-module.toml").contents, "./sdk/entrypoint", "a client took the module off the static path")
 
     let legacyScope = outputRoot + "/static-legacy"
