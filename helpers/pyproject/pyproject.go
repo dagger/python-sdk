@@ -65,6 +65,13 @@ func getUseUv(doc map[string]any) (value bool, ok bool) {
 	return value, ok
 }
 
+// getGlobalClient reports the [tool.dagger].global-client flag and whether it
+// was set at all, like getUseUv.
+func getGlobalClient(doc map[string]any) (value bool, ok bool) {
+	value, ok = table(table(doc, "tool"), "dagger")["global-client"].(bool)
+	return value, ok
+}
+
 func getBaseImage(doc map[string]any) string {
 	s, _ := table(table(doc, "tool"), "dagger")["base-image"].(string)
 	return s
@@ -81,6 +88,16 @@ func setUseUv(doc map[string]any, enabled bool) {
 		return
 	}
 	ensureTable(ensureTable(doc, "tool"), "dagger")["use-uv"] = false
+}
+
+// setGlobalClient writes the flag, or removes it: off is the default, and
+// generation reads the flag's presence.
+func setGlobalClient(doc map[string]any, enabled bool) {
+	if !enabled {
+		removeDaggerKey(doc, "global-client")
+		return
+	}
+	ensureTable(ensureTable(doc, "tool"), "dagger")["global-client"] = true
 }
 
 func setBaseImage(doc map[string]any, img string) {

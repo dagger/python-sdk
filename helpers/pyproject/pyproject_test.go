@@ -135,3 +135,20 @@ func TestSetBaseImage(t *testing.T) {
 	}
 }
 
+
+func TestGetGlobalClient(t *testing.T) {
+	if _, ok := getGlobalClient(mustLoad(t, sample)); ok {
+		t.Error("sample: global-client should report unset when absent")
+	}
+	doc := mustLoad(t, "[tool.dagger]\nglobal-client = true\nuse-uv = false\n")
+	if v, ok := getGlobalClient(doc); !ok || !v {
+		t.Errorf("should report set and true, got value=%v ok=%v", v, ok)
+	}
+	setGlobalClient(doc, false)
+	if _, ok := getGlobalClient(doc); ok {
+		t.Error("global-client should report unset after clearing")
+	}
+	if v, ok := getUseUv(doc); !ok || v {
+		t.Error("clearing global-client clobbered use-uv")
+	}
+}
