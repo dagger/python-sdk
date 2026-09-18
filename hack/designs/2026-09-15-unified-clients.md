@@ -489,6 +489,15 @@ inside a function body.
   it after the program's event loop is gone; `dagger.close()` closes it sooner.
   The environment comes first, so a module never provisions. Verified by hand:
   a program that only calls a client exits 0 and leaves no session process.
+- **A module says it is one** [confident]. The `sdk/` member carries
+  `dagger.provisioning`, because a plain program run inside a module's own scope
+  needs it. So both module entrypoints call `mark_module_runtime()` first, and
+  after that the default session raises "No active engine session to connect to"
+  rather than provisioning. Without it, the only thing keeping a module from
+  downloading a CLI into its own container would be the engine always setting
+  the session in the environment — an accident, not a rule. The signal is the
+  entrypoint, which knows it serves a module, and not an environment variable
+  the engine may rename.
 - A caller passes `session=` only to use a specific session.
 
 One session per client does not work: an object belongs to one session, and a
@@ -751,9 +760,14 @@ module runtime reads the scope file with a small reader, not a TOML parser, so
 it accepts one form of the workspace table: an unquoted `[tool.uv.workspace]`
 header, with `members` as an array of strings. It does not read a quoted
 header, an inline table, or dotted keys such as
-`tool.uv.workspace.members = [...]`. Generation asks the runtime which members
-it reads, and refuses a module scope file where the two disagree, naming the
-form to write. This holds for a module scope only; a plain project is never
+`tool.uv.workspace.members = [...]`. The reader refuses an array holding
+anything but strings, rather than reading strings out of a structure that is not
+a list of them; it reads `[project] dependencies` by the same rule. Generation
+compares **both ways**: the members the runtime reads against the members uv
+reads from the TOML. A member either one reads and the other does not stops
+generation, naming the difference and the form to write. One way would not be
+enough — "the runtime reads at least what I wrote" still lets it read a member
+nobody named. This holds for a module scope only; a plain project is never
 built by the runtime.
 
 **The module build installs what the project depends on** [confident], and the
