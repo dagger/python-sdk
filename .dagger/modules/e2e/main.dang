@@ -546,6 +546,14 @@ type E2e {
       .withNewFile("/" + scope + "/clients/notes/README.md", "not a member\n")
       .withNewFile("/" + scope + "/clients/handmade/pyproject.toml", "[project]\nname = \"handmade\"\ndescription = \"\"\"\n[tool.dagger]\ngenerated = \"client\"\n\"\"\"\n")
       .withNewFile("/" + scope + "/clients/handmade/secret.txt", "mine\n")
+      # A marker that cannot be read never licenses a delete.
+      .withNewFile("/" + scope + "/clients/brokentoml/pyproject.toml", "this is not = valid toml [[[\n")
+      .withNewFile("/" + scope + "/clients/brokentoml/secret.txt", "mine\n")
+      .withNewFile("/" + scope + "/clients/numbermark/pyproject.toml", "[tool.dagger]\ngenerated = 42\n")
+      .withNewFile("/" + scope + "/clients/numbermark/secret.txt", "mine\n")
+      .withNewFile("/" + scope + "/clients/emptyfile/pyproject.toml", "")
+      .withNewFile("/" + scope + "/clients/emptyfile/secret.txt", "mine\n")
+      .withNewFile("/" + scope + "/clients/nofile/secret.txt", "mine\n")
       .withWorkdir(scope)
     let generated = pythonSdk.generateScope(seeded, isModule: false, name: "user-content", clients: [client]).withWorkdir(".")
     let after = generated.file("/" + scope + "/pyproject.toml").contents
@@ -562,6 +570,11 @@ type E2e {
     let removed = pythonSdk.generateScope(generated.withWorkdir(scope), isModule: false, name: "user-content", clients: []).withWorkdir(".")
     assert(removed.directory("/" + scope).exists("clients/notes/README.md"), "removing a client deleted a directory without the marker")
     assert(removed.directory("/" + scope).exists("clients/handmade/secret.txt"), "text that only looks like the marker, in a string, got a directory deleted")
+    ["brokentoml", "numbermark", "emptyfile", "nofile"].each { dir =>
+      assert(generated.directory("/" + scope).exists("clients/" + dir + "/secret.txt"), "generation deleted clients/" + dir + ", whose marker cannot be read")
+      assert(removed.directory("/" + scope).exists("clients/" + dir + "/secret.txt"), "removing a client deleted clients/" + dir + ", whose marker cannot be read")
+      null
+    }
     assert(removed.directory("/" + scope).exists(clientDepMember) == false, "a removed client's member was left behind")
     let removedFile = removed.file("/" + scope + "/pyproject.toml").contents
     assertNotContains(removedFile, "\"" + clientDepMember + "\"", "a removed client stayed a workspace member")
@@ -578,6 +591,16 @@ type E2e {
       .withWorkdir(scope)
     let overUnknown = pythonSdk.generateScope(unknown, isModule: false, name: "user-content", clients: []).cwd rescue "raised"
     assert(overUnknown == "raised", "core was written over a member marked with a kind the SDK does not write")
+
+    # Nor an overwrite, even at a path generation certainly owns.
+    let corrupted = ws
+      .withNewFile("/" + scope + "/clients/core/pyproject.toml", "this is not = valid toml [[[\n")
+      .withNewFile("/" + scope + "/clients/core/mine.txt", "mine\n")
+      .withWorkdir(scope)
+    let overCorrupted = pythonSdk.generateScope(corrupted, isModule: false, name: "user-content", clients: []).cwd rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(overCorrupted, ["clients/core/ exists in", "is not a generated core; move it away"])
 
     # sdk/ from an earlier SDK carries no marker either, so only the header of
     # its generated bindings tells it from one the user wrote.
