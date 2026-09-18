@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -726,20 +727,42 @@ func (d *document) editSources(want []string) {
 	tables := d.editSourceTables(want)
 
 	var stale []int
-	var keep []string
+	var keep, present []string
 	if sec := d.section(sourcesTable); sec != nil {
+		// A source may also be written as dotted keys, one line a field.
+		dotted := map[string][]line{}
+		var dottedNames []string
 		for _, l := range d.lines(sec) {
-			key, ok := lineKey(d.text[l.start:l.end])
+			key, field, ok := lineKey(d.text[l.start:l.end])
 			if !ok || !ownedSource(normalizeDistribution(key)) {
 				continue
 			}
-			if contains(want, key, normalizeDistribution) {
+			switch {
+			case !contains(want, key, normalizeDistribution):
+				stale = append(stale, l.start)
+			case field:
+				name := normalizeDistribution(key)
+				if _, seen := dotted[name]; !seen {
+					dottedNames = append(dottedNames, key)
+				}
+				dotted[name] = append(dotted[name], l)
+			default:
 				keep = append(keep, key)
-			} else {
+			}
+		}
+		for _, key := range dottedNames {
+			lines := dotted[normalizeDistribution(key)]
+			if len(lines) == 1 && isWorkspaceLine(d.text[lines[0].start:lines[0].end]) {
+				present = append(present, key)
+				continue
+			}
+			// Any other field: the source is written again, inline.
+			for _, l := range lines {
 				stale = append(stale, l.start)
 			}
 		}
 	}
+	sort.Ints(stale)
 	// Last first, so the offsets before each deletion hold.
 	for i := len(stale) - 1; i >= 0; i-- {
 		d.deleteLine(stale[i])
@@ -750,8 +773,9 @@ func (d *document) editSources(want []string) {
 			d.replace(kv.valueStart, kv.valueEnd, "{ workspace = true }")
 		}
 	}
+	present = append(present, keep...)
 	for _, w := range want {
-		if contains(keep, w, normalizeDistribution) || contains(tables, w, normalizeDistribution) {
+		if contains(present, w, normalizeDistribution) || contains(tables, w, normalizeDistribution) {
 			continue
 		}
 		if d.section(sourcesTable) == nil && len(tables) > 0 {
@@ -834,14 +858,32 @@ func isWorkspaceTable(body string) bool {
 	return workspace && len(source) == 1
 }
 
-var keyLine = regexp.MustCompile(`^[ \t]*("[^"]*"|'[^']*'|[A-Za-z0-9_-]+)[ \t]*=`)
+const keyPart = `(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)`
 
-func lineKey(text string) (string, bool) {
+var keyLine = regexp.MustCompile(`^[ \t]*(` + keyPart + `)((?:[ \t]*\.[ \t]*` + keyPart + `)*)[ \t]*=`)
+
+// lineKey reads the key a line sets, and whether it sets a field of it with
+// a dotted key, as in `dagger-io.workspace = true`.
+func lineKey(text string) (string, bool, bool) {
 	m := keyLine.FindStringSubmatch(text)
 	if m == nil {
-		return "", false
+		return "", false, false
 	}
-	return strings.Trim(m[1], `"'`), true
+	return strings.Trim(m[1], `"'`), m[2] != "", true
+}
+
+// isWorkspaceLine reports whether one line alone makes a workspace source.
+func isWorkspaceLine(text string) bool {
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(text), &parsed); err != nil || len(parsed) != 1 {
+		return false
+	}
+	for _, v := range parsed {
+		source, _ := v.(map[string]any)
+		workspace, _ := source["workspace"].(bool)
+		return workspace && len(source) == 1
+	}
+	return false
 }
 
 func isWorkspaceSource(value string) bool {

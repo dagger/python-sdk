@@ -548,3 +548,36 @@ func TestEditScopeAddsToAnEmptyMultiLineArray(t *testing.T) {
 		t.Errorf("got:\n%s", got)
 	}
 }
+
+func TestEditScopeReadsDottedSourceKeys(t *testing.T) {
+	head := `[project]
+name = "my-module"
+dependencies = ["dagger-io", "dagger-clients-core"]
+
+[tool.uv.workspace]
+members = ["sdk", "clients/core"]
+
+[tool.uv.sources]
+`
+	kept := head + `dagger-io.workspace = true
+"dagger-clients-core" . workspace = true  # spaced and quoted
+mine.path = "../mine"
+`
+	if got := mustEdit(t, kept, coreOnly()); got != kept {
+		t.Errorf("a dotted workspace source was rewritten:\n%s", got)
+	}
+
+	vendored := head + `dagger-io.path = "sdk"
+dagger-io.editable = true
+dagger-clients-core.workspace = true
+dagger-clients-old.workspace = true
+mine.path = "../mine"
+`
+	want := head + `dagger-clients-core.workspace = true
+mine.path = "../mine"
+dagger-io = { workspace = true }
+`
+	if got := mustEdit(t, vendored, coreOnly()); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
