@@ -301,8 +301,10 @@ class Session(BaseConnection):
     API field: a client is the way in.
     """
 
-    def __init__(self, connection: BaseConnection) -> None:
-        self.connection = connection
+    def __init__(self, connection: BaseConnection | None = None) -> None:
+        # No connection is the shared one, which a module and `dagger run`
+        # set up: the session the generated global client builds is over it.
+        self.connection = SharedConnection() if connection is None else connection
         self._loads: dict[str, _Load] = {}
 
     @property
@@ -360,7 +362,7 @@ def default_session() -> Session:
     global _default  # noqa: PLW0603
     with _sessions_lock:
         if _default is None:
-            _default = Session(SharedConnection())
+            _default = Session()
         return _default
 
 

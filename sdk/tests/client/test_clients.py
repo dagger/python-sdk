@@ -261,7 +261,7 @@ def test_default_session_is_created_once_under_contention(monkeypatch):
     in_init = threading.Event()
 
     class SlowSession(Session):
-        def __init__(self, connection):
+        def __init__(self, connection=None):
             in_init.set()
             # Long enough for the other thread to read the default meanwhile.
             time.sleep(0.1)
@@ -529,3 +529,10 @@ async def test_connection_yields_the_default_session(monkeypatch):
 
     async with dagger.connection() as s:
         assert s is default_session()
+
+
+def test_session_with_no_connection_is_over_the_shared_one():
+    from dagger.client._session import SharedConnection
+
+    assert Session().connection is SharedConnection()
+    assert as_session(SharedConnection()) is default_session()
