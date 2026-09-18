@@ -1037,12 +1037,25 @@ type E2e {
       }
     assertContainsAll(jsonIncluded, ["dagger.json", "cannot carry", "exclude"])
 
-    # A static entrypoint is told from the shared one by its source, not its kind.
+    # This SDK's static entrypoint is told from any other by its source, the
+    # path generation writes, not by its kind, its quoting or its key order.
     let static = ws.withNewFile(manifestPath,
-      "name = \"" + name + "\"\n\n[entrypoint]\nsource = \"./sdk/entrypoint\"\nkind = \"dang\"\n")
+      "name = \"" + name + "\"\n\n[ entrypoint ]\nsource = './sdk/entrypoint'\nkind = \"dang\"\n")
     assert(pythonSdk.mod(static, path: tomlGenerateModulePath, findUp: false).dangEntrypoint, "a static entrypoint written source-first was not recognised")
     let shared = ws.withNewFile(manifestPath, plain)
     assert(pythonSdk.mod(shared, path: tomlGenerateModulePath, findUp: false).dangEntrypoint == false, "the shared entrypoint was taken for a static one")
+
+    # An entrypoint this SDK did not write is the user's, and is kept as
+    # written: a path of their own in the module, and a fork quoted their way.
+    let ownPath = head + "\n[entrypoint]\nkind = \"dang\"\nsource = \"./my-entrypoint\"\n"
+    let ownManifest = manifestOf(ws.withNewFile(manifestPath, ownPath))
+    assertContains(ownManifest, "source = \"./my-entrypoint\"", "a Dang entrypoint of the user's own was replaced: " + ownManifest)
+    assertNotContains(ownManifest, sharedEntrypointSource, "a Dang entrypoint of the user's own was replaced: " + ownManifest)
+    assert(pythonSdk.mod(ws.withNewFile(manifestPath, ownPath), path: tomlGenerateModulePath, findUp: false).dangEntrypoint == false, "an entrypoint of the user's own was taken for the static one")
+    let quoted = manifestOf(ws.withNewFile(manifestPath, head + runtimeTable + "\n[entrypoint]\nkind = 'dang'\nsource = '" + fork + "'\n"))
+    assertContains(quoted, fork, "a single-quoted Dang entrypoint was replaced: " + quoted)
+    assertNotContains(quoted, sharedEntrypointSource, "a single-quoted Dang entrypoint was replaced: " + quoted)
+    assertContainsNone(quoted, noRuntime)
 
     null
   }
@@ -1491,6 +1504,14 @@ type E2e {
 
     let included = static.generateScope(ws.withNewFile(manifestPath, "include = [\"src\"]\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
     assert(included == "raised", "an include list was dropped silently")
+
+    # Read as TOML: the builtin runtime quoted another way is still the one
+    # this SDK wrote, not a runtime of the user's own.
+    let quotedRuntime = static.generateScope(ws.withNewFile(manifestPath, "name = 'toml-generate-app'\n\n[runtime]\nsource = 'python'\n").withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents rescue {
+        err: Error => err.message
+      }
+    assertContains(quotedRuntime, "./sdk/entrypoint", "a single-quoted builtin runtime was refused on the static path: " + quotedRuntime)
 
     # A module rooted at its own directory is what an entrypoint manifest
     # assumes, so this one generates instead of being refused.

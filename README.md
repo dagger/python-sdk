@@ -73,8 +73,10 @@ source = "dagger.io/sdk/python/entrypoint@v1"
 ```
 
 A Dang entrypoint already in the manifest is kept as written, so a module can
-pin a version of the shared entrypoint or point at a fork. A static entrypoint
-is told from the shared one by its source, a path inside the module.
+pin a version of the shared entrypoint, point at a fork, or name one of its
+own. Generation replaces only the static entrypoint it writes itself, told by
+its source, `./sdk/entrypoint`. The manifest is read with a TOML parser, so
+quoting and key order are the user's.
 
 Inside an entrypoint `currentModule` is the module it serves, so the
 entrypoint builds that module's container from `currentModule.source`, with
