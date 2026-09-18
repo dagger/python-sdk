@@ -60,6 +60,43 @@ def contributed_fields(
     ]
 
 
+def check_attribution(schema: GraphQLSchema) -> None:
+    """Refuse a member attributed to a module that can't get it.
+
+    A client contributes fields to core object and interface types, and
+    nothing else. Anything else with `@sourceMap` on it would silently land
+    in the package of its type, so it's an error at generation.
+    """
+    for type_name, t in sorted(schema.type_map.items()):
+        if type_name.startswith("__"):
+            continue
+        owner = source_module(t.ast_node)
+        if isinstance(t, _FieldOwner | GraphQLInputObjectType):
+            members = {n: f.ast_node for n, f in t.fields.items()}
+        elif isinstance(t, GraphQLEnumType):
+            members = {n: v.ast_node for n, v in t.values.items()}
+        else:
+            continue
+        for name, node in sorted(members.items()):
+            module = source_module(node)
+            if module is None or module == owner:
+                continue
+            if owner is None and isinstance(t, _FieldOwner):
+                continue
+            place = f'"{type_name}.{name}" is attributed to the client "{module}"'
+            if owner is not None:
+                msg = (
+                    f'{place}, but its type "{type_name}" '
+                    f'is attributed to the client "{owner}"'
+                )
+            else:
+                msg = (
+                    f"{place}, but only a field of a core object or interface "
+                    "type can be contributed"
+                )
+            raise ClientError(msg)
+
+
 def modules(schema: GraphQLSchema) -> list[str]:
     """Every module the schema attributes something to."""
 

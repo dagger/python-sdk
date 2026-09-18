@@ -356,6 +356,7 @@ def _target(name: str, ref: str, pin: str | None, core_digest: str) -> str:
 
 def core_package(schema: GraphQLSchema, schema_version: str = "") -> Files:
     """Files of `dagger_clients.core`, whatever clients the schema holds."""
+    partition.check_attribution(schema)
     return {
         "__init__.py": _core_init(schema, schema_version),
         "py.typed": "",
@@ -371,6 +372,7 @@ def client_package(  # noqa: PLR0913
     schema_version: str = "",
 ) -> tuple[str, Files]:
     """Package name and files of one client, whatever the other clients are."""
+    partition.check_attribution(schema)
     module, package = _find_module(schema, name)
     if core_digest is None:
         core_digest = partition.core_digest(

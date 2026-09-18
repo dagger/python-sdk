@@ -2,7 +2,9 @@ import pytest
 from graphql import build_schema
 
 from codegen.partition import (
+    ClientError,
     ClientNameError,
+    check_attribution,
     contributed_fields,
     core_digest,
     modules,
@@ -14,7 +16,7 @@ from codegen.partition import (
 
 _DIRECTIVES = """
     directive @sourceMap(module: String, filename: String)
-        on OBJECT | FIELD_DEFINITION | ENUM
+        on OBJECT | FIELD_DEFINITION | ENUM | ENUM_VALUE | INPUT_FIELD_DEFINITION
     directive @expectedType(name: String!) on FIELD_DEFINITION | ARGUMENT_DEFINITION
 """
 
@@ -74,6 +76,37 @@ def test_own_fields_leave_out_contributed_fields():
     assert list(own_fields(schema.type_map["Query"])) == ["directory"]
     # Every field of a client's type goes with the type.
     assert list(own_fields(schema.type_map["Linter"])) == ["lint"]
+
+
+def test_check_attribution_accepts_fields_contributed_to_core_types():
+    assert check_attribution(_schema(_LINTER, _GLOW)) is None
+
+
+def test_check_attribution_refuses_a_field_of_one_client_given_to_another():
+    linter = """
+        type Linter @sourceMap(module: "linter") {
+            lint: String! @sourceMap(module: "glow")
+        }
+    """
+
+    with pytest.raises(
+        ClientError, match=r'"Linter\.lint" .* "glow", but .* "Linter" .* "linter"'
+    ):
+        check_attribution(_schema(linter))
+
+
+@pytest.mark.parametrize(
+    ("member", "place"),
+    [
+        ('enum Severity { LOW HIGH @sourceMap(module: "linter") }', "Severity.HIGH"),
+        ('input Options { level: Int @sourceMap(module: "linter") }', "Options.level"),
+    ],
+)
+def test_check_attribution_refuses_a_member_that_is_not_a_field(member, place):
+    with pytest.raises(
+        ClientError, match=f'"{place}" .* "linter", but only a field of a core'
+    ):
+        check_attribution(_schema(_LINTER, core=_CORE + member))
 
 
 def test_contributed_fields():

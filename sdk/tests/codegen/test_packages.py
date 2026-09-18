@@ -11,7 +11,7 @@ from codegen.partition import ClientError, ClientNameError, core_digest
 
 _CORE = """
     directive @sourceMap(module: String, filename: String)
-        on OBJECT | FIELD_DEFINITION | ENUM | INPUT_OBJECT
+        on OBJECT | FIELD_DEFINITION | ENUM | ENUM_VALUE | INPUT_OBJECT
     directive @expectedType(name: String!) on FIELD_DEFINITION | ARGUMENT_DEFINITION
 
     enum Severity { LOW HIGH }
@@ -398,6 +398,21 @@ def test_client_missing_from_the_schema():
         ClientError, match='nothing to the client "glow"; it has: linter'
     ):
         client_package(_schema(_LINTER), "glow", ".")
+
+
+def test_packages_refuse_a_wrong_attribution():
+    # Otherwise the field lands in the linter package, and glow gets nothing.
+    stray = """
+        type Glow @sourceMap(module: "glow") {
+            lint: Int! @sourceMap(module: "linter")
+        }
+    """
+    schema = build_schema(_sdl(_LINTER) + stray)
+
+    with pytest.raises(ClientError, match=r'"Glow\.lint"'):
+        client_package(schema, "linter", ".")
+    with pytest.raises(ClientError, match=r'"Glow\.lint"'):
+        core_package(schema)
 
 
 def test_client_refuses_a_type_of_another_client():
