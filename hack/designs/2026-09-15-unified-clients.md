@@ -755,17 +755,35 @@ module config is written.
 8. Scope without a module: remove the refusal at `python-sdk.dang:109-114`.
 9. Lock: refresh `uv.lock` if it exists.
 
-**Generation must never write a tree the runtime cannot build** [confident]. The
-module runtime reads the scope file with a small reader, not a TOML parser, so
-it accepts one form of the workspace table: an unquoted `[tool.uv.workspace]`
-header, with `members` as an array of strings. It does not read a quoted
-header, an inline table, or dotted keys such as
-`tool.uv.workspace.members = [...]`. The reader refuses an array holding
-anything but strings, rather than reading strings out of a structure that is not
-a list of them; it reads `[project] dependencies` by the same rule. Generation
-compares **both ways**: the members the runtime reads against the members uv
-reads from the TOML. A member either one reads and the other does not stops
-generation, naming the difference and the form to write. One way would not be
+**Generation must never write a tree the runtime cannot build** [confident].
+
+The module runtime reads `[tool.uv.workspace] members` and `[project]
+dependencies` with **`tomllib`, in the SDK's pinned default image**, in one
+cached exec per build. Those two are the user's own content, so they can hold
+escapes, literal strings and multi-line strings, and only a real parser reads
+them correctly. A hand-written reader failed this twice, in opposite
+directions: first it read a marker out of a string that only looked like one,
+then it refused `"tomli; python_version < \"3.11\""` as "not an array of
+strings". **The parser boundary is where the user's content begins.**
+Single-line keys that the templates and `mod config set` write — `name`,
+`base-image`, `use-uv` — stay on regular expressions, because generation writes
+them itself.
+
+The runtime cannot reach the Go helper, which does parse TOML: the shared
+entrypoint carries a copy of this build, and there `currentModule` is the
+user's module, so it can read none of its own non-Dang files.
+
+What is still refused, and by whom:
+
+- The runtime refuses an array holding anything but strings, rather than
+  reading strings out of a structure that is not a list of them.
+- The SDK's editor refuses a scope file whose tables it cannot edit while
+  keeping the user's formatting, an inline workspace table among them. That
+  limit is the editor's, not the runtime's.
+
+Generation compares **both ways**: the members the runtime reads against the
+members uv reads from the TOML. A member either one reads and the other does
+not stops generation, naming the key and the difference. One way would not be
 enough — "the runtime reads at least what I wrote" still lets it read a member
 nobody named. This holds for a module scope only; a plain project is never
 built by the runtime.
