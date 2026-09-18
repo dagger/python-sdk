@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from typing import TextIO
 
 from exceptiongroup import ExceptionGroup
@@ -10,6 +11,7 @@ from typing_extensions import Self
 
 from dagger._engine._version import CLI_VERSION
 from dagger._exceptions import QueryError
+from dagger._managers import SyncResource, asyncify
 from dagger.client._core import Context
 from dagger.client._session import (
     BaseConnection,
@@ -23,7 +25,7 @@ from ._config import Config
 from ._download import Downloader
 from ._exceptions import CLIReleaseUnavailableError, ProvisionError
 from ._progress import Progress
-from ._session import start_cli_session
+from ._session import start_cli_session_sync
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +98,8 @@ class Engine:
 
             await self.progress.update("Creating new Engine session")
             try:
-                connect_params = await self.stack.enter_async_context(
-                    start_cli_session(self.cfg, cli_bin)
+                connect_params = await self.enter_session(
+                    start_cli_session_sync(self.cfg, cli_bin)
                 )
             except Exception as e:
                 if download_error is not None:
@@ -115,6 +117,12 @@ class Engine:
         )
 
         return self
+
+    async def enter_session(
+        self, session: contextlib.AbstractContextManager[ConnectParams]
+    ) -> ConnectParams:
+        """Start the CLI session, closed with this engine's stack."""
+        return await self.stack.enter_async_context(SyncResource(session))
 
     async def get_cli(self) -> str:
         """Get path to CLI."""
@@ -164,3 +172,41 @@ class Engine:
         await self.progress.stop()
 
         return conn
+
+
+class _UnmanagedEngine(Engine):
+    """An engine whose CLI session outlives any event loop."""
+
+    def __init__(self, cfg: Config, stack: contextlib.AsyncExitStack) -> None:
+        super().__init__(cfg, stack)
+        # Nothing to close until a CLI session starts.
+        self.close_session: Callable[[], None] = lambda: None
+
+    async def enter_session(
+        self, session: contextlib.AbstractContextManager[ConnectParams]
+    ) -> ConnectParams:
+        params = await asyncify(session.__enter__)
+
+        def close() -> None:
+            # Closing stdin ends the CLI; this waits for it to drain its logs.
+            session.__exit__(None, None, None)
+
+        self.close_session = close
+        return params
+
+
+async def provision_default_session(
+    cfg: Config,
+) -> tuple[ConnectParams, Callable[[], None]]:
+    """Provision an engine for the default session of a plain program.
+
+    The default session has no ``async with`` to close it, so the caller gets
+    the close instead. It is sync: it may run at exit, when no event loop does.
+    """
+    engine = _UnmanagedEngine(cfg, contextlib.AsyncExitStack())
+    try:
+        await engine.provision()
+    finally:
+        await engine.progress.stop()
+    assert engine.connect_params
+    return engine.connect_params, engine.close_session

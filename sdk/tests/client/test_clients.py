@@ -34,9 +34,12 @@ from dagger.client.base import Type
 pytestmark = pytest.mark.anyio
 
 GLOW = Target(name="glow", ref="github.com/eunomie/glow", pin="4f1c9e")
-LINTER = Target(name="linter", ref="./clients/linter")
+# The module's own path in the workspace: that is what the engine serves.
+LINTER = Target(name="linter", ref="./.dagger/modules/linter")
 
 MISSING_FIELD = 'Cannot query field "glow" on type "Query".'
+# What beta.13 answers: a validation error, before anything runs.
+VALIDATION = {"code": "GRAPHQL_VALIDATION_FAILED"}
 
 
 class Answer(dict):
@@ -140,24 +143,16 @@ async def test_concurrent_queries_load_once():
     assert len(s.session.loads) == 1
 
 
-async def test_transitional_adapter_wire_shape():
-    # The one test on the load document. It pins the chain the engine has
-    # today and goes away with it, when serveModule lands.
+async def test_git_target_loads_before_its_query():
     s = session()
 
     await glow(session=s).output()
 
-    assert s.session.loads == [
-        "query {\n"
-        '  moduleSource(refString: "github.com/eunomie/glow", refPin: "4f1c9e") {\n'
-        '    withName(name: "glow") {\n'
-        "      asModule {\n"
-        "        serve\n"
-        "      }\n"
-        "    }\n"
-        "  }\n"
-        "}"
-    ]
+    load, query = s.session.queries
+    assert is_load(load)
+    assert GLOW.ref in load
+    assert GLOW.pin in load
+    assert query == "query {\n  glow {\n    output\n  }\n}"
 
 
 async def test_local_target_loads_before_its_query():
@@ -169,6 +164,102 @@ async def test_local_target_loads_before_its_query():
     assert is_load(load)
     assert LINTER.ref in load
     assert query == "query {\n  linter {\n    output\n  }\n}"
+
+
+NO_SERVE_MODULE = QueryError(
+    [
+        QueryErrorValue(
+            'Cannot query field "serveModule" on type "Query".', extensions=VALIDATION
+        )
+    ],
+    "query",
+)
+
+
+async def test_temporary_fallback_chain_wire_shape():
+    # The one test on a load document: the chain an engine without
+    # serveModule gets. It goes away with the fallback. No name, as with
+    # serveModule, so both engines serve the module under the same one.
+    s = session()
+    s.session.fail["serveModule"] = NO_SERVE_MODULE
+
+    await glow(session=s).output()
+
+    attempt, chain = s.session.loads
+    assert "serveModule" in attempt
+    assert chain == (
+        "query {\n"
+        '  moduleSource(refString: "github.com/eunomie/glow", refPin: "4f1c9e") {\n'
+        "    asModule {\n"
+        "      serve\n"
+        "    }\n"
+        "  }\n"
+        "}"
+    )
+
+
+async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
+    s = session()
+    s.session.fail["serveModule"] = NO_SERVE_MODULE
+
+    await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    attempt, chain, query = s.session.queries
+    assert "serveModule" in attempt
+    assert "currentWorkspace" in chain
+    assert LINTER.ref in chain
+    assert "withName" not in chain
+    assert query == "query {\n  linter {\n    output\n  }\n}"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "serveModule" on type "Query".',
+                path=["x"],
+                extensions=VALIDATION,
+            ),
+            id="resolver-error-with-the-phrase",
+        ),
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "serveModule" on type "Query".',
+                extensions={"code": "INTERNAL_SERVER_ERROR"},
+            ),
+            id="internal-error-with-the-phrase",
+        ),
+        pytest.param(
+            QueryErrorValue('Cannot query field "serveModule" on type "Query".'),
+            id="phrase-without-a-code",
+        ),
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "serveModule" on type "Glow".',
+                extensions=VALIDATION,
+            ),
+            id="serve-module-on-another-type",
+        ),
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "asModule" on type "ModuleSource".',
+                extensions=VALIDATION,
+            ),
+            id="another-missing-field",
+        ),
+        pytest.param(QueryErrorValue("boom"), id="plain-error"),
+    ],
+)
+async def test_other_load_errors_do_not_fall_back(error):
+    s = session()
+    s.session.fail["serveModule"] = QueryError([error], "query")
+
+    with pytest.raises(ClientLoadError) as info:
+        await glow(session=s).output()
+
+    assert len(s.session.loads) == 1
+    assert info.value.__cause__ is s.session.fail["serveModule"]
 
 
 async def test_failed_load_names_the_target_and_the_cause():
@@ -261,7 +352,7 @@ def test_default_session_is_created_once_under_contention(monkeypatch):
     in_init = threading.Event()
 
     class SlowSession(Session):
-        def __init__(self, connection):
+        def __init__(self, connection=None):
             in_init.set()
             # Long enough for the other thread to read the default meanwhile.
             time.sleep(0.1)
@@ -366,19 +457,40 @@ async def test_client_select_loads_in_the_receiver_session():
 
 async def test_missing_field_becomes_stale_client_error():
     s = session()
-    error = QueryError([QueryErrorValue(MISSING_FIELD)], "query")
+    error = QueryError([QueryErrorValue(MISSING_FIELD, extensions=VALIDATION)], "query")
     s.session.fail["output"] = error
 
     with pytest.raises(StaleClientError, match="dagger generate") as info:
         await glow(session=s).output()
 
-    assert "glow" in str(info.value)
+    assert str(info.value) == (
+        f"{MISSING_FIELD} The client 'glow' from github.com/eunomie/glow at 4f1c9e "
+        "is out of date. Run `dagger generate`."
+    )
     assert info.value.__cause__ is error
+
+
+async def test_stale_message_names_each_client_and_its_address():
+    s = session()
+    s.session.fail["output"] = QueryError(
+        [QueryErrorValue(MISSING_FIELD, extensions=VALIDATION)], "query"
+    )
+    receiver = client_root(Glow, LINTER, "linter", [], session=s)
+
+    with pytest.raises(StaleClientError) as info:
+        await Glow(client_select(receiver, GLOW, "asGlow", [])).output()
+
+    assert str(info.value).endswith(
+        "The clients 'glow' from github.com/eunomie/glow at 4f1c9e, "
+        "'linter' from ./.dagger/modules/linter are out of date. Run `dagger generate`."
+    )
 
 
 async def test_missing_field_without_target_stays_a_query_error():
     s = session()
-    s.session.fail["version"] = QueryError([QueryErrorValue(MISSING_FIELD)], "query")
+    s.session.fail["version"] = QueryError(
+        [QueryErrorValue(MISSING_FIELD, extensions=VALIDATION)], "query"
+    )
     root = client_root(Query, None, None, [], session=s)
 
     with pytest.raises(QueryError) as info:
@@ -401,7 +513,11 @@ async def test_other_query_errors_pass_through():
 async def test_missing_field_in_a_later_error_is_stale():
     s = session()
     error = QueryError(
-        [QueryErrorValue("boom"), QueryErrorValue(MISSING_FIELD)], "query"
+        [
+            QueryErrorValue("boom"),
+            QueryErrorValue(MISSING_FIELD, extensions=VALIDATION),
+        ],
+        "query",
     )
     s.session.fail["output"] = error
 
@@ -413,13 +529,28 @@ async def test_missing_field_in_a_later_error_is_stale():
 
 async def test_resolver_error_with_the_phrase_stays_a_query_error():
     s = session()
-    error = QueryError([QueryErrorValue(MISSING_FIELD, path=["glow"])], "query")
+    error = QueryError(
+        [QueryErrorValue(MISSING_FIELD, path=["glow"], extensions=VALIDATION)],
+        "query",
+    )
     s.session.fail["output"] = error
 
     with pytest.raises(QueryError) as info:
         await glow(session=s).output()
 
     assert info.value is error
+
+
+async def test_internal_error_with_the_phrase_stays_a_query_error():
+    s = session()
+    internal = {"code": "INTERNAL_SERVER_ERROR"}
+    error = QueryError([QueryErrorValue(MISSING_FIELD, extensions=internal)], "query")
+    s.session.fail["output"] = error
+
+    with pytest.raises(QueryError) as info:
+        await glow(session=s).output()
+
+    assert not isinstance(info.value, StaleClientError)
 
 
 async def test_phrase_inside_a_message_stays_a_query_error():
@@ -529,3 +660,34 @@ async def test_connection_yields_the_default_session(monkeypatch):
 
     async with dagger.connection() as s:
         assert s is default_session()
+
+
+def test_session_with_no_connection_is_over_the_shared_one():
+    from dagger.client._session import SharedConnection
+
+    assert Session().connection is SharedConnection()
+    assert as_session(SharedConnection()) is default_session()
+
+
+async def test_legacy_connection_yields_an_isolated_session(monkeypatch):
+    from dagger.provisioning import _connection
+
+    class Engine:
+        def __init__(self, cfg, stack):
+            pass
+
+        async def provision(self):
+            return self
+
+        def get_client_connection(self):
+            return FakeConnection()
+
+        async def setup_client(self, conn):
+            return conn
+
+    monkeypatch.setattr(_connection, "Engine", Engine)
+
+    async with dagger.Connection() as s:
+        assert isinstance(s, Session)
+        assert s is not default_session()
+        assert isinstance(s.connection, FakeConnection)

@@ -1,22 +1,45 @@
 """How the module a target names gets served into a session."""
 
+from dagger._exceptions import QueryError
 from dagger.client._core import Arg, Context
-from dagger.client._descriptor import Target
+from dagger.client._descriptor import Target, missing_field
 from dagger.client._session import Session
 
-# This is the one place that knows how a module is loaded. The engine field
-# this SDK wants, `serveModule(ref, name, pin)`, takes a path or a git ref in
-# one argument and resolves a path in the caller's own context. It does not
-# exist yet. Until it lands, a git ref goes through the chain the engine has
-# today, and a path resolves in the caller's workspace, which a module session
-# cannot do. When the field lands, this function alone changes.
+# One field, `serveModule(address, refPin)`, serves a git address and a
+# workspace path alike: the engine resolves each in the caller's own context,
+# which is what lets one client work in a module and in a plain program. The
+# descriptor's ref is the address and its pin the refPin. There is no name
+# argument: the engine derives the name from the module's own config, as it
+# did for the schema this client was generated from, so the two agree unless
+# the module renamed itself since, and then the client is stale and its first
+# selection says so (see stale_client_error).
 
 
 async def load_target(session: Session, target: Target) -> None:
-    """Serve the module a target names, under the client's name."""
+    """Serve the module a target names."""
+    ctx = Context(session)
+    args = [Arg("address", target.ref), Arg("refPin", target.pin, None)]
+    try:
+        await ctx.root_select("serveModule", args).execute()
+    except QueryError as e:
+        missing = missing_field(e)
+        if missing is None or missing.groups() != ("serveModule", "Query"):
+            raise
+        await _serve_without_the_field(ctx, target)
+
+
+# Only for an engine that predates serveModule, which answers that the field
+# does not exist. The field is in dagger/dagger from 284cd849
+# (dagger/dagger#14210), so this serves engines released before a release
+# carries that commit. This is not a design choice: delete it, with the tests
+# that pin its wire shape, once the minimum supported engine has the field.
+# Until then it serves what serveModule would, under the module's own name.
+# The engine's answer is not remembered, on purpose: on such an engine each
+# load pays one failed round trip first, which is cheaper than tracking
+# engine versions for a path that goes away.
+async def _serve_without_the_field(ctx: Context, target: Target) -> None:
     await (
-        _source(Context(session), target)
-        .select("ModuleSource", "withName", [Arg("name", target.name)])
+        _source(ctx, target)
         .select("ModuleSource", "asModule", [])
         .select("Module", "serve", [])
         .execute()
@@ -24,7 +47,7 @@ async def load_target(session: Session, target: Target) -> None:
 
 
 def _source(ctx: Context, target: Target) -> Context:
-    if _is_local(target.ref):
+    if target.ref.startswith((".", "/")):
         return ctx.root_select("currentWorkspace", []).select(
             "Workspace", "moduleSource", [Arg("path", target.ref)]
         )
@@ -32,8 +55,3 @@ def _source(ctx: Context, target: Target) -> Context:
         "moduleSource",
         [Arg("refString", target.ref), Arg("refPin", target.pin, None)],
     )
-
-
-def _is_local(ref: str) -> bool:
-    # A local descriptor is written as a path from the workspace root.
-    return ref.startswith((".", "/"))

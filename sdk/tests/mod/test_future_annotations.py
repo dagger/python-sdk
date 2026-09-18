@@ -11,8 +11,8 @@ from typing import Annotated
 
 from typing_extensions import Doc
 
-import dagger
 from dagger import DefaultPath, Deprecated, Ignore, Name
+from dagger.client import gen
 from dagger.mod import Module
 
 
@@ -25,7 +25,7 @@ def test_default_path_with_future_annotations():
         @mod.function
         def build(
             self,
-            src: Annotated[dagger.Directory, DefaultPath(".")],
+            src: Annotated[gen.Directory, DefaultPath(".")],
         ) -> str:
             return "ok"
 
@@ -83,7 +83,7 @@ def test_ignore_with_future_annotations():
         @mod.function
         def build(
             self,
-            src: Annotated[dagger.Directory, Ignore(["*.tmp", ".git"])],
+            src: Annotated[gen.Directory, Ignore(["*.tmp", ".git"])],
         ) -> str:
             return "ok"
 

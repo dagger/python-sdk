@@ -135,3 +135,24 @@ func TestSetBaseImage(t *testing.T) {
 	}
 }
 
+func TestGetGlobalClient(t *testing.T) {
+	if _, ok := getGlobalClient(mustLoad(t, sample)); ok {
+		t.Error("sample: global-client should report unset when absent")
+	}
+	doc := mustLoad(t, "[tool.dagger]\nglobal-client = true\nuse-uv = false\n")
+	if v, ok := getGlobalClient(doc); !ok || !v {
+		t.Errorf("should report set and true, got value=%v ok=%v", v, ok)
+	}
+}
+
+func TestGetMembers(t *testing.T) {
+	doc := mustLoad(t, `["tool"."uv"."workspace"]
+members = ["sdk", "clients/core", ["clients/unowned"]]
+`)
+	if got := getMembers(doc); got != "sdk\nclients/core\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := getMembers(mustLoad(t, sample)); got != "" {
+		t.Errorf("a file without a workspace: got %q", got)
+	}
+}

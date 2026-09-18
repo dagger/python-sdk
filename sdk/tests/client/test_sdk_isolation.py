@@ -1,6 +1,7 @@
 """The hand-written SDK files depend on nothing generated.
 
-Only ``dagger/__init__.py`` may name generated code.
+Only ``dagger/__init__.py`` may name generated code: the optional import of
+the temporary global client.
 """
 
 import ast
@@ -18,7 +19,7 @@ SRC = pathlib.Path(
 PACKAGE_INIT = SRC / "__init__.py"
 
 GENERATED_NAME_RE = re.compile(
-    r"(?<![\w.])(dagger\.client\.gen|dagger_gen|dagger_clients)(?!\w)"
+    r"(?<![\w.])(dagger\.client\.gen|dagger_gen|dagger_clients|dagger_global)(?!\w)"
 )
 
 # Runs in its own interpreter: this one has the generated bindings loaded.
@@ -30,7 +31,7 @@ import sys
 import types
 
 src = pathlib.Path(sys.argv[1])
-blocked = ("dagger.client.gen", "dagger_gen", "dagger_clients")
+blocked = ("dagger.client.gen", "dagger_gen", "dagger_clients", "dagger_global")
 
 
 class GeneratedCodeImportedError(Exception):
@@ -83,13 +84,23 @@ def test_sdk_files_import_without_generated_code():
     assert len(imported) == len(sdk_files()) - 1
 
 
+# The rule is that the SDK imports nothing generated, and the AST scan below
+# enforces it. A help message naming the package a user has to import is not
+# a dependency, so this one string is let through; every other name in the
+# text still fails.
+HELP_TEXT = {
+    pathlib.Path("client/_session.py"): "(from dagger_clients.core import core)",
+}
+
+
 @pytest.mark.parametrize("path", sdk_files(), ids=lambda p: str(p.relative_to(SRC)))
 def test_sdk_file_text_names_no_generated_package(path: pathlib.Path):
     """Catches a name in a string, which no import resolution sees."""
+    allowed = HELP_TEXT.get(path.relative_to(SRC))
     found = [
         f"{path.relative_to(SRC)}:{number}: {line.strip()}"
         for number, line in enumerate(path.read_text().splitlines(), 1)
-        if GENERATED_NAME_RE.search(line)
+        if GENERATED_NAME_RE.search(line.replace(allowed, "") if allowed else line)
     ]
 
     assert not found, "\n".join(found)
@@ -100,7 +111,7 @@ def _is_submodule(name: str) -> bool:
     return name in {p.stem for p in SRC.iterdir()}
 
 
-GENERATED = ("dagger.client.gen", "dagger_gen", "dagger_clients")
+GENERATED = ("dagger.client.gen", "dagger_gen", "dagger_clients", "dagger_global")
 
 
 def _is_generated(name: str) -> bool:
@@ -243,6 +254,7 @@ def f():
             id="method-body",
         ),
         pytest.param("import dagger_gen\n", "dagger.log", id="dagger_gen"),
+        pytest.param("import dagger_global\n", "dagger.log", id="dagger_global"),
         pytest.param(
             "from dagger_clients.core import core\n", "dagger.log", id="dagger_clients"
         ),
@@ -289,12 +301,11 @@ def test_guard_accepts_sdk_import(source: str, module: str):
     assert not _generated_imports(source, module)
 
 
-def test_package_init_names_generated_code_once():
-    """The init is exempt while it star-imports the bindings for ``dagger.X``.
+def test_package_init_names_only_the_global_client():
+    """The init's generated imports are the optional global client's.
 
-    The later slice trades that for the optional ``dagger_global`` import,
-    at which point this test and the exemption go together.
+    One for type checkers, and the lazy one at run time.
     """
     found = [stmt for _, stmt in _generated_imports(PACKAGE_INIT.read_text(), "dagger")]
 
-    assert found == ["from dagger_gen import *", "from dagger.client.gen import *"]
+    assert found == ["from dagger_global import *", "import_module('dagger_global')"]

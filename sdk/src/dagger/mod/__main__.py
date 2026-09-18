@@ -11,6 +11,7 @@ import anyio
 
 from dagger import telemetry
 from dagger._exceptions import QueryError
+from dagger.client._session import mark_module_runtime
 from dagger.mod._exceptions import ModuleError
 
 logger = logging.getLogger(__package__)
@@ -18,6 +19,7 @@ logger = logging.getLogger(__package__)
 
 def main(argv: list[str] | None = None) -> int:
     """Run one command and return the exit status."""
+    mark_module_runtime()
     parser = argparse.ArgumentParser(prog="python -m dagger.mod")
     commands = parser.add_subparsers(required=True)
 

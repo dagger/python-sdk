@@ -1,16 +1,16 @@
-import dagger
-from dagger import dag, function, object_type
+from dagger import function, object_type
+from dagger_clients.core import Container, Directory, Workspace, core
 
 
 @object_type
 class {{ .ModuleType }}:
-    source: dagger.Directory
+    source: Directory
     base_image_address: str
 
     @classmethod
     def create(
         cls,
-        ws: dagger.Workspace,
+        ws: Workspace,
         base_image_address: str = "alpine:3.24",
     ) -> {{ .ModuleType }}:
         return cls(
@@ -29,10 +29,11 @@ class {{ .ModuleType }}:
         )
 
     @function
-    def container(self) -> dagger.Container:
+    def container(self) -> Container:
         """A container with the workspace source, ready to build."""
         return (
-            dag.container()
+            core()
+            .container()
             .from_(self.base_image_address)
             .with_directory("/src", self.source)
             .with_workdir("/src")

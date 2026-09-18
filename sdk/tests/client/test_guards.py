@@ -13,7 +13,7 @@ def test_type_error_names_the_calling_module():
 
 
 def test_generated_bindings_keep_their_message():
-    from dagger import dag
+    from dagger.client.gen import dag
 
     with pytest.raises(TypeError, match=r"Method dagger\.client\.gen\.Container\."):
         dag.container().with_exec("nope")

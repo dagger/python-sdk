@@ -7,7 +7,6 @@ from typing_extensions import override
 
 if typing.TYPE_CHECKING:
     from dagger.client._core import Context
-    from dagger.client._session import BaseConnection
 
 
 class Scalar(str):
@@ -92,27 +91,5 @@ class Root(Type):
         super().__init__(ctx)
 
     @classmethod
-    def from_connection(cls, conn: BaseConnection):
-        """Create a new instance of the root type, using the given connection."""
-        from ._core import Context
-        from ._session import as_session
-
-        return cls(Context(as_session(conn)))
-
-    @classmethod
     def _graphql_name(cls) -> str:
         return "Query"
-
-
-_root_type: type[Root] = Root
-
-
-def set_root_type(cls: type[Root]) -> None:
-    """Register the generated root, for SDK files that can't import it."""
-    global _root_type  # noqa: PLW0603
-    _root_type = cls
-
-
-def root_type() -> type[Root]:
-    """The root that a connection hands out as its client."""
-    return _root_type
