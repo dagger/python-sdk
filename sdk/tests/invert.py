@@ -177,30 +177,35 @@ INVERSIONS = [
     ),
     # serveModule is the load, for a git and a local target alike.
     Inversion(
-        CLIENTS + "test_load_is_one_call_for_a_git_target",
-        '\'  serveModule(address: "github.com/eunomie/glow", refPin: "4f1c9e")\\n\'',
-        '\'  serveModule(address: "github.com/eunomie/glow", refPin: "9b2d7a")\\n\'',
+        CLIENTS + "test_git_target_loads_before_its_query",
+        "assert GLOW.pin in load",
+        "assert GLOW.pin not in load",
     ),
     Inversion(
-        CLIENTS + "test_load_is_the_same_call_for_a_local_target",
-        'serveModule(address: "./.dagger/modules/linter")',
-        'serveModule(address: "./linter")',
+        CLIENTS + "test_local_target_loads_before_its_query",
+        "assert is_load(load)\n    assert LINTER.ref in load",
+        "assert is_load(load)\n    assert LINTER.ref not in load",
     ),
     Inversion(
-        CLIENTS + "test_engine_without_serve_module_gets_the_old_chain",
-        'assert "serveModule" in attempt',
-        'assert "serveModule" not in attempt',
+        CLIENTS + "test_temporary_fallback_chain_wire_shape",
+        'assert "serveModule" in attempt\n    assert chain == (',
+        'assert "serveModule" not in attempt\n    assert chain == (',
     ),
     # The fallback pins no name either.
     Inversion(
-        CLIENTS + "test_engine_without_serve_module_gets_the_old_chain",
+        CLIENTS + "test_temporary_fallback_chain_wire_shape",
         '"    asModule {\\n"',
         '"    withName(name: \\"glow\\") {\\n"',
     ),
     Inversion(
         CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
-        '"      asModule {\\n"',
-        '"      withName(name: \\"linter\\") {\\n"',
+        'assert "withName" not in chain',
+        'assert "withName" in chain',
+    ),
+    Inversion(
+        CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
+        "assert LINTER.ref in chain",
+        "assert LINTER.ref not in chain",
     ),
     Inversion(
         CLIENTS + "test_other_load_errors_do_not_fall_back",

@@ -143,25 +143,26 @@ async def test_concurrent_queries_load_once():
     assert len(s.session.loads) == 1
 
 
-async def test_load_is_one_call_for_a_git_target():
+async def test_git_target_loads_before_its_query():
     s = session()
 
     await glow(session=s).output()
 
-    assert s.session.loads == [
-        "query {\n"
-        '  serveModule(address: "github.com/eunomie/glow", refPin: "4f1c9e")\n'
-        "}"
-    ]
+    load, query = s.session.queries
+    assert is_load(load)
+    assert GLOW.ref in load
+    assert GLOW.pin in load
+    assert query == "query {\n  glow {\n    output\n  }\n}"
 
 
-async def test_load_is_the_same_call_for_a_local_target():
+async def test_local_target_loads_before_its_query():
     s = session()
 
     await client_root(Glow, LINTER, "linter", [], session=s).output()
 
     load, query = s.session.queries
-    assert load == 'query {\n  serveModule(address: "./.dagger/modules/linter")\n}'
+    assert is_load(load)
+    assert LINTER.ref in load
     assert query == "query {\n  linter {\n    output\n  }\n}"
 
 
@@ -175,8 +176,9 @@ NO_SERVE_MODULE = QueryError(
 )
 
 
-async def test_engine_without_serve_module_gets_the_old_chain():
-    # Pins the wire shape of the fallback: delete with it. No name, as with
+async def test_temporary_fallback_chain_wire_shape():
+    # The one test on a load document: the chain an engine without
+    # serveModule gets. It goes away with the fallback. No name, as with
     # serveModule, so both engines serve the module under the same one.
     s = session()
     s.session.fail["serveModule"] = NO_SERVE_MODULE
@@ -202,19 +204,12 @@ async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
 
     await client_root(Glow, LINTER, "linter", [], session=s).output()
 
-    _, chain, query = s.session.queries
-    assert chain == (
-        "query {\n"
-        "  currentWorkspace {\n"
-        '    moduleSource(path: "./.dagger/modules/linter") {\n'
-        "      asModule {\n"
-        "        serve\n"
-        "      }\n"
-        "    }\n"
-        "  }\n"
-        "}"
-    )
-    assert query.startswith("query {\n  linter {")
+    attempt, chain, query = s.session.queries
+    assert "serveModule" in attempt
+    assert "currentWorkspace" in chain
+    assert LINTER.ref in chain
+    assert "withName" not in chain
+    assert query == "query {\n  linter {\n    output\n  }\n}"
 
 
 @pytest.mark.parametrize(
