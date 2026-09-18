@@ -21,10 +21,18 @@ type ModConfigValues {
   """
   pub baseImage: String
 
-  new(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null) {
+  """
+  Whether generation emits the temporary global client, `dagger.dag` with one
+  method per core field and per client, or null when unset. When null, no
+  global client is generated.
+  """
+  pub globalClient: Boolean
+
+  new(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null, globalClient: Boolean = null) {
     self.pythonVersion = pythonVersion
     self.useUv = useUv
     self.baseImage = baseImage
+    self.globalClient = globalClient
     self
   }
 }
@@ -54,6 +62,7 @@ type ModConfig {
       pythonVersion: readPythonVersion,
       useUv: readUseUv,
       baseImage: readBaseImage,
+      globalClient: readGlobalClient,
     )
   }
 
@@ -61,9 +70,10 @@ type ModConfig {
   Set one or more configuration values in pyproject.toml at once.
 
   Each flag is optional; omitting it leaves that setting untouched. Setting
-  useUv to true (the SDK default) writes nothing, keeping the file minimal.
+  useUv to true or globalClient to false (the SDK defaults) writes nothing,
+  keeping the file minimal.
   """
-  pub set(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null): Changeset! {
+  pub set(pythonVersion: String = null, useUv: Boolean = null, baseImage: String = null, globalClient: Boolean = null): Changeset! {
     let withPython = if (pythonVersion != null) {
       tool.withExec(["pyproject", "set-python-version", toolPath, pythonVersion])
     } else {
@@ -82,7 +92,13 @@ type ModConfig {
       withUv
     }
 
-    let edited = withImage.file(toolPath).contents
+    let withGlobal = if (globalClient != null) {
+      withImage.withExec(["pyproject", "set-global-client", toolPath, if (globalClient) { "true" } else { "false" }])
+    } else {
+      withImage
+    }
+
+    let edited = withGlobal.file(toolPath).contents
     ws.withNewFile("/" + pyprojectPath, edited).changes(ws)
   }
 
@@ -108,6 +124,14 @@ type ModConfig {
   let readBaseImage: String {
     let value = tool.withExec(["pyproject", "get-base-image", toolPath]).stdout
     if (value == "") { null } else { value }
+  }
+
+  """
+  Whether generation emits the global client, or null when unset.
+  """
+  let readGlobalClient: Boolean {
+    let value = tool.withExec(["pyproject", "get-global-client", toolPath]).stdout
+    if (value == "true") { true } else if (value == "false") { false } else { null }
   }
 
   let pyprojectPath: String! {
