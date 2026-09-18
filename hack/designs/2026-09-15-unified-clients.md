@@ -745,8 +745,8 @@ the check in `.dagger/modules/e2e/main.dang` still holds.
 ## 13. How a client loads its module
 
 A client must load the module it targets, from a client session and from a
-module session. The engine field exists, in `dagger/dagger#14210`, open at the
-time of writing:
+module session. The engine field exists and is merged, `dagger/dagger#14210`
+at `284cd849`:
 
 ```graphql
 Query.serveModule(address: String!, refPin: String): Void
@@ -755,10 +755,10 @@ Query.serveModule(address: String!, refPin: String): Void
 - A git address resolves through `moduleSource(address, refPin, requireKind: GIT)`.
 - A workspace path resolves through `currentWorkspace`, absolute from the
   workspace root and relative from the cwd.
-- **A descriptor writes the absolute form, `/clients/…`, never `./clients/…`**
-  [confident]. The relative form resolves against the cwd of whoever runs the
-  code, so a program started from its own scope directory would load a different
-  module, or none. The absolute form names one place in the workspace.
+- **A descriptor writes the absolute form, `/.dagger/modules/lib`, never
+  `./…`** [confident]. The relative form resolves against the cwd of whoever
+  runs the code, so a program started from its own scope directory would load a
+  different module, or none. The absolute form names one place in the workspace.
 - A bare name is rejected, so a module cannot enumerate what its caller installed.
 - Both end in `asModule().serve()`.
 
@@ -766,6 +766,12 @@ One call covers every client, so the descriptor keeps one shape: `ref` is the
 address, `pin` is `refPin`. Module code never touches `currentWorkspace`: the
 engine does that internally, which is what makes the call legitimate from a
 module once the guard on `currentWorkspace` lands.
+
+**What the field still owes the caller's cache** [open]. A load at run time is
+invisible to the cache key of the call that performed it. So a caller keeps its
+cached result after its client's target changes, which `[[dependencies]]` used
+to prevent. Every SDK that drops `[[dependencies]]` inherits this, so the answer
+belongs to the field, not to a language.
 
 ### `core.serveModule`, not `dag.serveModule` [provisional]
 
@@ -815,9 +821,10 @@ a name, every client regenerates rather than keeping the old name.
   `moduleSource`, and moves to one call when the field lands.
 - Local-client end-to-end checks need an engine with the field.
   `.dagger/modules/engine-e2e` must move to it.
-- [speculative] A path in a descriptor is written against the workspace root. A
-  module session resolves it against the module's own context root. For a module
-  in the user's workspace, the two roots must be the same directory.
+- A path in a descriptor is written against the workspace root, absolute
+  [confident]. A module session resolves it against the same workspace, and
+  `/../tmp` is normalised back inside it rather than escaping. Symlinks are not
+  verified.
 - [speculative] A module can load itself (7.3).
 
 ## 14. Decisions
@@ -898,10 +905,10 @@ removal date is Yves's call.
 - [speculative] A module can load itself into its own session, and whether that
   needs `SELF_CALLS`.
 - [speculative] Regeneration of a module with a self client does not block.
-- [speculative] A module session resolves a descriptor path against the same
-  root the descriptor was written against.
 - [speculative] The module build installs a scope that is a uv workspace root,
-  in uv and pip modes.
+  in uv and pip modes. The locked uv path is proved; the pip and unlocked paths
+  install every member, which is a defect being fixed.
+- [speculative] A symlinked path in a descriptor.
 - [speculative] A scope inside a tree that already has a uv workspace root above it.
 - [speculative] The global client as a second import package of the `sdk/`
   member, and whether mypy and pyright then type `dagger.dag` as the global
