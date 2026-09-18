@@ -1,10 +1,10 @@
 """What a generated client hands the SDK: its target and its core digest."""
 
 import contextlib
-import contextvars
 import dataclasses
 import logging
 import re
+import threading
 from collections.abc import Iterable, Iterator
 
 from dagger._exceptions import QueryError, StaleClientError
@@ -29,9 +29,12 @@ class Target:
     pin: str | None = None
 
 
-_registering: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "registering", default=False
-)
+# Registration is a phase of the process, not of one task: a context
+# variable would follow a child task out of the window and never reach a
+# thread. The cost is that a concurrent session in this process, while a
+# module registers, also sees a genuine mismatch downgraded to a warning.
+_registering = 0
+_registering_lock = threading.Lock()
 
 
 @contextlib.contextmanager
@@ -41,11 +44,14 @@ def registering_types() -> Iterator[None]:
     A stale client only warns here: a module with a client to itself has
     to run before that client can be regenerated.
     """
-    token = _registering.set(True)
+    global _registering  # noqa: PLW0603
+    with _registering_lock:
+        _registering += 1
     try:
         yield
     finally:
-        _registering.reset(token)
+        with _registering_lock:
+            _registering -= 1
 
 
 def check_core(client: str, expected: str, installed: str) -> None:
@@ -56,7 +62,7 @@ def check_core(client: str, expected: str, installed: str) -> None:
         f"Client {client!r} was generated for core {expected}, "
         f"but the installed core is {installed}. {GENERATE_HINT}"
     )
-    if _registering.get():
+    if _registering:
         logger.warning(msg)
         return
     raise StaleClientError(msg)

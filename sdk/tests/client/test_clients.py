@@ -1,6 +1,7 @@
 """The SDK side of a generated client: its session, its target, its load."""
 
 import logging
+import threading
 
 import anyio
 import anyio.lowlevel
@@ -361,6 +362,35 @@ def test_registering_ends_with_its_block():
 
     with pytest.raises(StaleClientError):
         check_core("glow", "sha256:aa", "sha256:bb")
+
+
+async def test_registering_ends_for_tasks_started_inside_it():
+    started, left = anyio.Event(), anyio.Event()
+
+    async def child():
+        started.set()
+        await left.wait()
+        with pytest.raises(StaleClientError):
+            check_core("glow", "sha256:aa", "sha256:bb")
+
+    async with anyio.create_task_group() as tg:
+        with registering_types():
+            tg.start_soon(child)
+            await started.wait()
+        left.set()
+
+
+def test_registering_covers_threads_started_inside_it(
+    caplog: pytest.LogCaptureFixture,
+):
+    with caplog.at_level(logging.WARNING), registering_types():
+        thread = threading.Thread(
+            target=check_core, args=("glow", "sha256:aa", "sha256:bb")
+        )
+        thread.start()
+        thread.join()
+
+    assert "sha256:bb" in caplog.text
 
 
 async def test_session_close_forgets_what_was_loaded():
