@@ -908,6 +908,15 @@ removal date is Yves's call.
   `Client`.
 - [not implemented] The default session provisions the engine on first query and
   closes it cleanly at exit. See 8.1.
+- **[blocker, not ours to fix] A changed client target returns a cached result.**
+  `[[dependencies]]` used to put the target module into the caller's identity, so
+  changing the target changed the caller's digest. A unified client records a
+  path and loads the module at run time, so nothing about the target reaches the
+  caller's cache key. Proved on the `284cd849` engine: call a local client,
+  change only the target's implementation, call the unchanged caller again, get
+  the old result. This is a question for the engine and the specification — what
+  `serveModule` contributes to the cache key of the call that used it. No SDK can
+  fix it from outside.
 - [speculative] `Module.serve` from a module session on the engine this repo targets.
 - [speculative] Spec decision 4: a client function whose signature names a type
   from another client.
