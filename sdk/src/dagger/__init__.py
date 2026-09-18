@@ -21,10 +21,8 @@ from dagger.client._config import Timeout as Timeout
 from dagger.client._connection import connect as connect
 from dagger.client._connection import close as close
 
-# The API is generated per scope, into dagger_clients, and the SDK files
-# never import it. The one exception is the temporary global client, which
-# keeps dag.container() and dagger.Container working while a module
-# migrates.
+# The temporary global client is the only generated code named here: it
+# keeps dag.container() and dagger.Container working while a module migrates.
 if _typing.TYPE_CHECKING:
     try:
         from dagger_global import *
@@ -82,7 +80,6 @@ def __dir__() -> list[str]:
 def __getattr__(name: str) -> _typing.Any:
     """Names of the global client, or where a name of the legacy bindings went."""
     if name == "dag":
-        # The global client's dag when there is one, through _global_dag.
         return _sessions.default_session()
     if name == "__all__":
         # What a star import took when these names were globals.
