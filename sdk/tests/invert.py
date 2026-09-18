@@ -58,13 +58,13 @@ INVERSIONS = [
     ),
     Inversion(
         PACKAGE + "test_session_field_points_to_core",
-        '"while migrating, set global-client = true under [tool.dagger] and run "',
-        '"while migrating, set global-client = false under [tool.dagger] and run "',
+        '"migrating, set global-client = true under [tool.dagger] and run "',
+        '"migrating, set global-client = false under [tool.dagger] and run "',
     ),
     Inversion(
         PACKAGE + "test_session_field_points_to_a_client_too",
-        '"or linter() from its package in dagger_clients for a client."',
-        '"or linter() from dagger_clients.core for a client."',
+        """"or linter() from the client's package for a client." in""",
+        """"or linter() from the core package for a client." in""",
     ),
     # dag is the default Session.
     Inversion(
