@@ -22,7 +22,12 @@ from cattrs.preconf.json import make_converter as make_json_converter
 from typing_extensions import TypeForm
 
 from dagger._exceptions import DaggerError, InvalidQueryError, QueryError
-from dagger.client._session import BaseConnection, as_session, default_session
+from dagger.client._session import (
+    BaseConnection,
+    Session,
+    as_session,
+    default_session,
+)
 from dagger.client._target import Target, stale_client_error
 from dagger.client.base import Input, Scalar, Type
 
@@ -264,21 +269,19 @@ class Context:
     async def execute(
         self, return_type: TypeForm[T] | type[T] | None = None
     ) -> T | None:
-        await self.load_targets()
+        session = as_session(self.conn)
+        await self.load_targets(session)
         await self.resolve_ids()
         try:
-            result = await self.conn.session.execute(self.build())
+            result = await session.execute(self.build())
         except QueryError as e:
             if self.targets and (stale := stale_client_error(e, self.targets)):
                 raise stale from e
             raise
         return self.get_value(result, return_type) if return_type else None
 
-    async def load_targets(self) -> None:
-        """Serve every module the query needs, in this context's session."""
-        if not self.targets:
-            return
-        session = as_session(self.conn)
+    async def load_targets(self, session: Session) -> None:
+        """Serve every module the query needs."""
         for target in sorted(self.targets, key=lambda t: t.name):
             await session.load(target)
 
