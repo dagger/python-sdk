@@ -91,6 +91,10 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "    @function\n"
         "    def boom(self) -> str:\n"
         "        raise RuntimeError('boom')\n"
+        "    @function\n"
+        "    def handed(self) -> str:\n"
+        "        from dagger.client._load import entrypoint_workspace\n"
+        "        return repr(entrypoint_workspace())\n"
     )
     return tmp_path
 
@@ -135,3 +139,33 @@ def test_command_failure_writes_nothing(module_dir: pathlib.Path):
     assert proc.returncode == 2
     assert "boom" in proc.stderr
     assert not (module_dir / "out").exists()
+
+
+def test_command_hands_the_workspace_to_the_load(module_dir: pathlib.Path):
+    # The entrypoint sends the module's workspace with the call, because this
+    # process is not the module and resolves no path of the caller's itself.
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "handed",
+        "fnArgs": "{}",
+        "workspace": "d29ya3NwYWNl",
+    }
+    proc = _call(module_dir, request)
+    assert proc.returncode == 0, proc.stderr
+    got = json.loads((module_dir / "out" / "result.json").read_text())
+    assert got == "'d29ya3NwYWNl'"
+
+
+def test_command_without_a_workspace_hands_none(module_dir: pathlib.Path):
+    # An entrypoint from before the handover sends none: serveModule then
+    # answers, as it did.
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "handed",
+        "fnArgs": "{}",
+    }
+    proc = _call(module_dir, request)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads((module_dir / "out" / "result.json").read_text()) == "None"

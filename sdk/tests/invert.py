@@ -37,6 +37,7 @@ CLIENTS = "tests/client/test_clients.py::"
 ISOLATION = "tests/client/test_sdk_isolation.py::"
 PACKAGES = "tests/codegen/test_packages.py::"
 DEFAULT_ENGINE = "tests/client/test_default_engine.py::"
+DISPATCH = "tests/mod/test_dispatch.py::"
 
 INVERSIONS = [
     # The default session provisions an engine only in a plain program, once,
@@ -234,6 +235,38 @@ INVERSIONS = [
         CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
         "assert LINTER.ref in chain",
         "assert LINTER.ref not in chain",
+    ),
+    # Under a module entrypoint, a local target loads through the workspace
+    # the entrypoint handed over, and nothing else changes query.
+    Inversion(
+        CLIENTS + "test_handed_workspace_serves_a_local_target_through_it",
+        '"    ... on Workspace {\\n"',
+        '"    ... on Query {\\n"',
+    ),
+    Inversion(
+        CLIENTS + "test_handed_workspace_leaves_a_git_target_to_serve_module",
+        "assert handed_workspace not in load",
+        "assert handed_workspace in load",
+    ),
+    Inversion(
+        CLIENTS + "test_handed_workspace_failure_does_not_fall_back",
+        'assert "serveModule" not in load',
+        'assert "serveModule" in load',
+    ),
+    Inversion(
+        CLIENTS + "test_without_a_handed_workspace_a_local_target_uses_serve_module",
+        'assert "node(" not in load',
+        'assert "node(" in load',
+    ),
+    Inversion(
+        DISPATCH + "test_command_hands_the_workspace_to_the_load",
+        "assert got == \"'d29ya3NwYWNl'\"",
+        'assert got == "None"',
+    ),
+    Inversion(
+        DISPATCH + "test_command_without_a_workspace_hands_none",
+        'read_text()) == "None"',
+        'read_text()) != "None"',
     ),
     Inversion(
         CLIENTS + "test_other_load_errors_do_not_fall_back",

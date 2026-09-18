@@ -28,6 +28,7 @@ from dagger.client import (
     registering_types,
 )
 from dagger.client._core import Arg, Context
+from dagger.client._load import use_entrypoint_workspace
 from dagger.client._session import BaseConnection, as_session
 from dagger.client.base import Type
 
@@ -210,6 +211,73 @@ async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
     assert LINTER.ref in chain
     assert "withName" not in chain
     assert query == "query {\n  linter {\n    output\n  }\n}"
+
+
+HANDED = "d29ya3NwYWNl"
+
+
+@pytest.fixture
+def handed_workspace():
+    use_entrypoint_workspace(HANDED)
+    yield HANDED
+    use_entrypoint_workspace(None)
+
+
+async def test_handed_workspace_serves_a_local_target_through_it(handed_workspace):
+    # Under a module entrypoint this process is not the module, and its own
+    # current workspace is its container: the path resolves in the one the
+    # entrypoint handed over, and serveModule is never asked.
+    s = session()
+
+    await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    load, query = s.session.queries
+    assert load == (
+        "query {\n"
+        f'  node(id: "{handed_workspace}") {{\n'
+        "    ... on Workspace {\n"
+        '      moduleSource(path: "./.dagger/modules/linter") {\n'
+        "        asModule {\n"
+        "          serve\n"
+        "        }\n"
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}"
+    )
+    assert query == "query {\n  linter {\n    output\n  }\n}"
+
+
+async def test_handed_workspace_leaves_a_git_target_to_serve_module(handed_workspace):
+    s = session()
+
+    await glow(session=s).output()
+
+    (load,) = s.session.loads
+    assert "serveModule" in load
+    assert handed_workspace not in load
+
+
+@pytest.mark.usefixtures("handed_workspace")
+async def test_handed_workspace_failure_does_not_fall_back():
+    s = session()
+    s.session.fail["moduleSource"] = QueryError([QueryErrorValue("boom")], "query")
+
+    with pytest.raises(ClientLoadError):
+        await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    (load,) = s.session.loads
+    assert "serveModule" not in load
+
+
+async def test_without_a_handed_workspace_a_local_target_uses_serve_module():
+    s = session()
+
+    await client_root(Glow, LINTER, "linter", [], session=s).output()
+
+    (load,) = s.session.loads
+    assert "serveModule" in load
+    assert "node(" not in load
 
 
 @pytest.mark.parametrize(

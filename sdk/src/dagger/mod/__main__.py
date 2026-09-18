@@ -99,8 +99,13 @@ def _call(args: argparse.Namespace) -> None:
 
 
 async def _dispatch(request: dict[str, Any]) -> Any:
+    from dagger.client._load import use_entrypoint_workspace
     from dagger.mod.cli import load_module
 
+    # The module's workspace, which the entrypoint was given and this process
+    # was not: a client resolves a local target there. Before the user's code
+    # is imported, so nothing it starts can load without it.
+    use_entrypoint_workspace(request.get("workspace"))
     return await load_module().dispatch(request)
 
 
