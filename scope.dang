@@ -31,6 +31,11 @@ type Scope {
   let lock: Boolean!
 
   """
+  The engine version of the scope's module, or empty for a scope without one.
+  """
+  let engineVersion: String!
+
+  """
   The workspace with the scope generated: sdk/, clients/core and one member
   per client written whole, a client that is no longer declared deleted, and
   the SDK-owned entries of the scope file set. Everything else is left as it
@@ -39,6 +44,7 @@ type Scope {
   pub generated: Workspace! {
     let existing = ws.directory(root)
     let members = clientMembers
+    checkNames(members)
     checkMembers(existing, members)
     let cleared = staleClients(existing, members).reduce(ws) { target, dir =>
       target.withoutDirectory(memberPath(clientsDirName + "/" + dir))
@@ -48,13 +54,14 @@ type Scope {
     let withClients = members.reduce(withCore) { target, member =>
       replaced(target, clientsDirName + "/" + member.dir, clientMember(member))
     }
-    withClients.withNewFile(memberPath(scopeFileName), scopeFile(existing, members).contents)
+    relocked(existing, withClients.withNewFile(memberPath(scopeFileName), scopeFile(existing, members).contents))
   }
 
   let sdkDirName: String! = "sdk"
   let clientsDirName: String! = "clients"
   let coreDirName: String! = "core"
   let scopeFileName: String! = "pyproject.toml"
+  let lockFileName: String! = "uv.lock"
   let sdkDistribution: String! = "dagger-io"
   let coreDistribution: String! = "dagger-clients-core"
 
@@ -102,6 +109,51 @@ type Scope {
       null
     }
     null
+  }
+
+  """
+  Two clients whose names differ only in case, "-", "_" or "." would share
+  one member and one import package.
+  """
+  let checkNames(members: [ClientMember!]!): Void {
+    members.each { member =>
+      let same = members.filter { other => other.dir == member.dir }
+      if (same.length > 1) {
+        raise "clients " + same.map { other => "\"" + other.name + "\"" }.join(" and ") + " of " + path + " would both be generated into " + clientsDirName + "/" + member.dir
+      }
+      null
+    }
+    null
+  }
+
+  """
+  A committed uv.lock names the members, so it is locked again against the
+  new ones; `uv sync --locked` in the module build refuses a stale lock. The
+  uv is the one the module build runs, so the build can read the lock. A
+  scope without a lock gets none.
+  """
+  let relocked(existing: Directory!, target: Workspace!): Workspace! {
+    if (existing.exists(lockFileName)) {
+      let scopeDir = target.directory(root).filter(exclude: [".venv", "**/.venv", "**/__pycache__"])
+      let lockFile = codegenBase
+        .withMountedFile("/usr/local/bin/uv", container.from(buildUvImage).rootfs.file("uv"))
+        .withDirectory("/scope", scopeDir)
+        .withWorkdir("/scope")
+        .withExec(["uv", "lock"])
+        .file("/scope/" + lockFileName)
+      target.withFile(memberPath(lockFileName), lockFile)
+    } else {
+      target
+    }
+  }
+
+  let buildUvImage: String! {
+    let line = currentModule.source.file("runtime/images/uv/Dockerfile").contents.match("(?m)^FROM\\s+(\\S+)")
+    if (line == null) {
+      raise "no FROM line in runtime/images/uv/Dockerfile"
+    } else {
+      line.captures[0] ?? ""
+    }
   }
 
   """
@@ -201,8 +253,8 @@ type Scope {
 
   """
   Core is generated from a module with nothing in it, so its schema is core
-  and nothing else. Every client's schema holds the same core, and the
-  generator checks that when it writes the client.
+  and nothing else. Every client's schema holds the same core, read in the
+  same view, and the generator checks that when it writes the client.
   """
   let coreSource: Directory! {
     codegenEnv
@@ -212,10 +264,22 @@ type Scope {
   }
 
   let coreSchema: File! {
-    currentModule.source
-      .directory("helpers/core-schema")
-      .asModuleSource
-      .clientSchemaIntrospectionJSON
+    coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJSON
+  }
+
+  let coreSchemaSource: ModuleSource! {
+    currentModule.source.directory("helpers/core-schema").asModuleSource
+  }
+
+  """
+  The engine version the scope's code runs against: its module's, or the
+  version core is generated at for a scope without a module. The engine
+  serves a schema in the view of the module it describes, so a client to a
+  module that declares an older version would otherwise name core types that
+  its scope does not have.
+  """
+  let view: String! {
+    if (engineVersion == "") { coreSchemaSource.engineVersion } else { engineVersion }
   }
 
   """
@@ -241,7 +305,7 @@ type Scope {
   let clientSource(member: ClientMember!): Directory! {
     let pin = if (member.pin == null) { [] :: [String!]! } else { ["--pin", member.pin ?? ""] }
     codegenEnv
-      .withMountedFile(schemaPath, member.source.clientSchemaIntrospectionJSON)
+      .withMountedFile(schemaPath, member.source.withEngineVersion(view).clientSchemaIntrospectionJSON)
       .withExec([
         codegenPython, "-m", "codegen", "generate-client",
         "-i", schemaPath, "-o", outputPath,

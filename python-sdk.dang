@@ -132,49 +132,51 @@ type PythonSdk {
   }
 
   """
-  Generate one SDK scope: the module at the workspace cwd, when the scope has
-  one. A module without a config file is initialized from the configured
-  template. Every module receives a dagger-module.toml from the manifest
-  builder module and is then generated. A pre-1.0 dagger.json is migrated
-  and removed. The scope's module clients become the module's dependencies,
-  so the generated bindings include their types. With dangEntrypoint, the
-  module gets an entrypoint manifest and a generated entrypoint instead of a
-  runtime.
-  Standalone clients, in a scope without a module, are not generated yet.
+  Generate one SDK scope, the directory at the workspace cwd: sdk/, core and
+  one member per client, with the SDK's entries in its pyproject.toml. A scope
+  without a module gets the same tree and no module config. In a module scope,
+  a module without a config file is initialized from the configured template,
+  every module receives a dagger-module.toml from the manifest builder, and a
+  pre-1.0 dagger.json is migrated and removed. With dangEntrypoint, the module
+  gets an entrypoint manifest and a generated entrypoint instead of a runtime.
   """
   pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
+    let scope = normalizePath(ws.cwd)
+    # Resolve local client paths from the workspace root.
+    let rooted = ws.withWorkdir(".")
     if (isModule == false) {
-      if (clients.length > 0) {
-        raise "python-sdk does not generate standalone module clients yet"
-      } else {
-        ws
-      }
+      Scope(path: scope, ws: rooted, clients: clients, lock: lock, engineVersion: "").generated.withWorkdir(scope)
     } else {
-      let scope = normalizePath(ws.cwd)
       let hadConfig = hasModuleConfig(ws, scope)
-      # Resolve local dependency paths from the workspace root.
-      let rooted = ws.withWorkdir(".")
       let initialized = if (hadConfig) {
         rooted
       } else {
         rooted.withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
       }
       if (dangEntrypoint) {
-        checkStaticScope(initialized, scope, hadConfig, clients)
+        checkStaticScope(initialized, scope, hadConfig)
       }
       # The runtime manifest is what every engine serves a schema for; the
       # static path swaps it for the entrypoint manifest as it generates.
-      let configured = generateScopeManifest(initialized, scope, name, clients)
-      mod(configured, path: scope, findUp: false).generated.withWorkdir(scope)
+      let configured = generateScopeManifest(initialized, scope, name)
+      Mod(
+        rootPath: scope,
+        ws: configured,
+        dangEntrypoint: dangEntrypoint or hasEntrypointManifest(configured, scope),
+        clients: clients,
+        lock: lock,
+      ).generated.withWorkdir(scope)
     }
   }
 
   """
-  Generate dagger-module.toml from the existing manifest and complete client
-  set. Preserve fields that the SDK does not own. Remove dagger.json so two
-  manifest files cannot contain different state.
+  Generate dagger-module.toml from the existing manifest. Preserve fields that
+  the SDK does not own. A client is a member of the scope, loaded by the code
+  that uses it, so the manifest lists none, and the [[dependencies]] of the
+  layout before go. Remove dagger.json so two manifest files cannot contain
+  different state.
   """
-  let generateScopeManifest(ws: Workspace!, scope: String!, name: String!, clients: [ModuleSource!]!): Workspace! {
+  let generateScopeManifest(ws: Workspace!, scope: String!, name: String!): Workspace! {
     let root = "/" + scope
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
     let hasJson = scopeHasFile(ws, scope, "dagger.json")
@@ -198,9 +200,9 @@ type PythonSdk {
       sdkHelpers.moduleManifest.withLegacyPythonRuntime
         .withDangEntrypoint(source: sharedEntrypointSource)
     }
-    clients.reduce(base.withName(name: name).withoutLegacyRuntimeDependencies) { manifest, client =>
-      manifest.withLegacyRuntimeDependency(module: client)
-    }.generate(ws.withWorkdir(scope), lock: lock, legacyJson: false).withWorkdir(".")
+    base.withName(name: name).withoutLegacyRuntimeDependencies
+      .generate(ws.withWorkdir(scope), lock: lock, legacyJson: false)
+      .withWorkdir(".")
   }
 
   """
@@ -223,10 +225,7 @@ type PythonSdk {
   """
   What a static entrypoint cannot carry, refused before anything is written.
   """
-  let checkStaticScope(ws: Workspace!, scope: String!, hadConfig: Boolean!, clients: [ModuleSource!]!): Void {
-    if (clients.length > 0) {
-      raise "a static entrypoint cannot use other modules yet: an entrypoint manifest has no dependencies; set dangEntrypoint = false"
-    }
+  let checkStaticScope(ws: Workspace!, scope: String!, hadConfig: Boolean!): Void {
     if (hadConfig == false and template == "legacy") {
       raise "the legacy template is not available with a static entrypoint"
     }
@@ -252,7 +251,8 @@ type PythonSdk {
     let sourceMatch = head.match("(?m)^\\s*source\\s*=\\s*\"([^\"]*)\"")
     let sourceValue = if (sourceMatch == null) { "." } else { sourceMatch.captures[0] ?? "." }
     let source = if (sourceValue == ".") { [] :: [String!]! } else { ["source"] }
-    let tables = ["codegen", "clients", "dependencies"].filter { name =>
+    # [[dependencies]] is not among them: generation removes it on every path.
+    let tables = ["codegen", "clients"].filter { name =>
       toml.containsMatch(Regexp("(?m)^\\s*\\[\\[?" + name + "\\]\\]?"))
     }
     let pythonRuntime = toml.containsMatch("(?m)^\\s*\\[runtime\\]\\s*\\n\\s*source\\s*=\\s*\"python\"")
@@ -345,6 +345,8 @@ type PythonSdk {
       rootPath: modPath,
       ws: ws,
       dangEntrypoint: dangEntrypoint or hasEntrypointManifest(ws, modPath),
+      clients: null,
+      lock: lock,
     )
   }
 
