@@ -727,7 +727,12 @@ module config is written.
    module is read at the scope's version, not at the version that module
    declares.
 5. Removed clients: delete each directory under `clients/` that carries
-   `[tool.dagger] generated = "client"` and is no longer declared.
+   `[tool.dagger] generated = "client"` and is no longer declared. The scope
+   file loses only the entries of members whose **present** directory carries
+   the marker. A directory the user removed by hand keeps its entry, because
+   generation can no longer prove it owned it; `uv` then names the missing
+   member, and the user restores the directory or removes the entry. A visible
+   broken scope file is better than a silent edit to a line the SDK may not own.
 6. SDK-owned entries: set the `members` entries, one `{ workspace = true }`
    source per member, and one `[project] dependencies` entry per client. Keep
    everything else, including members and dependencies the user added.
@@ -743,10 +748,13 @@ module config is written.
 
 **Generation must never write a tree the runtime cannot build** [confident]. The
 module runtime reads the scope file with a small reader, not a TOML parser, so
-it accepts one form of the workspace table. Generation asks the runtime which
-members it reads, and refuses a module scope file where the two disagree. The
-refusal names the form to write. This holds for a module scope only; a plain
-project is never built by the runtime.
+it accepts one form of the workspace table: an unquoted `[tool.uv.workspace]`
+header, with `members` as an array of strings. It does not read a quoted
+header, an inline table, or dotted keys such as
+`tool.uv.workspace.members = [...]`. Generation asks the runtime which members
+it reads, and refuses a module scope file where the two disagree, naming the
+form to write. This holds for a module scope only; a plain project is never
+built by the runtime.
 
 **The module build installs what the project depends on** [confident], and the
 members those depend on, in every path: locked uv, unlocked uv and pip. A
@@ -898,7 +906,7 @@ Invert each assertion once and confirm that it fails.
 20. Install one: a consumer that names one client gets only that client, core and the SDK files.
 21. Remove a client: its member, source and `members` entry are gone; `uv sync --locked` passes.
 22. User content kept: user tables, comments and a user member survive generation byte for byte.
-23. Default session in a plain program: a program with no connection handling runs a client call and exits cleanly.
+23. Default session in a plain program: a program with no connection handling runs a client call and exits cleanly. **Passes**: exit 0, no session process left, 23.7s cold and 1.9s warm.
 24. Self client: a module with a client to itself calls its own function through `dagger call`; after an API change, generation succeeds.
 25. Signature rule: a function that returns a client type fails registration with a clear message; a core type and the module's own class pass.
 
