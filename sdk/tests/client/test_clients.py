@@ -140,7 +140,9 @@ async def test_concurrent_queries_load_once():
     assert len(s.session.loads) == 1
 
 
-async def test_git_target_loads_through_module_source():
+async def test_transitional_adapter_wire_shape():
+    # The one test on the load document. It pins the chain the engine has
+    # today and goes away with it, when serveModule lands.
     s = session()
 
     await glow(session=s).output()
@@ -158,24 +160,15 @@ async def test_git_target_loads_through_module_source():
     ]
 
 
-async def test_local_target_loads_from_the_workspace():
+async def test_local_target_loads_before_its_query():
     s = session()
 
     await client_root(Glow, LINTER, "linter", [], session=s).output()
 
-    assert s.session.loads == [
-        "query {\n"
-        "  currentWorkspace {\n"
-        '    moduleSource(path: "./clients/linter") {\n'
-        '      withName(name: "linter") {\n'
-        "        asModule {\n"
-        "          serve\n"
-        "        }\n"
-        "      }\n"
-        "    }\n"
-        "  }\n"
-        "}"
-    ]
+    load, query = s.session.queries
+    assert is_load(load)
+    assert LINTER.ref in load
+    assert query == "query {\n  linter {\n    output\n  }\n}"
 
 
 async def test_failed_load_names_the_target_and_the_cause():
