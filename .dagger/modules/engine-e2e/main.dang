@@ -5,6 +5,7 @@ Keep engineCommit and the engine-dev dependency in dagger-module.toml aligned.
 type EngineE2e {
   let engineCommit: String! = "6bf59d50654ce9244ebeee1cc090b7dce3fe3083"
   let modulePath: String! = ".dagger/modules/sdk-smoke"
+  let flatModulePath: String! = ".dagger/modules/sdk-flat"
 
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
@@ -46,6 +47,27 @@ type EngineE2e {
       .withExec(["dagger", "-m", modulePath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
       .stdout
     assert(release.trimSpace != "", "the generated module did not run")
+
+    # The flat template keeps the module's code in a single file at its root,
+    # with no src/ of its own, and runs the same example module.
+    let flat = initialized
+      .withExec([
+        "dagger", "module", "init", "python", "--auto-apply",
+        "--name", "sdk-flat",
+        "--path", flatModulePath,
+        "--template", "flat",
+      ])
+      .withExec(["test", "-f", flatModulePath + "/sdk_flat.py"])
+      .withExec(["test", "!", "-e", flatModulePath + "/src"])
+      .withExec(["test", "-f", flatModulePath + "/sdk/src/dagger/client/gen.py"])
+      .withExec(["grep", "-q", "class SdkFlat:", flatModulePath + "/sdk_flat.py"])
+    let flatRelease = flat
+      .withExec(["dagger", "-m", flatModulePath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
+      .stdout
+    assert(
+      flatRelease.trimSpace == release.trimSpace,
+      "the flat module returned " + flatRelease.trimSpace + ", the default template returned " + release.trimSpace,
+    )
 
     initialized
       .withExec([

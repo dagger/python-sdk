@@ -186,6 +186,64 @@ type E2e {
   }
 
   """
+  The flat template puts the module's code in a single file at the module root
+  instead of under src/<package>/, with the same example module as the default
+  template. Its build backend packages a root-level module, and the
+  pyproject.toml settings apply to it like they do to any other template.
+  """
+  pub generateScopeFlatTemplateCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/scope-flat"
+    let scoped = ws.withNewDirectory("/" + scope, directory).withWorkdir(scope)
+    let changes = pythonSdk(template: "flat")
+      .generateScope(scoped, isModule: true, name: "scope-flat", clients: [])
+      .withWorkdir(".")
+      .changes(scoped.withWorkdir("."))
+
+    assertAdded(changes, scope + "/pyproject.toml")
+    assertAdded(changes, scope + "/scope_flat.py")
+    assertAdded(changes, scope + "/dagger-module.toml")
+    assertAdded(changes, scope + "/" + generatedMarkerPath)
+
+    # The module's own code is at the root; only the vendored library uses src/.
+    let ownSrc = changes.addedPaths.filter { path => path.hasPrefix(scope + "/src/") }
+    assert(ownSrc.length == 0, "the flat template wrote module code under src/: " + ownSrc.join(", "))
+
+    let flatSource = changes.layer.file(scope + "/scope_flat.py").contents
+    assertContainsAll(flatSource, [
+      "class ScopeFlat:",
+      "ws: dagger.Workspace",
+      "def container(self) -> dagger.Container:",
+    ])
+    assertContainsNone(flatSource, ["def __init__", "{{"])
+
+    let flatPyproject = changes.layer.file(scope + "/pyproject.toml").contents
+    assertContainsAll(flatPyproject, [
+      "name = \"scope-flat\"",
+      ">=3.14",
+      "hatchling",
+      "dagger-io",
+    ])
+    assertNotContains(flatPyproject, "[tool.dagger]", "default settings should not write a [tool.dagger] table")
+
+    let configuredScope = outputRoot + "/scope-flat-configured"
+    let configuredScoped = ws.withNewDirectory("/" + configuredScope, directory).withWorkdir(configuredScope)
+    let configuredChanges = pythonSdk(template: "flat", pythonVersion: "3.13", useUv: false, baseImage: "python:3.13-slim")
+      .generateScope(configuredScoped, isModule: true, name: "scope-flat-configured", clients: [])
+      .withWorkdir(".")
+      .changes(ws)
+    assertAdded(configuredChanges, configuredScope + "/scope_flat_configured.py")
+    assertContainsAll(configuredChanges.layer.file(configuredScope + "/pyproject.toml").contents, [
+      ">=3.13",
+      "use-uv = false",
+      "python:3.13-slim",
+      "hatchling",
+      "dagger-io",
+    ])
+
+    null
+  }
+
+  """
   generateScope preserves a current manifest. It migrates a pre-1.0
   dagger.json to dagger-module.toml. Both cases generate the client library.
   """
@@ -338,6 +396,34 @@ type E2e {
       .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
     run.assertSuccess
     assertContains(run.stdout, runtimeGreeting, "the module did not run on this repository's runtime")
+
+    null
+  }
+
+  """
+  The runtime runs a module whose code is a single file at the module root,
+  the layout the flat template writes. The committed src/ fixture is rewritten
+  into that layout, with the flat template's own pyproject.toml, so the layout
+  is the only difference from runtimeCallCheck.
+  """
+  pub runtimeFlatLayoutCallCheck(ws: Workspace!): Void @check {
+    let flatPyproject = ws
+      .file("/templates/flat/pyproject.toml.tmpl")
+      .contents
+      .replace("{{ .ModuleName }}", "runtime-app")
+    let flat = ws
+      .directory("/")
+      .withoutDirectory(runtimeModulePath + "/src")
+      .withFile(
+        runtimeModulePath + "/runtime_app.py",
+        ws.file("/" + runtimeModulePath + "/src/runtime_app/__init__.py"),
+      )
+      .withNewFile(runtimeModulePath + "/pyproject.toml", flatPyproject)
+    let run = sdkSdk
+      .target(flat, ".")
+      .runInstalled(["call", "-m", runtimeFixturePath, "greeting"])
+    run.assertSuccess
+    assertContains(run.stdout, runtimeGreeting, "the flat-layout module did not run on this repository's runtime")
 
     null
   }
