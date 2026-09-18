@@ -564,6 +564,17 @@ type E2e {
     let overUnknown = pythonSdk.generateScope(unknown, isModule: false, name: "user-content", clients: []).cwd rescue "raised"
     assert(overUnknown == "raised", "core was written over a member marked with a kind the SDK does not write")
 
+    # sdk/ from an earlier SDK carries no marker either, so only the header of
+    # its generated bindings tells it from one the user wrote.
+    let vendored = ws
+      .withNewFile("/" + scope + "/sdk/src/dagger/__init__.py", "# my own dagger\n")
+      .withNewFile("/" + scope + "/sdk/src/dagger/client/gen.py", "# written by hand\n")
+      .withWorkdir(scope)
+    let overSdk = pythonSdk.generateScope(vendored, isModule: false, name: "user-content", clients: []).cwd rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(overSdk, ["sdk/ exists", "was not written by dagger generate", "move or rename it"])
+
     null
   }
 
