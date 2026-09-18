@@ -3,7 +3,7 @@
 Requires the engine changes in [dagger/dagger#14221](https://github.com/dagger/dagger/pull/14221).
 
 A collection has stored keys and a function that returns one item for a key.
-The engine supplies `keys`, `get`, `values`, `subset`, and `delta`. Other exposed
+The engine supplies `keys`, `get`, `list`, and `subset`. Other exposed
 functions appear under `batch`.
 
 ```python
