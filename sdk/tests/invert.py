@@ -202,6 +202,12 @@ INVERSIONS = [
         "assert len(s.session.loads) == 1\n    assert info.value.__cause__",
         "assert len(s.session.loads) == 2\n    assert info.value.__cause__",
     ),
+    # Only a validation error is a missing field, for the stale check too.
+    Inversion(
+        CLIENTS + "test_internal_error_with_the_phrase_stays_a_query_error",
+        'internal = {"code": "INTERNAL_SERVER_ERROR"}',
+        'internal = {"code": "GRAPHQL_VALIDATION_FAILED"}',
+    ),
     # The staleness message names the client and its address.
     Inversion(
         CLIENTS + "test_missing_field_becomes_stale_client_error",

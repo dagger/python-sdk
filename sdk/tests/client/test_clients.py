@@ -38,6 +38,8 @@ GLOW = Target(name="glow", ref="github.com/eunomie/glow", pin="4f1c9e")
 LINTER = Target(name="linter", ref="./.dagger/modules/linter")
 
 MISSING_FIELD = 'Cannot query field "glow" on type "Query".'
+# What beta.13 answers: a validation error, before anything runs.
+VALIDATION = {"code": "GRAPHQL_VALIDATION_FAILED"}
 
 
 class Answer(dict):
@@ -164,7 +166,12 @@ async def test_load_is_the_same_call_for_a_local_target():
 
 
 NO_SERVE_MODULE = QueryError(
-    [QueryErrorValue('Cannot query field "serveModule" on type "Query".')], "query"
+    [
+        QueryErrorValue(
+            'Cannot query field "serveModule" on type "Query".', extensions=VALIDATION
+        )
+    ],
+    "query",
 )
 
 
@@ -215,12 +222,35 @@ async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
     [
         pytest.param(
             QueryErrorValue(
-                'Cannot query field "serveModule" on type "Query".', path=["x"]
+                'Cannot query field "serveModule" on type "Query".',
+                path=["x"],
+                extensions=VALIDATION,
             ),
             id="resolver-error-with-the-phrase",
         ),
         pytest.param(
-            QueryErrorValue('Cannot query field "asModule" on type "ModuleSource".'),
+            QueryErrorValue(
+                'Cannot query field "serveModule" on type "Query".',
+                extensions={"code": "INTERNAL_SERVER_ERROR"},
+            ),
+            id="internal-error-with-the-phrase",
+        ),
+        pytest.param(
+            QueryErrorValue('Cannot query field "serveModule" on type "Query".'),
+            id="phrase-without-a-code",
+        ),
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "serveModule" on type "Glow".',
+                extensions=VALIDATION,
+            ),
+            id="serve-module-on-another-type",
+        ),
+        pytest.param(
+            QueryErrorValue(
+                'Cannot query field "asModule" on type "ModuleSource".',
+                extensions=VALIDATION,
+            ),
             id="another-missing-field",
         ),
         pytest.param(QueryErrorValue("boom"), id="plain-error"),
@@ -432,7 +462,7 @@ async def test_client_select_loads_in_the_receiver_session():
 
 async def test_missing_field_becomes_stale_client_error():
     s = session()
-    error = QueryError([QueryErrorValue(MISSING_FIELD)], "query")
+    error = QueryError([QueryErrorValue(MISSING_FIELD, extensions=VALIDATION)], "query")
     s.session.fail["output"] = error
 
     with pytest.raises(StaleClientError, match="dagger generate") as info:
@@ -447,7 +477,9 @@ async def test_missing_field_becomes_stale_client_error():
 
 async def test_stale_message_names_each_client_and_its_address():
     s = session()
-    s.session.fail["output"] = QueryError([QueryErrorValue(MISSING_FIELD)], "query")
+    s.session.fail["output"] = QueryError(
+        [QueryErrorValue(MISSING_FIELD, extensions=VALIDATION)], "query"
+    )
     receiver = client_root(Glow, LINTER, "linter", [], session=s)
 
     with pytest.raises(StaleClientError) as info:
@@ -461,7 +493,9 @@ async def test_stale_message_names_each_client_and_its_address():
 
 async def test_missing_field_without_target_stays_a_query_error():
     s = session()
-    s.session.fail["version"] = QueryError([QueryErrorValue(MISSING_FIELD)], "query")
+    s.session.fail["version"] = QueryError(
+        [QueryErrorValue(MISSING_FIELD, extensions=VALIDATION)], "query"
+    )
     root = client_root(Query, None, None, [], session=s)
 
     with pytest.raises(QueryError) as info:
@@ -484,7 +518,11 @@ async def test_other_query_errors_pass_through():
 async def test_missing_field_in_a_later_error_is_stale():
     s = session()
     error = QueryError(
-        [QueryErrorValue("boom"), QueryErrorValue(MISSING_FIELD)], "query"
+        [
+            QueryErrorValue("boom"),
+            QueryErrorValue(MISSING_FIELD, extensions=VALIDATION),
+        ],
+        "query",
     )
     s.session.fail["output"] = error
 
@@ -496,13 +534,28 @@ async def test_missing_field_in_a_later_error_is_stale():
 
 async def test_resolver_error_with_the_phrase_stays_a_query_error():
     s = session()
-    error = QueryError([QueryErrorValue(MISSING_FIELD, path=["glow"])], "query")
+    error = QueryError(
+        [QueryErrorValue(MISSING_FIELD, path=["glow"], extensions=VALIDATION)],
+        "query",
+    )
     s.session.fail["output"] = error
 
     with pytest.raises(QueryError) as info:
         await glow(session=s).output()
 
     assert info.value is error
+
+
+async def test_internal_error_with_the_phrase_stays_a_query_error():
+    s = session()
+    internal = {"code": "INTERNAL_SERVER_ERROR"}
+    error = QueryError([QueryErrorValue(MISSING_FIELD, extensions=internal)], "query")
+    s.session.fail["output"] = error
+
+    with pytest.raises(QueryError) as info:
+        await glow(session=s).output()
+
+    assert not isinstance(info.value, StaleClientError)
 
 
 async def test_phrase_inside_a_message_stays_a_query_error():

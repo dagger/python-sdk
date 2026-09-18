@@ -70,10 +70,15 @@ def check_core(client: str, expected: str, installed: str) -> None:
 
 def missing_field(error: QueryError) -> "re.Match[str] | None":
     """The validation error for a field the schema lacks, with its two names."""
-    # Validation fails before anything runs, so it carries no path; an error
-    # with one comes from a resolver, whatever its message says.
+    # Validation fails before anything runs, so it carries no path, and says
+    # it is validation in its code; any other error comes from something
+    # that ran, whatever its message says.
     for e in error.errors:
-        if not e.path and (match := MISSING_FIELD.match(e.message)):
+        if (
+            e.path is None
+            and e.extensions.get("code") == "GRAPHQL_VALIDATION_FAILED"
+            and (match := MISSING_FIELD.match(e.message))
+        ):
             return match
     return None
 

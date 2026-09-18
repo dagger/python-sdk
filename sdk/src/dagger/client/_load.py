@@ -23,7 +23,7 @@ async def load_target(session: Session, target: Target) -> None:
         await ctx.root_select("serveModule", args).execute()
     except QueryError as e:
         missing = missing_field(e)
-        if missing is None or missing.group(1) != "serveModule":
+        if missing is None or missing.groups() != ("serveModule", "Query"):
             raise
         await _serve_without_the_field(ctx, target)
 
