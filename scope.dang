@@ -342,8 +342,16 @@ type Scope {
       .directory(outputPath)
   }
 
+  """
+  The schema of core alone: the empty module it is read through would be a
+  client of its own to the global client.
+  """
   let coreSchema: File! {
-    coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJSON
+    codegenBase
+      .withFile(coreOnlyScriptPath, currentModule.source.file("helpers/core-schema/core_only.py"))
+      .withMountedFile(schemaPath, coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJSON)
+      .withExec(["python", coreOnlyScriptPath, schemaPath, coreOnlyPath])
+      .file(coreOnlyPath)
   }
 
   let coreSchemaSource: ModuleSource! {
@@ -503,6 +511,8 @@ type Scope {
   let stripScriptPath: String! = "/strip-dev-sections.py"
   let schemaPath: String! = "/schema.json"
   let schemasPath: String! = "/schemas"
+  let coreOnlyScriptPath: String! = "/core-only.py"
+  let coreOnlyPath: String! = "/core-only.json"
   let outputPath: String! = "/generated"
 
   # musl runs the generator ~0.3s slower than glibc, but the glibc image is
