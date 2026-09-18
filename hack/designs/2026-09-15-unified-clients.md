@@ -275,6 +275,21 @@ Every generated member has `[tool.dagger] generated`: `"client"`, `"core"` or
 path and no source entry, so its files do not depend on the scope. One member
 generated in two scopes had equal digests.
 
+**The marker is a deletion boundary, so how it is read matters** [confident].
+Generation deletes and overwrites only what the marker claims, which makes the
+reading of that one key as load-bearing as the rule itself.
+
+- It is read as **TOML**, never as text. A `[` inside a string is not a table
+  header. A regex over raw text deleted a user's directory whose description
+  happened to quote a marker.
+- Only the three kinds above count. Any other value, `"hand-written"` say,
+  means a file the SDK does not understand, which is exactly when it must not
+  delete or overwrite.
+- Each place requires its own kind: `clients/core` must say `core`, a client
+  directory must say `client`, `sdk/` must say `runtime`.
+- A member the user wrote under `clients/` therefore survives generation, in the
+  tree and in the scope file alike.
+
 ### 5.3 The scope `pyproject.toml` [decided]
 
 It has three parts, and each part has one owner.
@@ -725,6 +740,18 @@ module config is written.
    client flag.
 8. Scope without a module: remove the refusal at `python-sdk.dang:109-114`.
 9. Lock: refresh `uv.lock` if it exists.
+
+**Generation must never write a tree the runtime cannot build** [confident]. The
+module runtime reads the scope file with a small reader, not a TOML parser, so
+it accepts one form of the workspace table. Generation asks the runtime which
+members it reads, and refuses a module scope file where the two disagree. The
+refusal names the form to write. This holds for a module scope only; a plain
+project is never built by the runtime.
+
+**The module build installs what the project depends on** [confident], and the
+members those depend on, in every path: locked uv, unlocked uv and pip. A
+workspace member the project does not depend on is the user's business, and
+installing it made an unrelated member's requirements break the module.
 
 Each scope writes only inside its own directory, so two scopes never write the
 same file.
