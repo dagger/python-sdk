@@ -117,6 +117,32 @@ def test_core_is_the_same_whatever_the_clients():
     assert core_package(_schema(_LINTER, _GLOW)) == core
 
 
+def test_legacy_core_is_the_same_whatever_the_clients():
+    core = core_package(_schema(), "v0.20.0")
+    # A client type named like a legacy ID must not take the class out of core.
+    taken = 'type DirectoryID @sourceMap(module: "linter") { size: Int! }'
+    schema = build_schema(_sdl(_LINTER) + taken)
+
+    assert "class DirectoryID(Scalar):" in core["__init__.py"]
+    assert core_package(schema, "v0.20.0") == core
+
+
+def _digest(files: dict[str, str]) -> str:
+    code = files["__init__.py"]
+    return code[code.index("CORE_DIGEST = ") :].splitlines()[0]
+
+
+def test_core_digest_follows_the_compatibility_mode_only():
+    schema = _schema()
+
+    assert _digest(core_package(schema, "v0.21.0")) == _digest(
+        core_package(schema, "v0.22.0")
+    )
+    assert _digest(core_package(schema, "v0.20.0")) != _digest(
+        core_package(schema, "v0.21.0")
+    )
+
+
 def test_client_holds_its_own_types():
     code = _linter(_LINTER, _GLOW)
 

@@ -147,10 +147,12 @@ def test_core_digest_follows_core(core: str):
     assert core_digest(_schema(_LINTER, core=core)) != core_digest(_schema(_LINTER))
 
 
-def test_core_digest_follows_schema_version():
+def test_core_digest_follows_the_compatibility_mode_only():
     schema = _schema()
 
-    assert core_digest(schema, "v0.21.0") != core_digest(schema, "v0.22.0")
+    assert core_digest(schema, legacy_sdk_compat=True) != core_digest(schema)
+    # Not the version: two modern versions render one core.
+    assert core_digest(schema, legacy_sdk_compat=False) == core_digest(schema)
 
 
 def test_core_digest_ignores_member_order():

@@ -104,9 +104,11 @@ def package_names(names: Iterable[str]) -> dict[str, str]:
     return {name: package for package, name in taken.items()}
 
 
-def core_digest(schema: GraphQLSchema, schema_version: str = "") -> str:
+def core_digest(schema: GraphQLSchema, *, legacy_sdk_compat: bool = False) -> str:
     """Digest of what the schema holds for core, whatever its clients are."""
-    digest = hashlib.sha256(schema_version.encode())
+    # The version itself is not hashed: two versions that generate one core
+    # must give one digest, and only the compatibility mode changes the code.
+    digest = hashlib.sha256(b"legacy" if legacy_sdk_compat else b"")
     for name, t in sorted(schema.type_map.items()):
         if name.startswith("__") or source_module(t.ast_node) is not None:
             continue

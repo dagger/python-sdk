@@ -271,7 +271,7 @@ def render_types(ctx: Context, type_map: TypeMap) -> Iterator[str]:
     )
 
     if ctx.legacy_sdk_compat:
-        for type_name in legacy_id_names(ctx.schema, type_map):
+        for type_name in legacy_id_names(type_map):
             yield legacy_id_class(type_name)
             ctx.defined.add(type_name)
 
@@ -430,10 +430,12 @@ def legacy_idable_types(
     return sorted(types, key=lambda t: t.name)
 
 
-def legacy_id_names(schema: GraphQLSchema, type_map: TypeMap) -> Iterator[IDName]:
+def legacy_id_names(type_map: TypeMap) -> Iterator[IDName]:
+    # Only the part being rendered counts: a client's type must not take a
+    # compatibility class out of core, whose digest doesn't see clients.
     for t in legacy_idable_types(type_map):
         name = legacy_id_name(t.name)
-        if schema.get_type(name) is None:
+        if name not in type_map:
             yield name
 
 

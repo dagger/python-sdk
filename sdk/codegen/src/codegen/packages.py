@@ -30,6 +30,7 @@ from codegen.generator import (
     is_object_type,
     joiner,
     legacy_id_names,
+    legacy_sdk_compat,
     new_context,
     quote,
     render_types,
@@ -186,7 +187,7 @@ def _all(names: list[str]) -> str:
 @joiner
 def _core_init(schema: GraphQLSchema, schema_version: str) -> Iterator[str]:
     ctx = new_context(schema, schema_version, partitioned=True)
-    digest = partition.core_digest(schema, schema_version)
+    digest = partition.core_digest(schema, legacy_sdk_compat=ctx.legacy_sdk_compat)
 
     yield _HEADER % "Session, client_root"
     yield from render_types(ctx, _owned(schema, None))
@@ -205,7 +206,7 @@ def _core_init(schema: GraphQLSchema, schema_version: str) -> Iterator[str]:
 def _core_names(ctx: Context) -> set[str]:
     """Every name that a client may import from the core package."""
     core = _owned(ctx.schema, None)
-    names = set(legacy_id_names(ctx.schema, core)) if ctx.legacy_sdk_compat else set()
+    names = set(legacy_id_names(core)) if ctx.legacy_sdk_compat else set()
     for name, t in core.items():
         if name.startswith("_") or is_builtin_scalar_type(t):
             continue
@@ -372,7 +373,9 @@ def client_package(  # noqa: PLR0913
     """Package name and files of one client, whatever the other clients are."""
     module, package = _find_module(schema, name)
     if core_digest is None:
-        core_digest = partition.core_digest(schema, schema_version)
+        core_digest = partition.core_digest(
+            schema, legacy_sdk_compat=legacy_sdk_compat(schema_version)
+        )
     return package, {
         "__init__.py": _client_init(schema, module, package, schema_version),
         "_target.py": _target(name, ref, pin, core_digest),
