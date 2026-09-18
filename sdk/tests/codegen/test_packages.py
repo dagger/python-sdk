@@ -86,8 +86,8 @@ def _linter(*clients: str, **members: str) -> str:
 def test_core_holds_no_client_type():
     code = core_package(_schema(_LINTER, _GLOW))["__init__.py"]
 
-    assert "class Directory(Type):" in code
-    assert "class Binding(Type):" in code
+    assert "class Directory(_Type):" in code
+    assert "class Binding(_Type):" in code
     assert "Linter" not in code
     assert "Glow" not in code
     assert "def linter(" not in code
@@ -100,9 +100,9 @@ def test_core_entry_point():
     code = files["__init__.py"]
 
     assert files["py.typed"] == ""
-    assert "def core(*, session: Session | None = None) -> Query:" in code
-    assert "return client_root(Query, None, None, [], session=session)" in code
-    assert "check_core" not in code
+    assert "def core(*, session: _Session | None = None) -> Query:" in code
+    assert "return _client_root(Query, None, None, [], session=session)" in code
+    assert "check_core" not in code.replace("check_core as _check_core", "")
     assert f'CORE_DIGEST = "{core_digest(schema)}"' in code
     assert '"CORE_DIGEST",' in code
     assert '"core",' in code
@@ -124,7 +124,7 @@ def test_legacy_core_is_the_same_whatever_the_clients():
     taken = 'type DirectoryID @sourceMap(module: "linter") { size: Int! }'
     schema = build_schema(_sdl(_LINTER) + taken)
 
-    assert "class DirectoryID(Scalar):" in core["__init__.py"]
+    assert "class DirectoryID(_Scalar):" in core["__init__.py"]
     assert core_package(schema, "v0.20.0") == core
 
 
@@ -147,8 +147,8 @@ def test_core_digest_follows_the_compatibility_mode_only():
 def test_client_holds_its_own_types():
     code = _linter(_LINTER, _GLOW)
 
-    assert "class Linter(Type):" in code
-    assert "class LinterReport(Type):" in code
+    assert "class Linter(_Type):" in code
+    assert "class LinterReport(_Type):" in code
     assert "async def lint(self, src: Directory, *, level: Severity" in code
     assert "class Glow(" not in code
     assert "as_glow" not in code
@@ -193,7 +193,7 @@ def test_client_imports_the_core_types_it_names():
         "PIN": "PIN",
         "REF": "REF",
     }
-    assert "TARGET = Target(name=NAME, ref=REF, pin=PIN)" in code
+    assert "TARGET = _Target(name=NAME, ref=REF, pin=PIN)" in code
 
 
 def test_client_entry_function():
@@ -201,7 +201,7 @@ def test_client_entry_function():
 
     assert (
         "def linter(source: Directory, *, config: str | None = None, "
-        "session: Session | None = None,) -> Linter:"
+        "session: _Session | None = None,) -> Linter:"
     ) in code
     assert 'raise _type_error("linter", "source", source, "Directory")' in code
     assert (
@@ -209,10 +209,10 @@ def test_client_entry_function():
             dedent(
                 """\
                 _args = [
-                    Arg("source", source),
-                    Arg("config", config, None),
+                    _Arg("source", source),
+                    _Arg("config", config, None),
                 ]
-                return client_root(Linter, TARGET, "linter", _args, session=session)
+                return _client_root(Linter, TARGET, "linter", _args, session=session)
                 """
             ),
             "    ",
@@ -228,9 +228,9 @@ def test_client_entry_function_renames_a_session_argument():
 
     assert (
         "def linter(*, session_: str | None = None, "
-        "session: Session | None = None,) -> Linter:"
+        "session: _Session | None = None,) -> Linter:"
     ) in code
-    assert 'Arg("session", session_, None),' in code
+    assert '_Arg("session", session_, None),' in code
 
 
 def test_client_contributed_field():
@@ -240,8 +240,8 @@ def test_client_contributed_field():
         dedent(
             """
             def as_linter(binding: Binding, /) -> Linter:
-                _args: list[Arg] = []
-                _ctx = client_select(binding, TARGET, "asLinter", _args)
+                _args: list[_Arg] = []
+                _ctx = _client_select(binding, TARGET, "asLinter", _args)
                 return Linter(_ctx)
             """
         )
@@ -256,7 +256,7 @@ def test_client_contributed_field_executes_a_leaf():
     code = _linter(_LINTER, Env=env)
 
     assert "async def linter_count(env: Env, /) -> int:" in code
-    assert '_ctx = client_select(env, TARGET, "linterCount", _args)' in code
+    assert '_ctx = _client_select(env, TARGET, "linterCount", _args)' in code
     assert "return await _ctx.execute(int)" in code
 
 
@@ -267,7 +267,7 @@ def test_client_contributed_field_that_returns_an_id_of_its_receiver():
     assert "async def linted(binding: Binding, /) -> Binding:" in code
     # Through client_select like any contributed field, so that the module is
     # loaded before the query, never straight through the receiver's context.
-    assert '_ctx = client_select(binding, TARGET, "linted", _args)' in code
+    assert '_ctx = _client_select(binding, TARGET, "linted", _args)' in code
     assert "binding._ctx" not in code
     assert "return Binding(" in code
 
@@ -280,7 +280,7 @@ def test_client_contributed_field_receiver_avoids_an_argument_name():
     code = _linter(_LINTER, Env=env)
 
     assert "def with_linter(env_: Env, /, *, env: Env | None = None) -> Env:" in code
-    assert '_ctx = client_select(env_, TARGET, "withLinter", _args)' in code
+    assert '_ctx = _client_select(env_, TARGET, "withLinter", _args)' in code
 
 
 def test_client_overloads_one_name_on_two_receivers():
@@ -292,18 +292,57 @@ def test_client_overloads_one_name_on_two_receivers():
         "binding: Binding, /",
         "env: Env, /, *, strict: bool | None=None",
     ]
-    assert all(ast.unparse(d.decorator_list) == "overload" for d in overloads)
+    assert all(ast.unparse(d.decorator_list) == "_overload" for d in overloads)
     assert not dispatcher.decorator_list
     # One selection per receiver, each with its own field arguments.
-    assert 'client_select(binding, TARGET, "asLinter", _args)' in code
-    assert 'client_select(env, TARGET, "asLinter", _args)' in code
-    assert 'Arg("strict", strict, None)' in code
+    assert '_client_select(binding, TARGET, "asLinter", _args)' in code
+    assert '_client_select(env, TARGET, "asLinter", _args)' in code
+    assert '_Arg("strict", strict, None)' in code
     exported = code[code.index("__all__") :]
     assert exported.count('"as_linter",') == 1
     assert exported.count('"') == 2 * len(
         ("Linter", "LinterReport", "as_linter", "linter")
     )
     compile(code, "linter", "exec")
+
+
+def _names(code: str) -> tuple[set[str], set[str]]:
+    """Names a module imports, and names it defines at the top level."""
+    tree = ast.parse(code)
+    imported = {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+    }
+    defined = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    return imported, defined
+
+
+@pytest.mark.parametrize("name", ["Arg", "Type", "Session", "Callable"])
+def test_client_type_named_like_a_helper_does_not_shadow_it(name: str):
+    own = f'type {name} @sourceMap(module: "linter") {{ value: Int! }}'
+    _, files = client_package(build_schema(_sdl(_LINTER) + own), "linter", ".")
+    code = files["__init__.py"]
+
+    assert f"class {name}(" in code
+    imported, defined = _names(code)
+    assert not imported & defined
+    # The entry function still builds its arguments with the query builder.
+    assert '_Arg("source", source)' in code
+
+
+def test_core_type_named_like_a_helper_does_not_shadow_it():
+    own = "type Type { value: Int! }"
+    code = core_package(build_schema(_sdl() + own))["__init__.py"]
+
+    assert "class Type(" in code
+    imported, defined = _names(code)
+    assert not imported & defined
 
 
 def test_client_is_the_same_whatever_the_other_clients():
@@ -385,12 +424,12 @@ def test_client_name_becomes_a_package():
 
     assert package == "my_project_dev"
     assert (
-        "def my_project_dev(*, session: Session | None = None) -> MyProjectDev:"
+        "def my_project_dev(*, session: _Session | None = None) -> MyProjectDev:"
         in (files["__init__.py"])
     )
     # The field name is the engine's, so the SDK never derives it.
     assert (
-        'client_root(MyProjectDev, TARGET, "myProjectDev", _args, session=session)'
+        '_client_root(MyProjectDev, TARGET, "myProjectDev", _args, session=session)'
         in files["__init__.py"]
     )
     # The descriptor pins the name as given, which is the one the engine knows.

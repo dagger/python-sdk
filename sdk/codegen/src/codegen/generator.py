@@ -141,6 +141,12 @@ class Context:
         """Fields of a type that belong to the package being rendered."""
         return own_fields(t) if self.partitioned else t.fields
 
+    def helper(self, name: str) -> str:
+        """Name that a runtime or generator helper goes by in the code."""
+        # A package imports every helper under a private alias, so that no
+        # generated type can shadow it. The one-file client keeps plain names.
+        return f"_{name}" if self.partitioned else name
+
     def process_type(self, name: str):
         # This is only needed to keep track of remaining types because
         # of forward references.
@@ -180,7 +186,7 @@ class Handler(ABC, Generic[_H]):
     """Does this handler render the given type?"""
 
     def supertype_name(self, t: _H) -> str:
-        return self.__class__.__name__
+        return self.ctx.helper(self.__class__.__name__)
 
     def type_name(self, t: _H) -> str:
         return t.name
@@ -272,7 +278,7 @@ def render_types(ctx: Context, type_map: TypeMap) -> Iterator[str]:
 
     if ctx.legacy_sdk_compat:
         for type_name in legacy_id_names(type_map):
-            yield legacy_id_class(type_name)
+            yield legacy_id_class(type_name, ctx.helper("Scalar"))
             ctx.defined.add(type_name)
 
     # Split into two iterators to update ctx.remaining.
@@ -439,11 +445,11 @@ def legacy_id_names(type_map: TypeMap) -> Iterator[IDName]:
             yield name
 
 
-def legacy_id_class(type_name: IDName) -> str:
+def legacy_id_class(type_name: IDName, scalar: str = "Scalar") -> str:
     return textwrap.dedent(
         f'''\
 
-        class {type_name}(Scalar):
+        class {type_name}({scalar}):
             """Legacy typed ID alias for the unified ID scalar."""
         '''
     )
@@ -662,7 +668,7 @@ class _InputField:
 
     def as_param(self) -> str:
         """As a parameter in a function signature."""
-        type_ = "Self" if self.is_self else self.type
+        type_ = self.ctx.helper("Self") if self.is_self else self.type
         out = f"{self.name}: {type_}"
         if self.default_is_mutable:
             if not out.endswith("| None"):
@@ -692,7 +698,7 @@ class _InputField:
             params[1] = f"{self.default_value} if {self.name} is None else {self.name}"
         if self.has_default:
             params.append(self.default_value)
-        return f"Arg({', '.join(params)}),"
+        return f"{self.ctx.helper('Arg')}({', '.join(params)}),"
 
     def check_expr(self, var: str) -> str:
         """Expression that is true when `var` matches the type as_param declares."""
@@ -840,7 +846,9 @@ class _ObjectField:
 
     @property
     def return_type(self) -> str:
-        return "Self" if self.type == self.parent_name else self.type
+        if self.type == self.parent_name:
+            return self.ctx.helper("Self")
+        return self.type
 
     def params(self) -> Iterator[str]:
         yield self.receiver
@@ -901,7 +909,7 @@ class _ObjectField:
             )
             yield textwrap.dedent(
                 f"""\
-                warnings.warn(
+                {self.ctx.helper("warnings")}.warn(
                     "{msg}",
                     DeprecationWarning,
                     stacklevel=4,
@@ -917,7 +925,7 @@ class _ObjectField:
             yield from (indent(arg.as_arg()) for arg in self.args)
             yield "]"
         else:
-            yield "_args: list[Arg] = []"
+            yield f"_args: list[{self.ctx.helper('Arg')}] = []"
 
     def _iface_client_name(self, name: str) -> str:
         """Return concrete client class name for interface types."""
@@ -1088,7 +1096,8 @@ class Input(ObjectHandler[GraphQLInputObjectType]):
     predicate: ClassVar[Predicate] = staticmethod(is_input_object_type)
 
     def render_head(self, t: GraphQLInputObjectType) -> str:
-        return f"@dataclass(slots=True)\n{super().render_head(t)}"
+        dataclass = self.ctx.helper("dataclass")
+        return f"@{dataclass}(slots=True)\n{super().render_head(t)}"
 
     @joiner
     def render_body(self, t: GraphQLInputObjectType) -> Iterator[str]:
@@ -1135,7 +1144,8 @@ class InterfaceProtocol(Handler[GraphQLInterfaceType]):
         return t.name
 
     def render_head(self, t: GraphQLInterfaceType) -> str:
-        return f"@runtime_checkable\nclass {t.name}(Protocol):"
+        checkable = self.ctx.helper("runtime_checkable")
+        return f"@{checkable}\nclass {t.name}({self.ctx.helper('Protocol')}):"
 
     @joiner
     def render(self, t: GraphQLInterfaceType) -> Iterator[str]:
@@ -1148,7 +1158,7 @@ class InterfaceProtocol(Handler[GraphQLInterfaceType]):
         # Second: a concrete client class for query builder instantiation
         client_name = f"_{t.name}Client"
         yield ""
-        yield f"class {client_name}(Type):"
+        yield f"class {client_name}({self.ctx.helper('Type')}):"
         yield indent(f'"""Concrete client for {t.name} interface."""')
         yield ""
         # Override _graphql_name to return the interface name
@@ -1187,7 +1197,7 @@ class Object(ObjectHandler[GraphQLObjectType]):
     predicate: ClassVar[Predicate] = staticmethod(is_object_type)
 
     def supertype_name(self, t: GraphQLObjectType) -> str:
-        return "Root" if t.name == "Query" else "Type"
+        return self.ctx.helper("Root" if t.name == "Query" else "Type")
 
     def type_name(self, t: GraphQLObjectType) -> str:
         return super().type_name(t)
@@ -1201,9 +1211,10 @@ class Object(ObjectHandler[GraphQLObjectType]):
 
         if is_self_chainable(t, self.ctx.fields(t).values()):
             self_name = self.type_name(t)
+            callable_ = self.ctx.helper("Callable")
             yield textwrap.dedent(
                 f'''
-                def with_(self, cb: Callable[["{self_name}"], "{self_name}"]) -> "{self_name}":
+                def with_(self, cb: {callable_}[["{self_name}"], "{self_name}"]) -> "{self_name}":
                     """Call the provided callable with current {self_name}.
 
                     This is useful for reusability and readability by not breaking the calling chain.
