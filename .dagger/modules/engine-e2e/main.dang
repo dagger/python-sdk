@@ -75,7 +75,14 @@ type EngineE2e {
     # builds the layout before.
     let manifest = "name = \"sdk-client-call\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../runtime\"\n"
 
-    let called = playground(ws)
+    let client = playground(ws)
+    # A pass must prove the field, not the SDK's fallback for engines without it.
+    let fields = client
+      .withExec(["dagger", "query"], stdin: "{ __type(name: \"Query\") { fields { name } } }")
+      .stdout
+    assert(fields.contains("\"serveModule\""), "the dev engine has no serveModule, so this check would prove only the fallback")
+
+    let called = client
       .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "sdk-client-call", "--path", path])
       .withWorkdir(path)
       .withExec(["dagger", "module", "client", "add", "../e2e/fixtures/clients/dep", "--sdk", "python", "--auto-apply"])
