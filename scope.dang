@@ -60,7 +60,31 @@ type Scope {
     let withClients = members.reduce(withCore) { target, member =>
       replaced(target, clientsDirName + "/" + member.dir, clientMember(member))
     }
-    relocked(existing, withClients.withNewFile(memberPath(scopeFileName), scopeFile(existing, members, stale).contents))
+    let file = scopeFile(existing, members, stale)
+    checkRuntimeReads(file, members)
+    relocked(existing, withClients.withNewFile(memberPath(scopeFileName), file.contents))
+  }
+
+  """
+  A module's scope file must say to the runtime what it says to uv, or the
+  module generates and then fails to build. The runtime reads the file with
+  regular expressions for the forms the SDK writes, and is not a TOML parser;
+  so rather than widen it, generation asks it what it reads, and refuses a
+  file where it misses a member generation wrote.
+  """
+  let checkRuntimeReads(file: File!, members: [ClientMember!]!): Void {
+    if (engineVersion != "") {
+      let read = pythonSdkRuntime.scopeMembers(file)
+      let wrote = [sdkDirName, clientsDirName + "/" + coreDirName] + members.map { member => clientsDirName + "/" + member.dir }
+      let missed = wrote.filter { member => read.filter { r => r == member }.length == 0 }
+      if (missed.length > 0) {
+        raise scopeFileName + " of " + path + " lists " + missed.join(", ") +
+          " in a form the module runtime does not read, so the module would not build. " +
+          "Write the table header as plain [tool.uv.workspace], not quoted or dotted, " +
+          "and its members as an array of strings on the members line, then run dagger generate again"
+      }
+    }
+    null
   }
 
   let sdkDirName: String! = "sdk"

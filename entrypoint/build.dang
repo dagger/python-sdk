@@ -83,6 +83,13 @@ type PythonModuleBuild {
   }
 
   """
+  The workspace members of a scope's pyproject.toml, read as the build does.
+  """
+  pub scopeMembers(pyproject: File!): [String!]! {
+    pyConfig(directory.withFile(projectCfg, pyproject)).members
+  }
+
+  """
   The class name of a module's main object, converted like the engine's builtin
   Python runtime (strcase.ToCamel) so a module loads the same on both.
   """

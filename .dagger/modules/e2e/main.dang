@@ -368,6 +368,17 @@ type E2e {
     # Workspace.cwd is newer than v0.21.9.
     assertNotContains(generated.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "core was not generated in the module's view")
     assertContains(current.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "core was not generated in the current view")
+
+    # Valid TOML that the runtime does not read would generate a module that
+    # then fails to build, so generation refuses it and names the form to use.
+    let pyprojectPath = "/" + tomlGenerateModulePath + "/pyproject.toml"
+    let quoted = ws.withNewFile(pyprojectPath, ws.file(pyprojectPath).contents + "\n[\"tool\".\"uv\".\"workspace\"]\nmembers = [\"sdk\"]\n")
+    let refused = pythonSdk
+      .generateScope(quoted.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .cwd rescue {
+        err: Error => err.message
+      }
+    assertContainsAll(refused, ["the module runtime does not read", "plain [tool.uv.workspace]"])
     null
   }
 
