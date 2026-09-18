@@ -110,6 +110,7 @@ dagger call -m demo base with-exec --args=echo,core-still-works stdout
 say "done: $dir"
 cat >&2 <<EOF
 
-Every check of this SDK against your local engine:
+Every check of this SDK against your local engine, and on the floor release's:
   cd $sdk && hack/e2e-local.sh
+  cd $sdk && hack/e2e-floor.sh
 EOF

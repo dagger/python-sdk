@@ -1089,7 +1089,7 @@ type E2e {
   }
 
   """
-  The released CLI, on the floor release's engine, lists this checkout as the
+  The released CLI lists this checkout as the
   python SDK, initializes a module from it, and runs it. The module's manifest names the shared
   entrypoint and no runtime; it runs on this checkout's copy of that
   entrypoint, since the published one predates this layout.
@@ -1241,9 +1241,10 @@ type E2e {
   SDK, in a container with the floor release's CLI. The CLI is a nested
   client of the engine running the checks, and its workspace is this tree.
 
-  So the engine is whichever runs the checks, and a pass proves the floor
-  only when that engine is the floor. The playground refuses any other,
-  rather than pass on an engine the SDK does not claim.
+  So the engine is whichever runs the checks. A pass proves the floor only
+  on the floor's engine, which the floor job (hack/e2e-floor.sh) runs them on
+  and asserts with assertFloorEngine; an ordinary run takes the engine it
+  finds.
   """
   let playground(ws: Workspace!): Container! {
     playgroundOf(playgroundTree(ws))
@@ -1260,28 +1261,27 @@ type E2e {
   The playground over a tree a check has changed.
   """
   let playgroundOf(tree: Directory!): Container! {
-    let ctr = container
+    container
       .from(floorImage)
       .withoutEntrypoint
       .withMountedDirectory(playgroundRoot, tree)
       .withWorkdir(playgroundRoot)
       .withExec(["git", "init", "--quiet"])
-    checkFloorEngine(ctr)
-    ctr
   }
 
   """
-  The engine the playground's CLI talks to is the floor release, by the
-  version it reports itself. A release reports its build after a "+", which
-  is not part of the version; a dev or later build is refused.
+  The floor job's precondition, not a check of its own: the engine the
+  playground's CLI talks to is the floor release, by the version it reports
+  itself. A release reports its build after a "+", which is not part of the
+  version; a dev or later build is refused. hack/e2e-floor.sh calls it before
+  the checks, so that job cannot pass on another engine.
   """
-  let checkFloorEngine(ctr: Container!): Void {
-    let answered = ctr.withExec(["dagger", "query"], stdin: "{ version }", experimentalPrivilegedNesting: true).stdout
+  pub assertFloorEngine(ws: Workspace!): Void {
+    let answered = playground(ws).withExec(["dagger", "query"], stdin: "{ version }", experimentalPrivilegedNesting: true).stdout
     let reported = json.withContents((answered :: Dagger.JSON!)).field(["version"]).asString
     if ((reported.split("+")[0] ?? "") != "v" + floorVersion) {
       raise "the checks drive the floor release's CLI, v" + floorVersion + ", against the engine running them, which is " +
-        reported + ": a pass would not prove the floor. Run them on the floor engine: " +
-        "DAGGER_ENGINE=image://" + floorImage + " hack/e2e-local.sh"
+        reported + ": a pass would not prove the floor. Run the floor job, which provisions its engine: hack/e2e-floor.sh"
     }
     null
   }
