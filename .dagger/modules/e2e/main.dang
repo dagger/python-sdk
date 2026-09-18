@@ -1216,7 +1216,12 @@ type E2e {
     let reached = cli(withSecret, ["-m", callerPath, "call", "reach"]).stdout
     assertContains(reached, "reads=[]", form + ": module code read a caller file: " + reached)
     assertNotContains(reached, secret, form + ": module code read a caller file: " + reached)
+    # The probe proves something only if it held an ID to try, exercised many
+    # routes, and hit no unknown field: an absent route errored for the wrong
+    # reason and is no evidence of safety (fixtures/handover/reach.py).
     assertNotContains(reached, "held=0 ", form + ": the module held nothing to try, so this proves nothing: " + reached)
+    assertContains(reached, "absent=0 ", form + ": a probe route hit an unknown field, so it proves nothing: " + reached)
+    assertNotContains(reached, "routes=0 ", form + ": the probe ran no routes: " + reached)
     let declared = cli(withSecret, ["-m", callerPath, "call", "declared"]).stdout
     assertContains(declared, secret, form + ": a declared Workspace parameter did not reach the caller's workspace: " + declared)
     null
