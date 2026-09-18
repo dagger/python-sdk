@@ -571,6 +571,20 @@ def test_client_that_names_no_core_symbol_compiles(runtime):
     assert "import (" not in client_package(schema, "solo", ".")[1]["__init__.py"]
 
 
+def test_client_accepts_any_object_for_a_generic_id(runtime):
+    # No @expectedType: any Type is accepted, under the alias the package has.
+    query = 'linter(source: ID!): Linter! @sourceMap(module: "linter")'
+    schema = _schema(_LINTER, Query=query)
+    code = client_package(schema, "linter", ".")[1]["__init__.py"]
+
+    assert "def linter(source: _Type, *, session: _Session | None = None,)" in code
+    linter = runtime(schema, "linter")
+    directory = sys.modules["dagger_clients.core"].Directory(Context())
+    assert isinstance(linter.linter(directory), linter.Linter)
+    with pytest.raises(TypeError, match="linter"):
+        linter.linter("source")
+
+
 def _named(module: str, root: str, constructor: str) -> str:
     """A client whose name the engine turned into a type and a constructor."""
     return f"""

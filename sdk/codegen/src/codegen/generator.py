@@ -517,8 +517,12 @@ def format_input_type(
     convert_id=True,
     expected_type: TypeName | None = None,
     legacy_ids: bool = False,
+    any_object: str = "Type",
 ) -> str:
-    """May be used in an input object field or an object field parameter."""
+    """May be used in an input object field or an object field parameter.
+
+    `any_object` is what a generic ID stands for, as the package names it.
+    """
     if is_required_type(t):
         t = t.of_type
         fmt = "%s"
@@ -526,7 +530,9 @@ def format_input_type(
         fmt = "%s | None"
 
     if is_list_type(t):
-        inner = format_input_type(t.of_type, convert_id, expected_type, legacy_ids)
+        inner = format_input_type(
+            t.of_type, convert_id, expected_type, legacy_ids, any_object
+        )
         return fmt % f"list[{inner}]"
 
     if is_id_type(t):
@@ -534,7 +540,7 @@ def format_input_type(
             if expected_type is not None:
                 return fmt % expected_type
             # Generic ID scalar — accept any Type (Dagger object)
-            return fmt % "Type"
+            return fmt % any_object
         if legacy_ids and expected_type is not None:
             return fmt % legacy_id_name(expected_type)
 
@@ -625,6 +631,7 @@ class _InputField:
             convert_id,
             self.expected_type,
             ctx.legacy_sdk_compat,
+            ctx.helper("Type"),
         )
         self.is_self = self.type == self.parent_object_name
         self.description = graphql.description
@@ -724,7 +731,8 @@ class _InputField:
 
         if is_id_type(t):
             if self.convert_id:
-                return f"isinstance({var}, {self.expected_type or 'Type'})"
+                any_object = self.expected_type or self.ctx.helper("Type")
+                return f"isinstance({var}, {any_object})"
             if self.ctx.legacy_sdk_compat and self.expected_type is not None:
                 return f"isinstance({var}, {legacy_id_name(self.expected_type)})"
             return f"isinstance({var}, str)"
