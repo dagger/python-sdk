@@ -1457,9 +1457,16 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
-      "workspace: (workspace.id :: String!)",
+      "clients: ClientHandover(workspace: workspace).clients",
       "let module = currentModule.source",
     ])
+    # The declared clients go with the call, never the workspace, and the
+    # static entrypoint hands them over with the shared one's own code.
+    assertNotContains(main, "workspace.id", "the static entrypoint hands the module the caller's workspace")
+    assert(
+      changes.layer.file(scope + "/sdk/entrypoint/handover.dang").contents == ws.file("/entrypoint/handover.dang").contents,
+      "the static entrypoint does not carry the shared entrypoint's handover",
+    )
     # Found through its own source, so a moved module needs no regeneration.
     assertNotContains(main, "modulePath", "the entrypoint still finds the module through the workspace")
     ["pyproject.toml", "src/static_init/__init__.py"].each { path =>
