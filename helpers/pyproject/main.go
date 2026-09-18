@@ -19,12 +19,22 @@ func main() {
 // edit-scope and set-global-client edit the file in place and keep its
 // formatting: they touch a scope file that generation also owns.
 //
+// get-member-kinds takes a scope directory instead of a file.
+//
 // usage: pyproject <command> <file> [value | flags]
 func run(args []string) error {
 	if len(args) < 2 {
 		return fmt.Errorf("usage: pyproject <command> <file> [value | flags]")
 	}
 	cmd, path := args[0], args[1]
+	if cmd == "get-member-kinds" {
+		out, err := memberKinds(path)
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
+		return nil
+	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {

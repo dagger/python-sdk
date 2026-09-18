@@ -529,6 +529,8 @@ type E2e {
       .withNewFile("/" + scope + "/tools/mine/pyproject.toml", "[project]\nname = \"mine\"\n")
       .withNewFile("/" + scope + "/clients/tools/pyproject.toml", "[project]\nname = \"tools\"\n")
       .withNewFile("/" + scope + "/clients/notes/README.md", "not a member\n")
+      .withNewFile("/" + scope + "/clients/handmade/pyproject.toml", "[project]\nname = \"handmade\"\ndescription = \"\"\"\n[tool.dagger]\ngenerated = \"client\"\n\"\"\"\n")
+      .withNewFile("/" + scope + "/clients/handmade/secret.txt", "mine\n")
       .withWorkdir(scope)
     let generated = pythonSdk.generateScope(seeded, isModule: false, name: "user-content", clients: [client]).withWorkdir(".")
     let after = generated.file("/" + scope + "/pyproject.toml").contents
@@ -544,6 +546,7 @@ type E2e {
 
     let removed = pythonSdk.generateScope(generated.withWorkdir(scope), isModule: false, name: "user-content", clients: []).withWorkdir(".")
     assert(removed.directory("/" + scope).exists("clients/notes/README.md"), "removing a client deleted a directory without the marker")
+    assert(removed.directory("/" + scope).exists("clients/handmade/secret.txt"), "text that only looks like the marker, in a string, got a directory deleted")
     assert(removed.directory("/" + scope).exists(clientDepMember) == false, "a removed client's member was left behind")
     let removedFile = removed.file("/" + scope + "/pyproject.toml").contents
     assertNotContains(removedFile, "\"" + clientDepMember + "\"", "a removed client stayed a workspace member")
@@ -553,6 +556,13 @@ type E2e {
     let squatted = ws.withNewFile("/" + scope + "/" + clientDepMember + "/mine.txt", "mine\n").withWorkdir(scope)
     let over = pythonSdk.generateScope(squatted, isModule: false, name: "user-content", clients: [client]).cwd rescue "raised"
     assert(over == "raised", "a client was written over a directory without the marker")
+
+    let unknown = ws
+      .withNewFile("/" + scope + "/clients/core/pyproject.toml", "[project]\nname = \"core\"\n\n[tool.dagger]\ngenerated = \"hand-written\"\n")
+      .withNewFile("/" + scope + "/clients/core/mine.txt", "mine\n")
+      .withWorkdir(scope)
+    let overUnknown = pythonSdk.generateScope(unknown, isModule: false, name: "user-content", clients: []).cwd rescue "raised"
+    assert(overUnknown == "raised", "core was written over a member marked with a kind the SDK does not write")
 
     null
   }

@@ -140,17 +140,20 @@ type Scope {
   """
   let checkMembers(existing: Directory!, members: [ClientMember!]!): Void {
     let sdkIsUsers = existing.exists(sdkDirName) and
-      isGeneratedMember(existing, sdkDirName) == false and
+      generatedKind(existing, sdkDirName) != "runtime" and
       existing.exists(sdkDirName + "/src/dagger/__init__.py") == false
     if (sdkIsUsers) {
       raise sdkDirName + "/ exists in " + path + " and is not the SDK's; move it away"
     }
-    ([coreDirName] + members.map { member => member.dir }).each { dir =>
-      let rel = clientsDirName + "/" + dir
-      if (existing.exists(rel) and isGeneratedMember(existing, rel) == false) {
-        raise rel + "/ exists in " + path + " and is not a generated client; move it away"
-      }
-      null
+    checkMember(existing, coreDirName, "core")
+    members.each { member => checkMember(existing, member.dir, "client") }
+    null
+  }
+
+  let checkMember(existing: Directory!, dir: String!, kind: String!): Void {
+    let rel = clientsDirName + "/" + dir
+    if (existing.exists(rel) and generatedKind(existing, rel) != kind) {
+      raise rel + "/ exists in " + path + " and is not a generated " + kind + "; move it away"
     }
     null
   }
@@ -219,22 +222,35 @@ type Scope {
     }
   }
 
-  let isGeneratedMember(existing: Directory!, rel: String!): Boolean! {
-    generatedKind(existing, rel) != ""
+  """
+  What `[tool.dagger] generated` says in a member's pyproject.toml, or empty.
+  The helper reads it as TOML, so text that only looks like the marker, in a
+  string, is not one; and only the kinds the SDK writes count, so a member
+  marked with anything else is the user's, never deleted or written over.
+  """
+  let generatedKind(existing: Directory!, rel: String!): String! {
+    let prefix = rel + " "
+    memberKinds(existing)
+      .filter { line => line.hasPrefix(prefix) }
+      .takeFirst(1)
+      .join("")
+      .trimPrefix(prefix)
   }
 
   """
-  What `[tool.dagger] generated` says in a member's pyproject.toml, or empty.
-  Not a TOML parser: the marker is a key of one table, on its own line.
+  One "<member> <kind>" line for sdk/ and each directory under clients/ that
+  carries a known marker.
   """
-  let generatedKind(existing: Directory!, rel: String!): String! {
-    let file = rel + "/" + scopeFileName
-    if (existing.exists(file) == false) {
-      ""
-    } else {
-      let m = existing.file(file).contents.match("(?ms)^\\s*\\[tool\\.dagger\\][^\\[]*^\\s*generated\\s*=\\s*\"([^\"]*)\"")
-      if (m == null) { "" } else { m.captures[0] ?? "" }
-    }
+  let memberKinds(existing: Directory!): [String!]! {
+    pyprojectTool
+      .withDirectory("/scope", existing, include: [
+        sdkDirName + "/" + scopeFileName,
+        clientsDirName + "/*/" + scopeFileName,
+      ])
+      .withExec(["pyproject", "get-member-kinds", "/scope"])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
   }
 
   """
