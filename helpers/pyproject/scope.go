@@ -524,20 +524,17 @@ func editArrayText(raw string, want []string, owned func(string) bool, normalize
 	elements, tail := splitArray(inner)
 	multiline := strings.Contains(inner, "\n")
 
-	var kept []arrayElement
+	keep := make([]bool, len(elements))
 	changed := false
-	for _, e := range elements {
-		if e.isStr && owned(normalize(e.value)) && !contains(want, e.value, normalize) {
-			changed = true
-			continue
-		}
-		kept = append(kept, e)
+	for i, e := range elements {
+		keep[i] = !(e.isStr && owned(normalize(e.value)) && !contains(want, e.value, normalize))
+		changed = changed || !keep[i]
 	}
 	var added []string
 	for _, w := range want {
 		present := false
-		for _, e := range kept {
-			if e.isStr && normalize(e.value) == normalize(w) {
+		for i, e := range elements {
+			if keep[i] && e.isStr && normalize(e.value) == normalize(w) {
 				present = true
 				break
 			}
@@ -550,30 +547,14 @@ func editArrayText(raw string, want []string, owned func(string) bool, normalize
 		return raw, false
 	}
 
-	var parts []string
-	for _, e := range kept {
-		parts = append(parts, e.raw)
-	}
 	if multiline {
-		indent := elementIndent(elements)
-		// The tail is what sits between the last element and the bracket: a
-		// comment on the element's line, then the bracket's own indentation.
-		head, closing := "", tail
-		if nl := strings.LastIndexByte(tail, '\n'); nl >= 0 {
-			head, closing = tail[:nl], tail[nl+1:]
+		return editMultilineArray(elements, keep, tail, added), true
+	}
+	var parts []string
+	for i, e := range elements {
+		if keep[i] {
+			parts = append(parts, e.raw)
 		}
-		text := "["
-		if len(parts) > 0 {
-			text += strings.Join(parts, ",") + ","
-		}
-		if len(added) == 0 {
-			return text + tail + "]", true
-		}
-		var fresh []string
-		for _, a := range added {
-			fresh = append(fresh, "\n"+indent+quote(a))
-		}
-		return text + head + strings.Join(fresh, ",") + ",\n" + closing + "]", true
 	}
 	for _, a := range added {
 		parts = append(parts, " "+quote(a))
@@ -582,6 +563,64 @@ func editArrayText(raw string, want []string, owned func(string) bool, normalize
 		parts[0] = strings.TrimLeft(parts[0], " \t")
 	}
 	return "[" + strings.Join(parts, ",") + "]", true
+}
+
+// editMultilineArray writes an array one element a line, in its own style.
+// A comment after an element's comma is cut into the next segment, or into
+// the tail, but it belongs to the element's line: it goes with the element
+// when that is removed, and stays when the element does.
+func editMultilineArray(elements []arrayElement, keep []bool, tail string, added []string) string {
+	indent := elementIndent(elements)
+	if tail == "" && len(elements) > 0 {
+		// No trailing comma: what follows the last value is the tail.
+		last := &elements[len(elements)-1]
+		value := strings.TrimRight(last.raw, " \t\r\n")
+		last.raw, tail = value, last.raw[len(value):]
+	}
+	leads := make([]string, len(elements))
+	bodies := make([]string, len(elements))
+	for i, e := range elements {
+		leads[i], bodies[i] = lineComment(e.raw)
+	}
+	tailLead, rest := lineComment(tail)
+	// The comment of the line the bracket opens on is the bracket's.
+	text := "["
+	if len(elements) > 0 {
+		text += leads[0]
+	}
+	for i := range elements {
+		if !keep[i] {
+			continue
+		}
+		own := tailLead
+		if i+1 < len(elements) {
+			own = leads[i+1]
+		}
+		text += bodies[i] + "," + own
+	}
+	if len(added) == 0 {
+		return text + rest + "]"
+	}
+	// New elements go after any comment lines, before the bracket's line.
+	head, closing := "", rest
+	if nl := strings.LastIndexByte(rest, '\n'); nl >= 0 {
+		head, closing = rest[:nl], rest[nl+1:]
+	}
+	for _, a := range added {
+		text += head + "\n" + indent + quote(a) + ","
+		head = ""
+	}
+	return text + "\n" + closing + "]"
+}
+
+// lineComment splits off what a segment holds before its first newline when
+// that is only blanks and a comment: the rest of the line before it.
+func lineComment(segment string) (string, string) {
+	nl := strings.IndexByte(segment, '\n')
+	if nl < 0 || !isBlank(stripComments(segment[:nl])) {
+		return "", segment
+	}
+	return segment[:nl], segment[nl:]
 }
 
 // elementIndent is the indentation of the elements, for a new one to match.

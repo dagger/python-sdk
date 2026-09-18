@@ -493,3 +493,58 @@ answer = 42
 		t.Errorf("a second edit changed the file:\n%s", again)
 	}
 }
+
+// A comment after an element's comma is on that element's line: removing the
+// next element keeps it, and removing the element takes it along.
+func TestEditScopeKeepsACommentWithItsLine(t *testing.T) {
+	for name, tc := range map[string]struct{ src, want string }{
+		"the next element goes": {
+			src: `dependencies = [
+  "httpx", # keep: this documents the user's dependency
+  "dagger-clients-old",
+]`,
+			want: `dependencies = [
+  "httpx", # keep: this documents the user's dependency
+]`,
+		},
+		"the element goes with its comment": {
+			src: `dependencies = [
+  "httpx", # the user's
+  "dagger-clients-old", # generated
+  "rich",  # the user's too
+]`,
+			want: `dependencies = [
+  "httpx", # the user's
+  "rich",  # the user's too
+]`,
+		},
+		"the last element, without a trailing comma": {
+			src: `dependencies = [ # the bracket's
+  "httpx", # the user's
+  "dagger-clients-old"  # generated
+]`,
+			want: `dependencies = [ # the bracket's
+  "httpx", # the user's
+]`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := "[project]\nname = \"x\"\n" + tc.src + "\n"
+			edit := scopeEdit{Members: []string{"sdk"}, Sources: []string{"dagger-io"}}
+			got := mustEdit(t, src, edit)
+			want := "[project]\nname = \"x\"\n" + tc.want + "\n"
+			if !strings.HasPrefix(got, want) {
+				t.Errorf("got:\n%s\nwant it to start with:\n%s", got, want)
+			}
+		})
+	}
+}
+
+func TestEditScopeAddsToAnEmptyMultiLineArray(t *testing.T) {
+	src := "[project]\nname = \"x\"\ndependencies = [\n]\n"
+	edit := scopeEdit{Members: []string{"sdk"}, Sources: []string{"dagger-io"}, Dependencies: []string{"dagger-clients-core"}}
+	got := mustEdit(t, src, edit)
+	if !strings.Contains(got, "dependencies = [\n    \"dagger-clients-core\",\n]\n") {
+		t.Errorf("got:\n%s", got)
+	}
+}
