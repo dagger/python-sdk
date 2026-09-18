@@ -34,7 +34,8 @@ from dagger.client.base import Type
 pytestmark = pytest.mark.anyio
 
 GLOW = Target(name="glow", ref="github.com/eunomie/glow", pin="4f1c9e")
-LINTER = Target(name="linter", ref="./clients/linter")
+# The module's own path in the workspace: that is what the engine serves.
+LINTER = Target(name="linter", ref="./.dagger/modules/linter")
 
 MISSING_FIELD = 'Cannot query field "glow" on type "Query".'
 
@@ -158,7 +159,7 @@ async def test_load_is_the_same_call_for_a_local_target():
     await client_root(Glow, LINTER, "linter", [], session=s).output()
 
     load, query = s.session.queries
-    assert load == 'query {\n  serveModule(address: "./clients/linter")\n}'
+    assert load == 'query {\n  serveModule(address: "./.dagger/modules/linter")\n}'
     assert query == "query {\n  linter {\n    output\n  }\n}"
 
 
@@ -198,7 +199,7 @@ async def test_engine_without_serve_module_resolves_a_path_in_the_workspace():
     assert chain == (
         "query {\n"
         "  currentWorkspace {\n"
-        '    moduleSource(path: "./clients/linter") {\n'
+        '    moduleSource(path: "./.dagger/modules/linter") {\n'
         "      asModule {\n"
         "        serve\n"
         "      }\n"
@@ -454,7 +455,7 @@ async def test_stale_message_names_each_client_and_its_address():
 
     assert str(info.value).endswith(
         "The clients 'glow' from github.com/eunomie/glow at 4f1c9e, "
-        "'linter' from ./clients/linter are out of date. Run `dagger generate`."
+        "'linter' from ./.dagger/modules/linter are out of date. Run `dagger generate`."
     )
 
 

@@ -157,8 +157,8 @@ INVERSIONS = [
     ),
     Inversion(
         CLIENTS + "test_load_is_the_same_call_for_a_local_target",
-        "assert load == 'query {\\n  serveModule(address: \"./clients/linter\")\\n}'",
-        "assert load == 'query {\\n  serveModule(address: \"./linter\")\\n}'",
+        'serveModule(address: "./.dagger/modules/linter")',
+        'serveModule(address: "./linter")',
     ),
     Inversion(
         CLIENTS + "test_engine_without_serve_module_gets_the_old_chain",
@@ -189,7 +189,7 @@ INVERSIONS = [
     ),
     Inversion(
         CLIENTS + "test_stale_message_names_each_client_and_its_address",
-        "'linter' from ./clients/linter are out of date.",
+        "'linter' from ./.dagger/modules/linter are out of date.",
         "'linter' from ./linter are out of date.",
     ),
     # The SDK files import nothing generated; the init names it once.
