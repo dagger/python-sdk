@@ -111,6 +111,27 @@ INVERSIONS = [
         "assert root._ctx.conn is dagger_global.dag, type(root._ctx.conn)",
         "assert root._ctx.conn is not dagger_global.dag, type(root._ctx.conn)",
     ),
+    # dir() and a star import see the lazy names.
+    Inversion(
+        PACKAGE + "test_dir_lists_dag_with_the_sdk_names",
+        'assert {"dag", "Session", "connection", "function"} <= set(names)',
+        'assert {"dag", "Session", "connection", "function"} > set(names)',
+    ),
+    Inversion(
+        PACKAGE + "test_star_import_without_the_global_client",
+        'assert namespace["dag"] is default_session()',
+        'assert namespace["dag"] is not default_session()',
+    ),
+    Inversion(
+        PACKAGE + "test_global_client_names_are_listed_and_star_imported",
+        'assert namespace["Container"] is core.Container',
+        'assert namespace["Container"] is not core.Container',
+    ),
+    Inversion(
+        PACKAGE + "test_global_client_names_are_listed_and_star_imported",
+        'assert {"dag", "Container", "Linter", "Client", "Session"} <= set(listed)',
+        'assert {"dag", "Container", "Linter", "Client", "Session"} > set(listed)',
+    ),
     # A global client that cannot import is an error, not an absent one.
     Inversion(
         PACKAGE + "test_global_client_that_cannot_import_is_not_skipped",

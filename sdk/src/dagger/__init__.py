@@ -70,11 +70,24 @@ with contextlib.suppress(ModuleNotFoundError):
     from dagger.mod import *
 
 
+def _lazy_names() -> list[str]:
+    global_ = _global_client()
+    return ["dag", *(() if global_ is None else global_.__all__)]
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_lazy_names()})
+
+
 def __getattr__(name: str) -> _typing.Any:
     """Names of the global client, or where a name of the legacy bindings went."""
     if name == "dag":
         # The global client's dag when there is one, through _global_dag.
         return _sessions.default_session()
+    if name == "__all__":
+        # What a star import took when these names were globals.
+        public = (n for n in globals() if not n.startswith("_"))
+        return sorted({*public, *_lazy_names()})
     global_ = None if name.startswith("_") else _global_client()
     if global_ is not None and name in global_.__all__:
         return getattr(global_, name)

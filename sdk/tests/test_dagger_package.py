@@ -113,6 +113,23 @@ def test_private_session_name_gets_the_plain_message():
     assert not hasattr(dagger.dag, "container")
 
 
+def test_dir_lists_dag_with_the_sdk_names():
+    names = dir(dagger)
+
+    assert {"dag", "Session", "connection", "function"} <= set(names)
+    assert "Container" not in names
+
+
+def test_star_import_without_the_global_client():
+    namespace: dict = {}
+    exec("from dagger import *", namespace)
+
+    assert namespace["dag"] is default_session()
+    assert {"Session", "connection", "function"} <= namespace.keys()
+    assert "Container" not in namespace
+    assert not {n for n in namespace if n.startswith("_")} - {"__builtins__"}
+
+
 def _run(script: str, pythonpath: pathlib.Path | None = None) -> str:
     env = dict(os.environ)
     if pythonpath is not None:
@@ -207,6 +224,28 @@ WITH_GLOBAL_CLIENT = """
 
 def test_global_client_makes_dag_the_client(generated: pathlib.Path):
     assert _run(WITH_GLOBAL_CLIENT, generated) == "ok\n"
+
+
+GLOBAL_NAMES_LISTED = """
+    import dagger
+    import dagger_clients.core as core
+    import dagger_global
+
+    listed = dir(dagger)
+    assert {"dag", "Container", "Linter", "Client", "Session"} <= set(listed)
+
+    namespace = {}
+    exec("from dagger import *", namespace)
+    assert namespace["dag"] is dagger_global.dag
+    assert namespace["Container"] is core.Container
+    assert namespace["Client"] is dagger_global.Client
+    assert {"Linter", "Session", "connection", "function"} <= namespace.keys()
+    print("ok")
+"""
+
+
+def test_global_client_names_are_listed_and_star_imported(generated: pathlib.Path):
+    assert _run(GLOBAL_NAMES_LISTED, generated) == "ok\n"
 
 
 @pytest.mark.parametrize(
