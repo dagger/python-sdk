@@ -687,7 +687,7 @@ type E2e {
     # A member the scope lists and the tree lacks is refused before the build.
     let withoutCore = built.withoutFile("/" + tomlGenerateModulePath + "/" + coreMemberFile)
     let refused = pythonSdkRuntime
-      .moduleRuntime(modSource: withoutCore.moduleSource("/" + tomlGenerateModulePath), introspectionJson: null)
+      .moduleRuntime(modSource: runtimeSource(withoutCore, tomlGenerateModulePath), introspectionJson: null)
       .withExec(["true"])
       .stdout rescue "raised"
     assert(refused == "raised", "a scope without its core member was built")
@@ -701,11 +701,23 @@ type E2e {
       .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [seeded.moduleSource("/" + clientDepPath)])
       .withWorkdir(".")
     let out = pythonSdkRuntime
-      .moduleRuntime(modSource: generated.moduleSource("/" + tomlGenerateModulePath), introspectionJson: null)
+      .moduleRuntime(modSource: runtimeSource(generated, tomlGenerateModulePath), introspectionJson: null)
       .withExec(["python", "-c", installedProbe])
       .stdout
     assertContains(out, "installed", what + ": " + out)
     generated
+  }
+
+  """
+  A generated module as an engine that calls the runtime sees it: without the
+  entrypoint table of its manifest, which an engine that loads manifest
+  version 2 follows instead, and then has no runtime source to hand over.
+  """
+  let runtimeSource(generated: Workspace!, path: String!): ModuleSource! {
+    let manifestPath = "/" + path + "/dagger-module.toml"
+    generated
+      .withNewFile(manifestPath, generated.file(manifestPath).contents.replaceMatches("(?ms)^\\[entrypoint\\].*?(^\\[|\\z)", "$1"))
+      .moduleSource("/" + path)
   }
 
   """
