@@ -812,7 +812,7 @@ Invert each assertion once and confirm that it fails.
 12. No `[[dependencies]]`: generating a module that has them removes them; the module still calls its clients.
 13. Configuration drives generation: adding a client writes exactly one member, one source, one `members` entry and one dependency; removing it undoes all four.
 14. Import after generate: a scope with a fresh client imports it with no edit by the user.
-15. Name pinning: a client whose generated name differs from the name the engine serves fails at load, with the descriptor in the message.
+15. Name pinning: none. A client whose generated name differs from the name the engine serves fails on its first selection, and that becomes `StaleClientError` naming the client, its address and the remedy (13).
 16. Generated code needs no configuration: delete the client entries from `dagger.toml`, keep the tree, and the module still calls its clients.
 17. Global client, existing module: the flag is written; the unchanged source passes mypy and runs through `dagger call`; `type(dag.container()) is dagger_clients.core.Container`.
 18. Global client, new module: no flag, no `dagger_global`; `dag.container` raises the migration message.
