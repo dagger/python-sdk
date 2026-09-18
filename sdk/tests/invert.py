@@ -49,16 +49,22 @@ INVERSIONS = [
         "and the API is on core() from dagger_clients.core.",
         "and the API is on core() from dagger.client.gen.",
     ),
-    # dag.container() names core().container() and the flag.
+    # dag.container() names core().container() and the flag, and the same
+    # message holds for a client.
     Inversion(
         PACKAGE + "test_session_field_points_to_core",
-        "client: core().container(). To keep dag.container() while migrating, set ",
-        "client: core().directory(). To keep dag.container() while migrating, set ",
+        '"clients now: core().container() for a core field, or container() from "',
+        '"clients now: core().directory() for a core field, or container() from "',
     ),
     Inversion(
         PACKAGE + "test_session_field_points_to_core",
-        '"global-client = true under [tool.dagger] and run dagger generate."',
-        '"global-client = false under [tool.dagger] and run dagger generate."',
+        '"while migrating, set global-client = true under [tool.dagger] and run "',
+        '"while migrating, set global-client = false under [tool.dagger] and run "',
+    ),
+    Inversion(
+        PACKAGE + "test_session_field_points_to_a_client_too",
+        '"or linter() from its package in dagger_clients for a client."',
+        '"or linter() from dagger_clients.core for a client."',
     ),
     # dag is the default Session.
     Inversion(

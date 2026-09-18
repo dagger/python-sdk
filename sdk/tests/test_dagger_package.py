@@ -87,11 +87,24 @@ def test_session_field_points_to_core():
         dagger.dag.container()
 
     assert str(info.value) == (
-        "'Session' object has no attribute 'container'. The API is on the core "
-        "client: core().container(). To keep dag.container() while migrating, set "
-        "global-client = true under [tool.dagger] and run dagger generate."
+        "'Session' object has no attribute 'container'. The API is on the "
+        "clients now: core().container() for a core field, or container() from "
+        "its package in dagger_clients for a client. To keep dag.container() "
+        "while migrating, set global-client = true under [tool.dagger] and run "
+        "dagger generate."
     )
     assert info.value.name == "container"
+
+
+def test_session_field_points_to_a_client_too():
+    # The session cannot tell a client from a core field without importing
+    # core, so one message has to be true of both.
+    with pytest.raises(AttributeError) as info:
+        dagger.dag.linter()
+
+    assert "or linter() from its package in dagger_clients for a client." in str(
+        info.value
+    )
 
 
 def test_private_session_name_gets_the_plain_message():

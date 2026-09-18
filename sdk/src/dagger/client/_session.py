@@ -328,13 +328,16 @@ class Session(BaseConnection):
 
     def __getattr__(self, name: str) -> Any:
         # Only reached for a name the session lacks, and the likely ask is
-        # an API field of the global client that dag used to be.
+        # an API field of the global client that dag used to be. Telling a
+        # core field from a client would take importing core, so the message
+        # names both.
         msg = f"{type(self).__name__!r} object has no attribute {name!r}"
         if not name.startswith("_"):
             msg += (
-                f". The API is on the core client: core().{name}(). "
-                f"To keep dag.{name}() while migrating, set global-client = true "
-                "under [tool.dagger] and run dagger generate."
+                f". The API is on the clients now: core().{name}() for a core "
+                f"field, or {name}() from its package in dagger_clients for a "
+                f"client. To keep dag.{name}() while migrating, set "
+                "global-client = true under [tool.dagger] and run dagger generate."
             )
         raise AttributeError(msg, name=name, obj=self)
 
