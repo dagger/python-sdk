@@ -388,6 +388,29 @@ def test_packages_compile(schema_version: str):
             compile(content, name, "exec")
 
 
+def test_core_type_whose_fields_are_all_contributed_compiles():
+    # Partitioning can leave a class with no body of its own.
+    query = 'type Query { linter: Linter! @sourceMap(module: "linter") }'
+    binding = "type Binding { name: String! }"
+    schema = build_schema(_CORE + _LINTER + query + binding)
+
+    code = core_package(schema)["__init__.py"]
+
+    assert "class Query(_Root):\n    ...\n" in code
+    compile(code, "core", "exec")
+
+
+def test_interface_with_no_own_member_compiles():
+    # id is on every Type, so the protocol of this interface has no member.
+    bare = 'interface Bare { id: ID! @expectedType(name: "Bare") }'
+    schema = build_schema(_sdl() + bare)
+
+    code = core_package(schema)["__init__.py"]
+
+    assert "class Bare(_Protocol):\n    ...\n" in code
+    compile(code, "core", "exec")
+
+
 def test_target_is_plain_data():
     schema = _schema(_LINTER)
     package, files = client_package(schema, "linter", "./modules/linter")

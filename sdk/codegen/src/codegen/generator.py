@@ -195,7 +195,8 @@ class Handler(ABC, Generic[_H]):
     def render(self, t: _H) -> Iterator[str]:
         yield ""
         yield self.render_head(t)
-        yield indent(self.render_body(t))
+        # A part of a schema can leave a class with nothing of its own.
+        yield indent(self.render_body(t) or "...")
         yield ""
 
     def render_head(self, t: _H) -> str:
@@ -1152,7 +1153,7 @@ class InterfaceProtocol(Handler[GraphQLInterfaceType]):
         # First: the Protocol class (for type annotations and isinstance checks)
         yield ""
         yield self.render_head(t)
-        yield indent(self.render_body(t))
+        yield indent(self.render_body(t) or "...")
         yield ""
 
         # Second: a concrete client class for query builder instantiation
