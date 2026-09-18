@@ -109,17 +109,25 @@ type Entrypoint implements ModuleEntrypoint {
         deprecated: optString(raw, "deprecated"),
       )
     }
-    let withFields = raw.field(["fields"]).asArray.{{contents}}.reduce(base) { acc, rawField =>
+    let collection = if (raw.field(["collection"]).asBoolean) { base.withCollection } else { base }
+    let withFields = raw.field(["fields"]).asArray.{{contents}}.reduce(collection) { acc, rawField =>
       let f = json.withContents(rawField.contents)
-      acc.withField(
+      let field = acc.withField(
         f.field(["name"]).asString,
         typeRef(json.withContents(f.field(["type"]).contents)),
         description: optString(f, "description"),
         deprecated: optString(f, "deprecated"),
       )
+      let role = optString(f, "collection_role")
+      if (role == "keys") { field.withCollectionKeys(f.field(["name"]).asString) }
+      else if (role == "delta") { field.withCollectionDelta(f.field(["name"]).asString) }
+      else { field }
     }
     let withFunctions = raw.field(["functions"]).asArray.{{contents}}.reduce(withFields) { acc, rawFn =>
-      acc.withFunction(functionOf(json.withContents(rawFn.contents)))
+      let f = json.withContents(rawFn.contents)
+      let withFunction = acc.withFunction(functionOf(f))
+      if (f.field(["collection_get"]).asBoolean) { withFunction.withCollectionGet(f.field(["name"]).asString) }
+      else { withFunction }
     }
     let ctor = raw.field(["constructor"])
     if (ctor.contents == "null") {
