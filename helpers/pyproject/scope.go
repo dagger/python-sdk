@@ -82,8 +82,10 @@ func editScope(src []byte, edit scopeEdit) ([]byte, error) {
 	return []byte(d.text), nil
 }
 
-// The forms the editor and the module runtime both read. workspaceForm is
-// worded as generation's own refusal of a file the runtime cannot read.
+// The forms the editor asks for when it refuses a file. They are the
+// editor's own limits: its line editor finds the workspace and sources
+// tables by their headers, not as inline tables or dotted keys. The module
+// runtime reads those tables with tomllib and has no such limit.
 const (
 	workspaceForm = "Write the workspace table as an unquoted [tool.uv.workspace] header with members as an array of strings"
 	sourcesForm   = "the sources as an unquoted [tool.uv.sources] header with one key per source, such as dagger-io = { workspace = true }"
