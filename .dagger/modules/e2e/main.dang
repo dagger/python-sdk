@@ -378,7 +378,7 @@ type E2e {
       .cwd rescue {
         err: Error => err.message
       }
-    assertContainsAll(refused, ["the module runtime does not read", "plain [tool.uv.workspace]"])
+    assertContainsAll(refused, ["the module runtime does not read", "an unquoted [tool.uv.workspace] header", "then run dagger generate again"])
     null
   }
 

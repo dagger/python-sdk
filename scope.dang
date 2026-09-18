@@ -80,8 +80,10 @@ type Scope {
       if (missed.length > 0) {
         raise scopeFileName + " of " + path + " lists " + missed.join(", ") +
           " in a form the module runtime does not read, so the module would not build. " +
-          "Write the table header as plain [tool.uv.workspace], not quoted or dotted, " +
-          "and its members as an array of strings on the members line, then run dagger generate again"
+          "Write the workspace table as an unquoted [tool.uv.workspace] header with members " +
+          "as an array of strings, then run dagger generate again. The runtime does not read " +
+          "a quoted header such as [\"tool\".\"uv\".\"workspace\"], an inline table such as " +
+          "workspace = { members = [...] }, or dotted keys such as tool.uv.workspace.members = [...]"
       }
     }
     null
