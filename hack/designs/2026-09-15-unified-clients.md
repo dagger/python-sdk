@@ -865,6 +865,21 @@ least-privilege capability of this kind, which is filed against the engine. A
 `serveModule` that took a *workspace* would not do: it would put the capability
 back in the module's hands.
 
+**How far the evidence reaches** [confident]. A check runs module code that
+walks every identifier the loader holds and every route that could rebuild a
+directory from outside the files it was handed, at climb depths 1 to 12, one
+level of recursion, under both entrypoint forms: 4305 routes, nothing read. It
+distinguishes a refused capability from a field the engine does not have, and
+asserts the second count is zero, so a route cannot pass by naming a field that
+does not exist. What it does not cover: a field a later engine adds, a third
+hop, and a route needing more than one level of recursion. The probe reads the
+caller's file against the shape that leaked, so it can fail.
+
+**This protects a module that runs on this SDK's entrypoint, and nothing more.**
+The engine hands every Dang entrypoint the caller's workspace, so a module that
+brings its own entrypoint reads the caller's files whatever an SDK does. That is
+the engine's to fix.
+
 **What the field still owes the caller's cache** [open]. A load at run time is
 invisible to the cache key of the call that performed it. So a caller keeps its
 cached result after its client's target changes, which `[[dependencies]]` used
