@@ -8,7 +8,6 @@ import json
 import pathlib
 from collections.abc import Iterator
 
-import dagger
 from dagger.mod._describe import (
     ArgumentDescription,
     EnumDescription,
@@ -30,8 +29,6 @@ Together with every dotted directory: the vendored library is generated, and a
 virtual environment or a bytecode cache never reaches the module's container.
 The rendered guard skips the same names, so both sides scan one set of files.
 """
-
-Kind = dagger.TypeDefKind
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -197,21 +194,21 @@ def _type(ref: TypeRef) -> str:
     if ref.optional:
         expr += ".withOptional(true)"
     match ref.kind:
-        case Kind.LIST_KIND:
+        case "LIST_KIND":
             assert ref.elem is not None
             return f"{expr}.withListOf({_type(ref.elem)})"
-        case Kind.ENUM_KIND:
+        case "ENUM_KIND":
             described = f"{_quote(ref.name)}{_opt('description', ref.description)}"
             return f"{expr}.withEnum({described})"
-        case Kind.SCALAR_KIND:
+        case "SCALAR_KIND":
             described = f"{_quote(ref.name)}{_opt('description', ref.description)}"
             return f"{expr}.withScalar({described})"
-        case Kind.INTERFACE_KIND:
+        case "INTERFACE_KIND":
             return f"{expr}.withInterface({_quote(ref.name)})"
-        case Kind.OBJECT_KIND:
+        case "OBJECT_KIND":
             return f"{expr}.withObject({_quote(ref.name)})"
         case _:
-            return f"{expr}.withKind(TypeDefKind.{ref.kind.value})"
+            return f"{expr}.withKind(TypeDefKind.{ref.kind})"
 
 
 def _opt(arg: str, value: str | None) -> str:

@@ -21,7 +21,7 @@ import exceptiongroup
 from cattrs.preconf.json import make_converter as make_json_converter
 from typing_extensions import TypeForm
 
-from dagger import DaggerError, InvalidQueryError
+from dagger._exceptions import DaggerError, InvalidQueryError
 from dagger.client._session import BaseConnection, SharedConnection
 from dagger.client.base import Input, Scalar, Type
 
@@ -39,6 +39,7 @@ Obj_T = TypeVar("Obj_T", bound=Type)
 INDENT = "  "
 
 _SNAKE_TO_CAMEL_RE = re.compile(r"(_)([a-z\d])")
+_ENUM_NAME_RE = re.compile(r"[_A-Za-z][_0-9A-Za-z]*")
 
 
 def snake_to_camel(s: str, upper: bool = True) -> str:
@@ -51,6 +52,12 @@ def snake_to_camel(s: str, upper: bool = True) -> str:
     if upper:
         s = s[:1].upper() + s[1:]
     return s
+
+
+class EnumName(str):
+    """A schema enum value, for callers that have no generated enum to send."""
+
+    __slots__ = ()
 
 
 class Arg(typing.NamedTuple):
@@ -115,8 +122,8 @@ def _scalar_literal(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     # Before str: an enum may subclass str, and goes by name.
-    if isinstance(value, enum.Enum):
-        return value.name
+    if isinstance(value, (enum.Enum, EnumName)):
+        return _enum_literal(value)
     if isinstance(value, str):
         # GraphQL string escapes are a subset of JSON's.
         return json.dumps(value)
@@ -126,6 +133,16 @@ def _scalar_literal(value: Any) -> str:
         return repr(value)
     msg = f"Cannot serialize {value!r} as a GraphQL value"
     raise InvalidQueryError(msg)
+
+
+def _enum_literal(value: enum.Enum | EnumName) -> str:
+    if isinstance(value, enum.Enum):
+        return value.name
+    # Rendered bare, so anything but a name would inject query syntax.
+    if not _ENUM_NAME_RE.fullmatch(value):
+        msg = f"Invalid enum value name: {str(value)!r}"
+        raise InvalidQueryError(msg)
+    return str(value)
 
 
 def _input_literal(obj: Input) -> str:

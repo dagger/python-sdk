@@ -1,3 +1,4 @@
+import sys
 import typing
 from collections.abc import Sequence
 from typing import TypeGuard
@@ -40,7 +41,11 @@ def type_error(method: str, param: str, value: object, expected: str) -> TypeErr
     shown = repr(value)
     if len(shown) > 60:  # noqa: PLR2004
         shown = shown[:57] + "..."
+    # Bindings can be generated into any package, so the caller says where
+    # it lives. Generated code only passes the class and method.
+    module = sys._getframe(1).f_globals.get("__name__", "")  # noqa: SLF001
+    qualname = f"{module}.{method}" if module else method
     return TypeError(
-        f"Method dagger.client.gen.{method}() parameter {param}={shown} "
+        f"Method {qualname}() parameter {param}={shown} "
         f"expected to be of type {expected}."
     )

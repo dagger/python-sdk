@@ -8,8 +8,12 @@ import httpx
 from opentelemetry import propagate
 from typing_extensions import Self
 
-from dagger import ClientConnectionError, TransportError, telemetry
-from dagger._exceptions import _query_error_from_response
+from dagger import telemetry
+from dagger._exceptions import (
+    ClientConnectionError,
+    TransportError,
+    _query_error_from_response,
+)
 from dagger._managers import ResourceManager
 from dagger.client._config import ConnectConfig
 

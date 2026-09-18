@@ -9,8 +9,8 @@ from typing import Any
 
 import anyio
 
-import dagger
 from dagger import telemetry
+from dagger._exceptions import QueryError
 from dagger.mod._exceptions import ModuleError
 
 logger = logging.getLogger(__package__)
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         args.run(args)
-    except (ModuleError, dagger.QueryError) as e:
+    except (ModuleError, QueryError) as e:
         logger.error(str(e))  # noqa: TRY400 - the message is the whole story
         return 2
     except Exception:

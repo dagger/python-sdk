@@ -12,9 +12,8 @@ import dataclasses
 import enum
 import inspect
 import json
-from typing import Any
+from typing import Any, Literal
 
-import dagger
 from dagger.client._guards import is_id_type_subclass
 from dagger.client.base import Scalar
 from dagger.mod._utils import (
@@ -30,14 +29,26 @@ from dagger.mod._utils import (
     strip_annotations,
 )
 
-Kind = dagger.TypeDefKind
+# TypeDefKind values by schema name: the SDK files can't import the enum.
+Kind = Literal[
+    "STRING_KIND",
+    "INTEGER_KIND",
+    "FLOAT_KIND",
+    "BOOLEAN_KIND",
+    "VOID_KIND",
+    "LIST_KIND",
+    "ENUM_KIND",
+    "SCALAR_KIND",
+    "INTERFACE_KIND",
+    "OBJECT_KIND",
+]
 
-_BUILTINS: dict[Any, dagger.TypeDefKind] = {
-    str: Kind.STRING_KIND,
-    int: Kind.INTEGER_KIND,
-    float: Kind.FLOAT_KIND,
-    bool: Kind.BOOLEAN_KIND,
-    type(None): Kind.VOID_KIND,
+_BUILTINS: dict[Any, Kind] = {
+    str: "STRING_KIND",
+    int: "INTEGER_KIND",
+    float: "FLOAT_KIND",
+    bool: "BOOLEAN_KIND",
+    type(None): "VOID_KIND",
 }
 
 
@@ -45,7 +56,7 @@ _BUILTINS: dict[Any, dagger.TypeDefKind] = {
 class TypeRef:
     """A reference to an API type."""
 
-    kind: dagger.TypeDefKind
+    kind: Kind
     name: str = ""
     description: str | None = None
     optional: bool = False
@@ -129,9 +140,9 @@ def describe_json(desc: ModuleDescription) -> str:
     The module-kind entrypoint reads this in its own session and replays the
     same builder calls the API build makes, so the definitions it returns
     belong to that session instead of the module's nested one. A TypeDefKind
-    becomes its schema name; a tuple becomes a list; nothing else is special.
+    is its schema name; a tuple becomes a list; nothing else is special.
     """
-    return json.dumps(dataclasses.asdict(desc), default=lambda value: value.value)
+    return json.dumps(dataclasses.asdict(desc))
 
 
 def describe_type(  # noqa: C901, PLR0911
@@ -159,24 +170,24 @@ def describe_type(  # noqa: C901, PLR0911
         return TypeRef(_BUILTINS[typ], optional=optional)
 
     if el := list_of(typ):
-        return TypeRef(Kind.LIST_KIND, optional=optional, elem=describe_type(el))
+        return TypeRef("LIST_KIND", optional=optional, elem=describe_type(el))
 
     if inspect.isclass(cls := typ):
         name = cls.__name__
 
         if is_subclass(cls, enum.Enum):
-            return TypeRef(Kind.ENUM_KIND, name, get_doc(cls), optional)
+            return TypeRef("ENUM_KIND", name, get_doc(cls), optional)
 
         if is_subclass(cls, Scalar):
-            return TypeRef(Kind.SCALAR_KIND, name, get_doc(cls), optional)
+            return TypeRef("SCALAR_KIND", name, get_doc(cls), optional)
 
         # object defined in this module
         if obj_type := get_object_type(cls):
-            kind = Kind.INTERFACE_KIND if obj_type.interface else Kind.OBJECT_KIND
+            kind: Kind = "INTERFACE_KIND" if obj_type.interface else "OBJECT_KIND"
             return TypeRef(kind, name, optional=optional)
 
         # object type from API (codegen)
         if is_id_type_subclass(cls):
-            return TypeRef(Kind.OBJECT_KIND, name, optional=optional)
+            return TypeRef("OBJECT_KIND", name, optional=optional)
 
     raise TypeError(error_msg)

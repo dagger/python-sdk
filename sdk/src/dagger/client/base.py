@@ -101,3 +101,17 @@ class Root(Type):
     @classmethod
     def _graphql_name(cls) -> str:
         return "Query"
+
+
+_root_type: type[Root] = Root
+
+
+def set_root_type(cls: type[Root]) -> None:
+    """Register the generated root, for SDK files that can't import it."""
+    global _root_type  # noqa: PLW0603
+    _root_type = cls
+
+
+def root_type() -> type[Root]:
+    """The root that a connection hands out as its client."""
+    return _root_type

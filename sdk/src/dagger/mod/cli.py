@@ -9,8 +9,9 @@ import typing
 
 import anyio
 
-import dagger
 from dagger import telemetry
+from dagger._exceptions import QueryError
+from dagger.client._connection import connect
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
 from dagger.mod._module import MAIN_OBJECT, Module
 
@@ -35,14 +36,14 @@ async def main(mod: Module | None = None, register: bool = False) -> int | None:
     # Establishing connection early on to allow returning dag.error().
     # Note: if there's a connection error dag.error() won't be sent but
     # should be logged and the traceback shown on the function's stderr output.
-    async with await dagger.connect():
+    async with await connect():
         try:
             if mod is None:
                 mod = load_module()
             if register:
                 return await mod.register()
             return await mod.serve()
-        except (ModuleError, dagger.QueryError) as e:
+        except (ModuleError, QueryError) as e:
             await record_exception(e)
             return 2
         except Exception as e:
