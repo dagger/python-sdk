@@ -7,9 +7,14 @@
 #   hack/e2e-local.sh find-client-root-check generate-scope-clients-check
 #
 # E2E_SCRATCH names the copy; it defaults to a fresh temporary directory.
+# Each named check logs to <scratch>.logs/<check>.log, next to the copy rather
+# than in it, because the copy is synced with --delete; a failure prints the
+# log's error lines.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 scratch=${E2E_SCRATCH:-$(mktemp -d)}
+logs="$scratch.logs"
+mkdir -p "$logs"
 rsync -a --delete \
   --exclude .git --exclude .venv --exclude __pycache__ \
   --exclude .dagger/modules/e2e/out --exclude .dagger/modules/uc-probe \
@@ -23,10 +28,11 @@ if [ $# -eq 0 ]; then
 fi
 status=0
 for check in "$@"; do
-  if dagger call -m .dagger/modules/e2e "$check" >/dev/null; then
+  if dagger call -m .dagger/modules/e2e "$check" >"$logs/$check.log" 2>&1; then
     echo "PASS $check" >&2
   else
-    echo "FAIL $check" >&2
+    echo "FAIL $check ($logs/$check.log)" >&2
+    sed 's/\x1b\[[0-9;]*m//g' "$logs/$check.log" | grep -E '^ *! ' | awk '!seen[$0]++' | head -8 >&2
     status=1
   fi
 done
