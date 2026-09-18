@@ -48,7 +48,13 @@ status=0
 for check in "$@"; do
   dagger call -m "$module" "$check" >"$logs/$check.log" 2>&1 &
   call=$!
-  (sleep "${E2E_TIMEOUT:-900}" && kill "$call" 2>/dev/null && echo "TIMEOUT after ${E2E_TIMEOUT:-900}s" >>"$logs/$check.log") &
+  (
+    trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+    sleep "${E2E_TIMEOUT:-900}" &
+    nap=$!
+    wait "$nap"
+    kill "$call" 2>/dev/null && echo "TIMEOUT after ${E2E_TIMEOUT:-900}s" >>"$logs/$check.log"
+  ) &
   watchdog=$!
   if wait "$call"; then
     echo "PASS $check" >&2
