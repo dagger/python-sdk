@@ -566,6 +566,97 @@ type E2e {
   }
 
   """
+  A module scope builds from its workspace: the SDK files, core and the
+  client are installed from their members, not editable, whether the module
+  builds with uv, with pip, or from the uv.lock that generation locked again.
+  """
+  pub runtimeScopeInstallCheck(ws: Workspace!): Void @check {
+    let pyprojectPath = "/" + tomlGenerateModulePath + "/pyproject.toml"
+    let lockPath = "/" + tomlGenerateModulePath + "/uv.lock"
+    let pip = ws.withNewFile(pyprojectPath, ws.file(pyprojectPath).contents + "\n[tool.dagger]\nuse-uv = false\n")
+    # A lock of the layout before, which names none of the members.
+    let stale = ws.withNewFile(lockPath, "version = 1\nrequires-python = \">=3.14\"\n")
+
+    let built = assertInstalled(ws, "uv")
+    assertInstalled(pip, "pip")
+    let locked = assertInstalled(stale, "uv.lock")
+    assertContains(locked.file(lockPath).contents, "name = \"dagger-clients-client-dep\"", "generation did not lock the client")
+
+    # A member the scope lists and the tree lacks is refused before the build.
+    let withoutCore = built.withoutFile("/" + tomlGenerateModulePath + "/" + coreMemberFile)
+    let refused = pythonSdkRuntime
+      .moduleRuntime(modSource: withoutCore.moduleSource("/" + tomlGenerateModulePath), introspectionJson: null)
+      .withExec(["true"])
+      .stdout rescue "raised"
+    assert(refused == "raised", "a scope without its core member was built")
+
+    null
+  }
+
+  """The generated module, after its build found each member installed."""
+  let assertInstalled(seeded: Workspace!, what: String!): Workspace! {
+    let generated = pythonSdk
+      .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [seeded.moduleSource("/" + clientDepPath)])
+      .withWorkdir(".")
+    let out = pythonSdkRuntime
+      .moduleRuntime(modSource: generated.moduleSource("/" + tomlGenerateModulePath), introspectionJson: null)
+      .withExec(["python", "-c", installedProbe])
+      .stdout
+    assertContains(out, "installed", what + ": " + out)
+    generated
+  }
+
+  """
+  Finds each package without importing it, so the check holds whatever the
+  SDK files import. The module's source is mounted under /src, so an origin
+  there is an editable install.
+  """
+  let installedProbe: String! =
+    "import importlib.util as u, sys\n" +
+    "for name in ('dagger', 'dagger_clients.core', 'dagger_clients.client_dep'):\n" +
+    "    spec = u.find_spec(name)\n" +
+    "    if spec is None or spec.origin.startswith('/src/'):\n" +
+    "        sys.exit(name + ' is not installed from its member: ' + str(spec and spec.origin))\n" +
+    "print('installed')\n"
+
+  """
+  A module calls the client it declared: its code imports the client and
+  calls the client's module through the engine, on this repository's
+  runtime, driven through a released CLI.
+  """
+  pub runtimeClientCallCheck(ws: Workspace!): Void @check {
+    let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
+    let calling = ws.withNewFile(sourcePath,
+      "from dagger import function, object_type\n" +
+      "from dagger_clients.client_dep import client_dep\n\n\n" +
+      "@object_type\n" +
+      "class TomlGenerateApp:\n" +
+      "    @function\n" +
+      "    async def greeting(self) -> str:\n" +
+      "        return await client_dep().greeting()\n")
+    let generated = pythonSdk
+      .generateScope(calling.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + clientDepPath)])
+      .withWorkdir(".")
+      # The runtime of this working tree, as the runtime fixture names it.
+      .withNewFile("/" + tomlGenerateModulePath + "/dagger-module.toml", runtimeOnlyManifest("toml-generate-app"))
+    let run = sdkSdk
+      .target(generated.directory("/"), ".")
+      .runInstalled(["call", "-m", "vendor/sdk-workspace/" + tomlGenerateModulePath, "greeting"])
+    run.assertSuccess
+    assertContains(run.stdout, "hello from the client dependency", "the module did not call its client")
+
+    null
+  }
+
+  """
+  A manifest on this working tree's runtime and nothing else, so a released
+  CLI runs the module on this repository's build, not a published entrypoint.
+  """
+  let runtimeOnlyManifest(name: String!): String! {
+    "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
+  }
+
+  """
   The fixture as seen from sdk-sdk's scratch workspace, where this repository
   is vendored.
   """

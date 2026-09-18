@@ -27,8 +27,8 @@ type PythonModuleBuild {
   let modSourceDirPath: String! = "/src"
   let venvPath: String! = "/opt/venv"
   let genDir: String! = "sdk"
+  let clientsDir: String! = "clients"
   let sdkGenPath: String! = "src/dagger/client/gen.py"
-  let userGenPath: String! = "src/dagger_gen.py"
   let projectCfg: String! = "pyproject.toml"
   let pipCompileLock: String! = "requirements.lock"
   let uvLock: String! = "uv.lock"
@@ -68,8 +68,7 @@ type PythonModuleBuild {
       raise "no python files found in module source"
     } else {
       let cfg = pyConfig(source)
-      let vendorPath = vendorPathFor(source, cfg)
-      checkGeneratedFiles(source, moduleName, vendorPath)
+      checkGeneratedFiles(source, moduleName, requiredGeneratedFiles(source, cfg))
 
       let baseImage = baseImageFor(source, cfg)
       let uvImage = uvImageFor(cfg)
@@ -161,15 +160,18 @@ type PythonModuleBuild {
   }
 
   """
-  The vendored library is installed non-editable so uv compiles its bytecode
-  once, not on every call into a throwaway mount; the module's own package
-  stays editable.
+  The SDK files and the generated clients are installed non-editable so uv
+  compiles their bytecode once, not on every call into a throwaway mount; the
+  module's own package stays editable.
   """
   let install(ctr: Container!, source: Directory!, cfg: PyConfig!): Container! {
     let compiled = ctr.withEnvVariable("UV_COMPILE_BYTECODE", "1")
+    let packages = localPackages(source, cfg)
 
     if (cfg.useUv and source.exists(uvLock)) {
       # --locked: fail loudly on a stale lockfile instead of re-resolving.
+      # In a scope, sync installs the members the project depends on, which
+      # --no-install-project leaves in.
       compiled
         .withExec(["uv", "sync", "--no-dev", "--locked", "--no-editable", "--no-install-project"])
         .withEnvVariable("VIRTUAL_ENV", "$UV_PROJECT_ENVIRONMENT", expand: true)
@@ -184,22 +186,58 @@ type PythonModuleBuild {
         ["-r", projectCfg]
       }
       compiled
-        .withExec(["uv", "pip", "install", "--no-editable", "./" + genDir] + deps)
+        .withExec(["uv", "pip", "install", "--no-editable"] + packages + deps)
         .withExec(["uv", "pip", "install", "--no-deps", "-e", "."])
     } else {
-      compiled.withExec(["pip", "install", "./" + genDir, "-e", "."])
+      # pip reads no uv sources, so every local package goes in by path, in
+      # the same command that resolves the project's dependencies on them.
+      compiled.withExec(["pip", "install"] + packages + ["-e", "."])
+    }
+  }
+
+  """
+  What the module installs from its own tree: every member of a scope's
+  workspace, the SDK's and the user's alike, or the vendored library of the
+  layout before.
+  """
+  let localPackages(source: Directory!, cfg: PyConfig!): [String!]! {
+    if (cfg.isScope) {
+      # A member may be a glob, which the tree resolves.
+      cfg.members.reduce([] :: [String!]!) { found, member =>
+        found + source.glob(member + "/" + projectCfg).map { file => "./" + file.trimSuffix("/" + projectCfg) }
+      }
+    } else {
+      ["./" + genDir]
+    }
+  }
+
+  """
+  The generated files a module needs before it builds. A scope needs each of
+  the SDK's members it lists; a user's member is the user's to provide.
+  """
+  let requiredGeneratedFiles(source: Directory!, cfg: PyConfig!): [String!]! {
+    if (cfg.isScope) {
+      cfg.members
+        .filter { member =>
+          (member == genDir or member.hasPrefix(clientsDir + "/")) and member.contains("*") == false
+        }
+        .map { member => member + "/" + projectCfg }
+    } else {
+      # A published dagger-io brings its own files, and the SDK files no longer
+      # read bindings from src/dagger_gen.py, so nothing generated is required.
+      let vendorPath = vendorPathFor(source, cfg)
+      if (vendorPath == "") {
+        [] :: [String!]!
+      } else {
+        [vendorPath + "/" + projectCfg, vendorPath + "/" + sdkGenPath]
+      }
     }
   }
 
   """
   Fail early when the committed generated files are missing.
   """
-  let checkGeneratedFiles(source: Directory!, modName: String!, vendorPath: String!): Void {
-    let required = if (vendorPath == "") {
-      [userGenPath]
-    } else {
-      [vendorPath + "/" + projectCfg, vendorPath + "/" + sdkGenPath]
-    }
+  let checkGeneratedFiles(source: Directory!, modName: String!, required: [String!]!): Void {
     required.each { rel =>
       if (source.exists(rel, expectedType: ExistsType.REGULAR_TYPE) == false) {
         raise "module \"" + modName + "\": generated file \"" + rel + "\" is missing; run `dagger generate` and commit the generated files"
@@ -304,6 +342,7 @@ type PythonModuleBuild {
     let project = tomlTable(toml, "project")
     let dagger = tomlTable(toml, "tool.dagger")
     let sources = tomlTable(toml, "tool.uv.sources")
+    let workspace = tomlTable(toml, "tool.uv.workspace")
     let indexes = tomlTables(toml, "tool.uv.index")
       .filter { table => tomlString(table, "name") == "" }
 
@@ -314,6 +353,7 @@ type PythonModuleBuild {
       useUv: tomlBool(dagger, "use-uv", true),
       uvVersion: tomlString(dagger, "uv-version"),
       vendorPath: inlineTableString(sources, "dagger-io", "path"),
+      members: tomlStrings(workspace, "members"),
       indexURL: indexes
         .filter { table => tomlBool(table, "default", false) }
         .map { table => tomlString(table, "url") }
@@ -359,6 +399,22 @@ type PythonModuleBuild {
   }
 
   """
+  The strings of an array, on one line or over several, comments dropped.
+  """
+  let tomlStrings(table: String!, key: String!): [String!]! {
+    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\[([^\\]]*)\\]"))
+    if (m == null) {
+      [] :: [String!]!
+    } else {
+      (m.captures[0] ?? "")
+        .replaceMatches("#[^\\n]*", "")
+        .split(",")
+        .map { item => item.trimSpace.trim("\"'") }
+        .filter { item => item != "" }
+    }
+  }
+
+  """
   e.g. `path` in `dagger-io = { path = "sdk", editable = true }`.
   """
   let inlineTableString(table: String!, key: String!, field: String!): String! {
@@ -377,6 +433,11 @@ type PyConfig {
   pub useUv: Boolean!
   pub uvVersion: String!
   pub vendorPath: String!
+
+  """
+  The `[tool.uv.workspace] members` of a scope; empty in the layout before.
+  """
+  pub members: [String!]!
   pub indexURL: String!
   pub extraIndexURL: String!
 
@@ -387,6 +448,7 @@ type PyConfig {
     useUv: Boolean! = true,
     uvVersion: String! = "",
     vendorPath: String! = "",
+    members: [String!]! = [],
     indexURL: String! = "",
     extraIndexURL: String! = "",
   ) {
@@ -396,9 +458,18 @@ type PyConfig {
     self.useUv = useUv
     self.uvVersion = uvVersion
     self.vendorPath = vendorPath
+    self.members = members
     self.indexURL = indexURL
     self.extraIndexURL = extraIndexURL
     self
+  }
+
+  """
+  Whether the module is a scope of the unified layout, whose SDK files are
+  the workspace member sdk/ rather than a library vendored by path.
+  """
+  pub isScope: Boolean! {
+    members.filter { member => member == "sdk" }.length > 0
   }
 }
 
