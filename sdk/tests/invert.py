@@ -36,8 +36,36 @@ PACKAGE = "tests/test_dagger_package.py::"
 CLIENTS = "tests/client/test_clients.py::"
 ISOLATION = "tests/client/test_sdk_isolation.py::"
 PACKAGES = "tests/codegen/test_packages.py::"
+DEFAULT_ENGINE = "tests/client/test_default_engine.py::"
 
 INVERSIONS = [
+    # The default session provisions an engine only in a plain program, once,
+    # and ends it at exit or on dagger.close().
+    Inversion(
+        DEFAULT_ENGINE + "test_a_plain_program_provisions_and_ends_the_engine_at_exit",
+        'assert (marks / "ended").exists()',
+        'assert not (marks / "ended").exists()',
+    ),
+    Inversion(
+        DEFAULT_ENGINE + "test_a_session_in_the_environment_is_never_provisioned",
+        'assert proc.stdout.strip() == "5151"',
+        'assert proc.stdout.strip() == "4242"',
+    ),
+    Inversion(
+        DEFAULT_ENGINE + "test_without_provisioning_there_is_no_session",
+        'assert "No active engine session to connect to" in proc.stderr',
+        'assert "No active engine session to connect to" not in proc.stderr',
+    ),
+    Inversion(
+        DEFAULT_ENGINE + "test_concurrent_first_queries_provision_once",
+        'assert (marks / "started").read_text().count("session") == 1',
+        'assert (marks / "started").read_text().count("session") > 1',
+    ),
+    Inversion(
+        DEFAULT_ENGINE + "test_close_ends_the_engine_before_it_returns",
+        'assert proc.stdout.strip() == "True"',
+        'assert proc.stdout.strip() == "False"',
+    ),
     # dagger.Container names its new home.
     Inversion(
         PACKAGE + "test_core_name_points_to_its_new_home",

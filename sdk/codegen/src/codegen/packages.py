@@ -52,6 +52,7 @@ SESSION_NAMES = frozenset(
     {
         "_as_session",
         "_loads",
+        "_ready",
         "aclose",
         "close",
         "connect",
