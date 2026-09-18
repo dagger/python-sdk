@@ -224,12 +224,18 @@ type PythonModuleBuild {
   member directory to install. [project] dependencies and a member's are the
   user's own content, with escapes, literal and multi-line strings, so the
   regular expressions of pyConfig must not read them. Only the
-  pyproject.toml files go in, so the read is cached until one changes.
+  pyproject.toml files that can be a member's go in, so the read is cached
+  until one of them changes. A file that does not read is named.
   """
   let workspaceRead(source: Directory!): [String!]! {
     let lines = container
       .from(defaultBaseImage)
-      .withMountedDirectory("/scope", source.filter(include: ["**/" + projectCfg]))
+      .withMountedDirectory("/scope", source.filter(
+        include: ["**/" + projectCfg],
+        # No member lives in these, and a virtualenv alone holds hundreds of
+        # pyproject.toml files that would reach the read and its cache key.
+        exclude: ["**/.venv", "**/__pycache__", "**/node_modules", "**/.git"],
+      ))
       .withExec(["python", "-c", workspaceReader, "/scope"])
       .stdout
       .split("\n")
@@ -245,26 +251,32 @@ type PythonModuleBuild {
   let workspaceReader: String! =
     "import glob, os, re, sys, tomllib\n" +
     "root = sys.argv[1]\n" +
+    "def fail(message):\n" +
+    "    print('error\\t' + message)\n" +
+    "    sys.exit(0)\n" +
     "def load(rel):\n" +
-    "    with open(os.path.join(root, rel, 'pyproject.toml'), 'rb') as f:\n" +
-    "        return tomllib.load(f)\n" +
+    "    path = os.path.normpath(os.path.join(rel, 'pyproject.toml'))\n" +
+    "    try:\n" +
+    "        with open(os.path.join(root, path), 'rb') as f:\n" +
+    "            return tomllib.load(f)\n" +
+    "    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as e:\n" +
+    "        fail(f'{path} is not valid TOML: {e}')\n" +
+    "def table(doc, *keys):\n" +
+    "    for key in keys:\n" +
+    "        doc = doc.get(key) if isinstance(doc, dict) else None\n" +
+    "    return doc if isinstance(doc, dict) else {}\n" +
     "def strings(value, key, where):\n" +
     "    if value is None:\n" +
     "        return []\n" +
     "    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):\n" +
-    "        print(f'error\\t{where}: {key} is not an array of strings; write it as one, such as {key} = [\"a\", \"b\"]')\n" +
-    "        sys.exit(0)\n" +
+    "        fail(f'{where}: {key} is not an array of strings; write it as one, such as {key} = [\"a\", \"b\"]')\n" +
     "    return value\n" +
     "def name(requirement):\n" +
-    "    m = re.match(r'\\s*([A-Za-z0-9][A-Za-z0-9._-]*)', requirement)\n" +
+    "    m = re.match(r'\\s*([A-Za-z0-9][A-Za-z0-9._-]*)', requirement if isinstance(requirement, str) else '')\n" +
     "    return re.sub(r'[-_.]+', '-', m.group(1).lower()) if m else ''\n" +
-    "try:\n" +
-    "    doc = load('.')\n" +
-    "except tomllib.TOMLDecodeError as e:\n" +
-    "    print(f'error\\tpyproject.toml is not valid TOML: {e}')\n" +
-    "    sys.exit(0)\n" +
-    "members = strings(doc.get('tool', {}).get('uv', {}).get('workspace', {}).get('members'), 'members', 'pyproject.toml')\n" +
-    "wanted = {name(r) for r in strings(doc.get('project', {}).get('dependencies'), 'dependencies', 'pyproject.toml')}\n" +
+    "doc = load('.')\n" +
+    "members = strings(table(doc, 'tool', 'uv', 'workspace').get('members'), 'members', 'pyproject.toml')\n" +
+    "wanted = {name(r) for r in strings(table(doc, 'project').get('dependencies'), 'dependencies', 'pyproject.toml')}\n" +
     "dirs = []\n" +
     "for member in members:\n" +
     "    print('member\\t' + member)\n" +
@@ -274,8 +286,8 @@ type PythonModuleBuild {
     "            dirs.append(rel)\n" +
     "projects = {}\n" +
     "for rel in dirs:\n" +
-    "    project = load(rel).get('project', {})\n" +
-    "    projects[rel] = (name(project.get('name', '')), {name(r) for r in strings(project.get('dependencies'), 'dependencies', rel + '/pyproject.toml')})\n" +
+    "    project = table(load(rel), 'project')\n" +
+    "    projects[rel] = (name(project.get('name')), {name(r) for r in strings(project.get('dependencies'), 'dependencies', rel + '/pyproject.toml')})\n" +
     "needed = []\n" +
     "while True:\n" +
     "    found = [rel for rel in dirs if rel not in needed and projects[rel][0] in wanted]\n" +

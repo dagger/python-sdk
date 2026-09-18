@@ -801,6 +801,20 @@ type E2e {
     assertMembersInstalled(members, "uv")
     assertMembersInstalled(members.withNewFile(pyprojectPath, members.file(pyprojectPath).contents + "\n[tool.dagger]\nuse-uv = false\n"), "pip")
 
+    # A member whose pyproject.toml does not read is named, not shown as a
+    # traceback from the reader.
+    let broken = pythonSdk
+      .generateScope(members.withNewFile("/" + tomlGenerateModulePath + "/tools/unused/pyproject.toml", "[project\n").withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    let brokenBuild = pythonSdkRuntime
+      .moduleRuntime(modSource: runtimeSource(broken, tomlGenerateModulePath), introspectionJson: null)
+      .withExec(["true"])
+      .stdout rescue {
+        err: Error => err.message
+      }
+    assertContains(brokenBuild, "tools/unused/pyproject.toml is not valid TOML", "a broken member was not named: " + brokenBuild)
+    assertNotContains(brokenBuild, "Traceback", "a broken member surfaced as a traceback")
+
     null
   }
 
