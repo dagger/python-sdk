@@ -12,18 +12,17 @@
 #   <workspace>/.dagger/modules/lib/         a module with one function
 #   <workspace>/.dagger/modules/demo/        a module that calls lib through a client
 #
-# and then calls demo, which calls lib. Nothing here needs the dev engine: on a
-# released engine the client loads its module through the SDK's fallback path.
-# The half that needs `serveModule`, and so an engine built from dagger/dagger
-# at 284cd849, is the last command this script prints rather than runs.
+# and then calls demo, which calls lib through serveModule. It needs an engine
+# that runs Dang entrypoints and has serveModule: v1.0.0-beta.14 or later.
 #
-# Why each module's manifest is rewritten: `[runtime] source = "python"` means
-# the *builtin* Python SDK of the engine, not this checkout, even in a workspace
-# that names its own SDK. So `dagger module init python` generates with this
-# checkout and then the builtin runs the module, which fails on the layout it
-# did not write. A module that must run on this working tree names the runtime
-# by path instead. A user of a published SDK never does this.
-# See hack/designs/2026-09-18-workspace-sdk-runtime.md.
+# Why each module's manifest is rewritten: generation names the shared Dang
+# entrypoint this repository publishes, dagger.io/sdk/python/entrypoint@v1,
+# which runs the SDK of its release, not this checkout. The engine loads an
+# entrypoint from a git ref or from a path inside the module, never from a path
+# above it, so each module gets a copy of this checkout's entrypoint/ and its
+# manifest names that copy. Every generation names the published one again,
+# so the copy is named again after each. A user of a published SDK never does
+# this.
 set -eu
 
 # TRY_SDK runs the walkthrough on another checkout, a branch under review say.
@@ -46,20 +45,24 @@ check.skip = ["*"]
 module = "python-sdk"
 TOML
 
-# The runtime of this checkout, from a module in .dagger/modules/<name>.
-manifest() {
+# The shared entrypoint of this checkout, copied into .dagger/modules/<name>
+# and named by the module's manifest.
+entrypoint() {
+  rm -rf ".dagger/modules/$1/checkout-entrypoint"
+  mkdir -p ".dagger/modules/$1/checkout-entrypoint"
+  cp python-sdk/entrypoint/*.dang ".dagger/modules/$1/checkout-entrypoint/"
   cat >".dagger/modules/$1/dagger-module.toml" <<TOML
 name = "$1"
-engineVersion = "$(dagger version | awk '/^version:/ { print $2 }')"
 
-[runtime]
-source = "../../../python-sdk/runtime"
+[entrypoint]
+kind = "dang"
+source = "./checkout-entrypoint"
 TOML
 }
 
 say "dagger module init python --name lib"
 dagger module init python --name lib -y
-manifest lib
+entrypoint lib
 cat >.dagger/modules/lib/src/lib/__init__.py <<'PY'
 from dagger import function, object_type
 
@@ -74,10 +77,10 @@ dagger call -m lib greeting --name lib
 
 say "dagger module init python --name demo"
 dagger module init python --name demo -y
-manifest demo
 
 say "dagger module client add ../lib"
 (cd .dagger/modules/demo && dagger module client add ../lib -y)
+entrypoint demo
 
 say "what the scope looks like now"
 cat .dagger/modules/demo/pyproject.toml
@@ -107,13 +110,6 @@ dagger call -m demo base with-exec --args=echo,core-still-works stdout
 say "done: $dir"
 cat >&2 <<EOF
 
-The half above runs on a released engine. Two things need more:
-
-1. Loading through the engine field, not the SDK's fallback:
-     cd $sdk
-     E2E_MODULE=.dagger/modules/engine-e2e hack/e2e-local.sh dev-client-call-check
-   That builds an engine from dagger/dagger at 284cd849, which has serveModule.
-
-2. Every check of this SDK against your local engine:
-     cd $sdk && hack/e2e-local.sh
+Every check of this SDK against your local engine:
+  cd $sdk && hack/e2e-local.sh
 EOF
