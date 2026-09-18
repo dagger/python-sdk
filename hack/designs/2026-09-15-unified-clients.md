@@ -835,18 +835,35 @@ Generated code never branches on which kind of reference it holds.
 Dang entrypoint runs its Python in an ordinary nested client, which the engine
 gives no module context, so that process finds its workspace from its own
 container rather than from the user's. An absolute workspace path then resolves
-against a container and the load fails. The entrypoint therefore hands the
-module's real workspace to the process, and the SDK uses it:
+against a container and the load fails.
+
+The entrypoint therefore hands the process what it needs to load its clients —
+and **only** that:
 
 | The target | The query |
 | --- | --- |
-| Local, in a process an entrypoint handed a workspace | `node(id: <workspace>)` → `moduleSource(path:)` → `asModule` → `serve` |
+| Local, and handed over by the entrypoint | `node(id: <that client>)` → `asModule` → `serve` |
 | Everything else | `serveModule(address, refPin)` |
 
+What is handed over is one **module source per declared client**, built from the
+files the engine has already loaded for it, detached from the workspace those
+files came from. It is read from the caller's config at every call. A local
+client that was not handed over fails by name, pointing at `dagger generate`;
+the process never falls back to `serveModule` for a local target.
+
+**It must not be the workspace, and it must not be a handle that leads back to
+one** [confident]. A module is third-party code, and in Dagger an ID is a
+capability. Handing over the workspace lets module code read any file in it; a
+probe did exactly that. Handing over `Workspace.moduleSource(path)` is no
+better, because such a source keeps the workspace it came from —
+`withIncludes(["../../../secret"])` reloads its context from there — and
+`Module.source` leads back the same way. Both were tried, and both leaked.
+
 The branch lives in the load seam, `sdk/src/dagger/client/_load.py`, and nowhere
-else. It is temporary: a `serveModule` that takes a workspace would let the SDK
-name the workspace it means, and the two would collapse back into one. That is
-filed against the engine.
+else. It is temporary: one query would serve both if the engine accepted a
+least-privilege capability of this kind, which is filed against the engine. A
+`serveModule` that took a *workspace* would not do: it would put the capability
+back in the module's hands.
 
 **What the field still owes the caller's cache** [open]. A load at run time is
 invisible to the cache key of the call that performed it. So a caller keeps its
