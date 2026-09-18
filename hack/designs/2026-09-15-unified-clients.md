@@ -289,7 +289,8 @@ It has three parts, and each part has one owner.
 # <scope>/pyproject.toml
 [project]
 name = "my-module"
-dependencies = ["dagger-io", "dagger-clients-linter"]
+# Core is always a dependency: the module's own code imports dagger_clients.core.
+dependencies = ["dagger-io", "dagger-clients-core", "dagger-clients-linter"]
 
 [tool.uv.workspace]
 members = ["sdk", "clients/core", "clients/linter", "clients/my-module"]
@@ -578,12 +579,12 @@ global-client = true
   `dagger generate` removes the global client.
 - Only generation reads the flag. The SDK does not read `pyproject.toml` at run time.
 
-Where it goes [provisional]. The global client is generic in shape but tied to
+Where it goes [confident]. The global client is generic in shape but tied to
 one scope's clients, so it belongs with the SDK files: the `sdk/` member gains a
 second import package, `sdk/src/dagger_global/`, when the flag is on. Then no
 new member appears. The cost: that copy of `dagger-io` depends on the scope's
-clients while the flag is on. The alternative is a member of its own next to
-`sdk/`; a spike decides.
+clients while the flag is on. Clearing the flag must give back exactly the
+`sdk/` of a module that never had one.
 
 ```python
 # sdk/src/dagger_global/__init__.py (generated, temporary)
@@ -607,8 +608,10 @@ dag = Client()
 - Contributed fields: the global client adds `binding.as_linter()` to the core
   class at import, at run time only. Type checkers do not see it, which points
   to the migration.
-- Dependencies: with the flag, the SDK adds the global client to
-  `[project] dependencies`, next to the clients it already writes there.
+- Dependencies: the global client is a second import package of the `sdk/`
+  member, not a member of its own, so nothing is added to the scope's
+  `[project] dependencies`. That member's own `pyproject.toml` gains a
+  dependency on core and on each client while the flag is on [confident].
 - End of life: a `DeprecationWarning` on import in phase 2. Removal in a later
   release.
 
