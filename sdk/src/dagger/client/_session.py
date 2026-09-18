@@ -326,6 +326,18 @@ class Session(BaseConnection):
     async def execute(self, query: str) -> Any:
         return await self.session.execute(query)
 
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for a name the session lacks, and the likely ask is
+        # an API field of the global client that dag used to be.
+        msg = f"{type(self).__name__!r} object has no attribute {name!r}"
+        if not name.startswith("_"):
+            msg += (
+                f". The API is on the core client: core().{name}(). "
+                f"To keep dag.{name}() while migrating, set global-client = true "
+                "under [tool.dagger] and run dagger generate."
+            )
+        raise AttributeError(msg, name=name, obj=self)
+
     async def load(self, target: "Target") -> None:
         """Serve the module a target names, once per session."""
         entry = self._loads.setdefault(target.name, _Load(target))
@@ -364,6 +376,21 @@ def default_session() -> Session:
         if _default is None:
             _default = Session()
         return _default
+
+
+def install_default_session(session: Session) -> None:
+    """Make a session the process default, before anything has used one.
+
+    Only the temporary global client needs this: its ``dag`` is a Session,
+    and it has to be the one over the shared connection, so that a client
+    called without ``session=`` and ``dagger.connection()`` share its loads.
+    """
+    global _default  # noqa: PLW0603
+    with _sessions_lock:
+        if _default is not None and _default is not session:
+            msg = "The default session is already in use"
+            raise RuntimeError(msg)
+        _default = session
 
 
 def as_session(conn: BaseConnection) -> Session:

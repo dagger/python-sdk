@@ -1,6 +1,7 @@
 """The hand-written SDK files depend on nothing generated.
 
-Only ``dagger/__init__.py`` may name generated code.
+Only ``dagger/__init__.py`` may name generated code: the optional import of
+the temporary global client.
 """
 
 import ast
@@ -18,7 +19,7 @@ SRC = pathlib.Path(
 PACKAGE_INIT = SRC / "__init__.py"
 
 GENERATED_NAME_RE = re.compile(
-    r"(?<![\w.])(dagger\.client\.gen|dagger_gen|dagger_clients)(?!\w)"
+    r"(?<![\w.])(dagger\.client\.gen|dagger_gen|dagger_clients|dagger_global)(?!\w)"
 )
 
 # Runs in its own interpreter: this one has the generated bindings loaded.
@@ -30,7 +31,7 @@ import sys
 import types
 
 src = pathlib.Path(sys.argv[1])
-blocked = ("dagger.client.gen", "dagger_gen", "dagger_clients")
+blocked = ("dagger.client.gen", "dagger_gen", "dagger_clients", "dagger_global")
 
 
 class GeneratedCodeImportedError(Exception):
@@ -100,7 +101,7 @@ def _is_submodule(name: str) -> bool:
     return name in {p.stem for p in SRC.iterdir()}
 
 
-GENERATED = ("dagger.client.gen", "dagger_gen", "dagger_clients")
+GENERATED = ("dagger.client.gen", "dagger_gen", "dagger_clients", "dagger_global")
 
 
 def _is_generated(name: str) -> bool:
@@ -243,6 +244,7 @@ def f():
             id="method-body",
         ),
         pytest.param("import dagger_gen\n", "dagger.log", id="dagger_gen"),
+        pytest.param("import dagger_global\n", "dagger.log", id="dagger_global"),
         pytest.param(
             "from dagger_clients.core import core\n", "dagger.log", id="dagger_clients"
         ),
@@ -290,11 +292,7 @@ def test_guard_accepts_sdk_import(source: str, module: str):
 
 
 def test_package_init_names_generated_code_once():
-    """The init is exempt while it star-imports the bindings for ``dagger.X``.
-
-    The later slice trades that for the optional ``dagger_global`` import,
-    at which point this test and the exemption go together.
-    """
+    """The init's one generated import is the optional global client."""
     found = [stmt for _, stmt in _generated_imports(PACKAGE_INIT.read_text(), "dagger")]
 
-    assert found == ["from dagger_gen import *", "from dagger.client.gen import *"]
+    assert found == ["from dagger_global import *"]

@@ -536,3 +536,27 @@ def test_session_with_no_connection_is_over_the_shared_one():
 
     assert Session().connection is SharedConnection()
     assert as_session(SharedConnection()) is default_session()
+
+
+async def test_legacy_connection_yields_an_isolated_session(monkeypatch):
+    from dagger.provisioning import _connection
+
+    class Engine:
+        def __init__(self, cfg, stack):
+            pass
+
+        async def provision(self):
+            return self
+
+        def get_client_connection(self):
+            return FakeConnection()
+
+        async def setup_client(self, conn):
+            return conn
+
+    monkeypatch.setattr(_connection, "Engine", Engine)
+
+    async with dagger.Connection() as s:
+        assert isinstance(s, Session)
+        assert s is not default_session()
+        assert isinstance(s.connection, FakeConnection)
