@@ -253,6 +253,20 @@ type E2e {
     assertContains(current.after.file(tomlGenerateModulePath + "/dagger-module.toml").contents, "engineVersion = \"v1.0.0-0\"", "regenerating did not preserve engineVersion")
     assertNotContains(current.after.file(tomlGenerateModulePath + "/pyproject.toml").contents, "path = \"sdk\"", "the vendored source survived")
 
+    # Valid TOML that the runtime does not read would generate a module that
+    # then fails to build, so generation refuses it and names the form to use.
+    # The input is a scope generation wrote, with only its header rewritten.
+    let pyprojectPath = "/" + tomlGenerateModulePath + "/pyproject.toml"
+    let written = currentWs.file(pyprojectPath).contents
+    assert(written.contains("\n[tool.uv.workspace]\n"), "generation wrote no [tool.uv.workspace] header to rewrite")
+    let quoted = currentWs.withNewFile(pyprojectPath, written.replace("[tool.uv.workspace]", "[\"tool\".\"uv\".\"workspace\"]"))
+    let refused = pythonSdk
+      .generateScope(quoted.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .cwd rescue {
+        err: Error => err.message
+      }
+    assertContainsAll(refused, ["the module runtime does not read", "an unquoted [tool.uv.workspace] header", "then run dagger generate again"])
+
     let legacyWs = pythonSdk
       .generateScope(ws.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])
       .withWorkdir(".")
@@ -369,16 +383,6 @@ type E2e {
     assertNotContains(generated.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "core was not generated in the module's view")
     assertContains(current.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "core was not generated in the current view")
 
-    # Valid TOML that the runtime does not read would generate a module that
-    # then fails to build, so generation refuses it and names the form to use.
-    let pyprojectPath = "/" + tomlGenerateModulePath + "/pyproject.toml"
-    let quoted = ws.withNewFile(pyprojectPath, ws.file(pyprojectPath).contents + "\n[\"tool\".\"uv\".\"workspace\"]\nmembers = [\"sdk\"]\n")
-    let refused = pythonSdk
-      .generateScope(quoted.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
-      .cwd rescue {
-        err: Error => err.message
-      }
-    assertContainsAll(refused, ["the module runtime does not read", "an unquoted [tool.uv.workspace] header", "then run dagger generate again"])
     null
   }
 
