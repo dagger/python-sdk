@@ -209,6 +209,33 @@ def test_global_client_makes_dag_the_client(generated: pathlib.Path):
     assert _run(WITH_GLOBAL_CLIENT, generated) == "ok\n"
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "import cycle: dagger imports dagger_global, which imports the clients, "
+        "each of which is still importing dagger; the fix needs a design call"
+    ),
+)
+@pytest.mark.parametrize(
+    "first",
+    [
+        "import dagger_clients.core",
+        "from dagger_clients.linter import linter",
+        "import dagger_global",
+    ],
+)
+def test_generated_code_imported_before_dagger(generated: pathlib.Path, first: str):
+    script = f"""
+        {first}
+        import dagger
+        import dagger_global
+        assert type(dagger.dag) is dagger_global.Client, type(dagger.dag)
+        print("ok")
+    """
+
+    assert _run(script, generated) == "ok\n"
+
+
 BROKEN_GLOBAL_CLIENT = """
     try:
         import dagger
