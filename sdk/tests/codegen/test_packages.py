@@ -461,6 +461,7 @@ class _Runtime:
 
     def __init__(self) -> None:
         self.selected: list[tuple] = []
+        self.rooted: list[tuple] = []
 
     class Session: ...
 
@@ -472,6 +473,7 @@ class _Runtime:
         assert wanted == installed, name
 
     def client_root(self, cls, target, name, args, *, session=None):
+        self.rooted.append((cls, target, name, args))
         return cls(Context())
 
     def client_select(self, receiver, target, name, args):
@@ -507,6 +509,8 @@ def runtime(monkeypatch):
         return module
 
     load.selected = fake.selected  # type: ignore[attr-defined]
+    load.rooted = fake.rooted  # type: ignore[attr-defined]
+    load.Target = fake.Target  # type: ignore[attr-defined]
     return load
 
 
@@ -555,6 +559,16 @@ def test_overload_dispatches_an_implementation_to_its_interface_hook(runtime):
     assert runtime.selected[-1][0] is zebra
     with pytest.raises(TypeError, match="as_linter"):
         linter.as_linter("zebra")
+
+
+def test_client_that_names_no_core_symbol_compiles(runtime):
+    # Nothing to import from core but the digest: no empty import block.
+    schema = build_schema(_sdl() + _named("solo", "Solo", "solo"))
+
+    solo = runtime(schema, "solo")
+
+    assert isinstance(solo.solo(), solo.Solo)
+    assert "import (" not in client_package(schema, "solo", ".")[1]["__init__.py"]
 
 
 def _named(module: str, root: str, constructor: str) -> str:

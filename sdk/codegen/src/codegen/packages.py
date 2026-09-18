@@ -352,10 +352,13 @@ def _client_init(
     # otherwise raise a plain ImportError, and the message to regenerate would
     # never be seen.
     yield "_check_core(NAME, CORE_DIGEST, _installed_core)"
-    yield ""
-    yield f"from {NAMESPACE}.{partition.CORE} import (  # noqa: E402"
-    yield from (indent(f"{name},") for name in _core_imports(ctx, module, references))
-    yield ")"
+    # A client whose types name nothing of core has no block: an empty one
+    # is a syntax error.
+    if imports := _core_imports(ctx, module, references):
+        yield ""
+        yield f"from {NAMESPACE}.{partition.CORE} import (  # noqa: E402"
+        yield from (indent(f"{name},") for name in imports)
+        yield ")"
     yield _block(
         "TARGET = _Target(name=NAME, ref=REF, pin=PIN)",
         '"""The module that this client loads on first use."""',
