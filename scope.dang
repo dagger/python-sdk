@@ -31,7 +31,14 @@ type Scope {
   let lock: Boolean!
 
   """
-  The engine version of the scope's module, or empty for a scope without one.
+  Whether the scope is a module's, which the module runtime builds.
+  """
+  let isModule: Boolean!
+
+  """
+  The engine version the scope's module declares for a runtime of its own.
+  Empty for a module on an entrypoint, which runs on the engine's own
+  version, and for a scope without a module.
   """
   let engineVersion: String!
 
@@ -73,7 +80,7 @@ type Scope {
   or where the runtime refuses to read the members at all.
   """
   let checkRuntimeReads(file: File!, members: [ClientMember!]!): Void {
-    if (engineVersion != "") {
+    if (isModule) {
       # Members are never empty, so a leading newline marks the refusal.
       let read = pythonSdkRuntime.scopeMembers(file).join("\n") rescue {
         err: Error => "\n" + err.message
@@ -442,8 +449,9 @@ type Scope {
   }
 
   """
-  The engine version the scope's code runs against: its module's, or the
-  version core is generated at for a scope without a module. The engine
+  The engine version the scope's code runs against: the one its module's own
+  runtime declares, or else the version core is generated at, which is the
+  engine's own view, as on an entrypoint. The engine
   serves a schema in the view of the module it describes, so a client to a
   module that declares an older version would otherwise name core types that
   its scope does not have.

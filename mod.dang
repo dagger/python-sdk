@@ -84,6 +84,7 @@ type Mod {
         ws: ws,
         clients: clients ?? declaredClients,
         lock: lock,
+        isModule: true,
         engineVersion: engineVersion,
       ).generated
       if (dangEntrypoint) {

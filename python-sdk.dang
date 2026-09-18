@@ -106,11 +106,10 @@ type PythonSdk {
   let vendorDirName: String! = "sdk"
 
   """
-  The shared Dang entrypoint every module on the runtime path names, served
-  from this repository's entrypoint/ directory. An engine that loads manifest
-  version 2 drives the module through it; an older engine ignores the table
-  and uses the builtin runtime named by [runtime]. `@v1` selects the greatest
-  `entrypoint/v1.*` tag of this repository, then the greatest plain `v1.*` one.
+  The shared Dang entrypoint every module names unless it has a static one,
+  served from this repository's entrypoint/ directory. `@v1` selects the
+  greatest `entrypoint/v1.*` tag of this repository, then the greatest plain
+  `v1.*` one.
   """
   let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
@@ -137,15 +136,15 @@ type PythonSdk {
   without a module gets the same tree and no module config. In a module scope,
   a module without a config file is initialized from the configured template,
   every module receives a dagger-module.toml from the manifest builder, and a
-  pre-1.0 dagger.json is migrated and removed. With dangEntrypoint, the module
-  gets an entrypoint manifest and a generated entrypoint instead of a runtime.
+  pre-1.0 dagger.json is migrated and removed. The manifest names the shared
+  entrypoint, or with dangEntrypoint one generated into the module.
   """
   pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
     let scope = normalizePath(ws.cwd)
     # Resolve local client paths from the workspace root.
     let rooted = ws.withWorkdir(".")
     if (isModule == false) {
-      Scope(path: scope, ws: rooted, clients: clients, lock: lock, engineVersion: "").generated.withWorkdir(scope)
+      Scope(path: scope, ws: rooted, clients: clients, lock: lock, isModule: false, engineVersion: "").generated.withWorkdir(scope)
     } else {
       let hadConfig = hasModuleConfig(ws, scope)
       let initialized = if (hadConfig) {
@@ -156,8 +155,8 @@ type PythonSdk {
       if (dangEntrypoint) {
         checkStaticScope(initialized, scope, hadConfig)
       }
-      # The runtime manifest is what every engine serves a schema for; the
-      # static path swaps it for the entrypoint manifest as it generates.
+      # The shared entrypoint's manifest; the static path swaps it for its own
+      # as it generates.
       let configured = generateScopeManifest(initialized, scope, name)
       Mod(
         rootPath: scope,
@@ -175,34 +174,92 @@ type PythonSdk {
   that uses it, so the manifest lists none, and the [[dependencies]] of the
   layout before go. Remove dagger.json so two manifest files cannot contain
   different state.
+
+  The module runs on a Dang entrypoint and on nothing else. The runtime this
+  SDK used to write, `[runtime] source = "python"`, goes, and so does what
+  only a runtime reads: engineVersion, since an entrypoint runs a module on
+  the engine's own version. Any other runtime is one the user chose, and the
+  manifest keeps it with no entrypoint added, because the engine follows an
+  entrypoint over a runtime.
   """
   let generateScopeManifest(ws: Workspace!, scope: String!, name: String!): Workspace! {
     let root = "/" + scope
     let hasToml = scopeHasFile(ws, scope, "dagger-module.toml")
     let hasJson = scopeHasFile(ws, scope, "dagger.json")
     let base = if (hasToml and isEntrypointManifest(ws.file(root + "/dagger-module.toml").contents)) {
-      # A static entrypoint manifest holds nothing the runtime manifest keeps.
-      sdkHelpers.moduleManifest.withLegacyPythonRuntime
-        .withDangEntrypoint(source: sharedEntrypointSource)
+      # A static entrypoint manifest holds nothing the shared one keeps.
+      sdkHelpers.moduleManifest.withDangEntrypoint(source: sharedEntrypointSource)
     } else if (hasToml) {
       let manifest = ws.file(root + "/dagger-module.toml")
+      let config = json.withContents((JSON.encode(TOML.decode(manifest.contents)) :: Dagger.JSON!))
       let loaded = sdkHelpers.moduleManifest(loadToml: withoutStaleEntrypoint(manifest))
-      # A Dang entrypoint already there is the user's: a pinned version, or a fork.
-      if (ManifestToml(manifest.contents).entrypointKind == "dang") {
+      if (keepsItsRuntime(config)) {
         loaded
       } else {
-        loaded.withDangEntrypoint(source: sharedEntrypointSource)
+        checkEntrypointOnly(config, "dagger-module.toml")
+        # A Dang entrypoint already there is the user's: a pinned version, or a fork.
+        let entrypointed = if (ManifestToml(manifest.contents).entrypointKind == "dang") {
+          loaded
+        } else {
+          loaded.withDangEntrypoint(source: sharedEntrypointSource)
+        }
+        entrypointed.withoutLegacyFields
       }
     } else if (hasJson) {
-      sdkHelpers.moduleManifest(loadJson: ws.file(root + "/dagger.json"))
-        .withDangEntrypoint(source: sharedEntrypointSource)
+      let manifest = ws.file(root + "/dagger.json")
+      let config = json.withContents((manifest.contents :: Dagger.JSON!))
+      let loaded = sdkHelpers.moduleManifest(loadJson: manifest)
+      if (keepsItsRuntime(config)) {
+        loaded
+      } else {
+        checkEntrypointOnly(config, "dagger.json")
+        loaded.withDangEntrypoint(source: sharedEntrypointSource).withoutLegacyFields
+      }
     } else {
-      sdkHelpers.moduleManifest.withLegacyPythonRuntime
-        .withDangEntrypoint(source: sharedEntrypointSource)
+      sdkHelpers.moduleManifest.withDangEntrypoint(source: sharedEntrypointSource)
     }
     base.withName(name: name).withoutLegacyRuntimeDependencies
       .generate(ws.withWorkdir(scope), lock: lock, legacyJson: false)
       .withWorkdir(".")
+  }
+
+  """
+  Whether a manifest names a runtime of the user's own: anything but the
+  builtin `python` this SDK wrote. Read with a TOML or JSON parser, because
+  the manifest is the user's content; a dagger.json names it as `sdk`.
+  """
+  let keepsItsRuntime(config: JSONValue!): Boolean! {
+    let fields = config.fields
+    let key = if (fields.contains("runtime")) { "runtime" } else if (fields.contains("sdk")) { "sdk" } else { "" }
+    if (key == "") {
+      false
+    } else {
+      let value = config.field([key])
+      let source = value.asString rescue {
+        err: Error => value.field(["source"]).asString
+      }
+      source != "" and source != "python"
+    }
+  }
+
+  """
+  Refuse what a runtime manifest can say and an entrypoint manifest cannot,
+  before anything is written: which files are the module (include, exclude)
+  and where its source is. Dropping either would change the module silently.
+  """
+  let checkEntrypointOnly(config: JSONValue!, file: String!): Void {
+    let fields = config.fields
+    let listed = ["include", "exclude"].filter { key => fields.contains(key) }
+    let source = if (fields.contains("source") and normalizePath(config.field(["source"]).asString) != ".") {
+      ["source"]
+    } else {
+      [] :: [String!]!
+    }
+    let refused = listed + source
+    if (refused.length > 0) {
+      raise file + " has settings an entrypoint manifest cannot carry (" + refused.join(", ") + "); remove them, or keep the module on a runtime of your own"
+    }
+    null
   }
 
   """
