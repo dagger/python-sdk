@@ -3,6 +3,7 @@
 #
 #   hack/try-unified-clients.sh            # a fresh temporary workspace
 #   TRY_DIR=/tmp/uc hack/try-unified-clients.sh
+#   TRY_SDK=/path/to/another/checkout hack/try-unified-clients.sh
 #
 # It builds this, from nothing:
 #
@@ -22,7 +23,8 @@
 # published SDK never does this.
 set -eu
 
-sdk=$(CDPATH= cd "$(dirname "$0")/.." && /bin/pwd)
+# TRY_SDK runs the walkthrough on another checkout, a branch under review say.
+sdk=${TRY_SDK:-$(CDPATH= cd "$(dirname "$0")/.." && /bin/pwd)}
 dir=${TRY_DIR:-$(mktemp -d)}
 say() { printf '\n== %s\n' "$1" >&2; }
 
