@@ -190,19 +190,63 @@ type PythonModuleBuild {
   }
 
   """
-  What the module installs from its own tree: every member of a scope's
-  workspace, the SDK's and the user's alike, or the vendored library of the
-  layout before.
+  What the module installs from its own tree: the members of a scope's
+  workspace that the project depends on, directly or through another member,
+  the way `uv sync` picks them; or the vendored library of the layout before.
+  A member nothing depends on is not installed: it may not even install here.
   """
   let localPackages(source: Directory!, cfg: PyConfig!): [String!]! {
     if (cfg.isScope) {
       # A member may be a glob, which the tree resolves.
-      cfg.members.reduce([] :: [String!]!) { found, member =>
-        found + source.glob(member + "/" + projectCfg).map { file => "./" + file.trimSuffix("/" + projectCfg) }
+      let dirs = cfg.members.reduce([] :: [String!]!) { found, member =>
+        found + source.glob(member + "/" + projectCfg).map { file => file.trimSuffix("/" + projectCfg) }
       }
+      let needed = neededMembers(source, dirs, cfg.dependencies.map { req => requirementName(req) }, [] :: [String!]!)
+      dirs.filter { dir => needed.filter { n => n == dir }.length > 0 }.map { dir => "./" + dir }
     } else {
       ["./" + genDir]
     }
+  }
+
+  """
+  The members named by a list of distributions, and the members those depend
+  on in turn, added to the ones already found.
+  """
+  let neededMembers(source: Directory!, dirs: [String!]!, names: [String!]!, found: [String!]!): [String!]! {
+    let next = dirs.filter { dir =>
+      found.filter { f => f == dir }.length == 0 and
+        names.filter { name => name == memberName(source, dir) }.length > 0
+    }
+    if (next.length == 0) {
+      found
+    } else {
+      let theirs = next.reduce([] :: [String!]!) { names, dir => names + memberRequirements(source, dir) }
+      neededMembers(source, dirs, theirs, found + next)
+    }
+  }
+
+  let memberProject(source: Directory!, dir: String!): String! {
+    tomlTable(source.file(dir + "/" + projectCfg).contents, "project")
+  }
+
+  let memberName(source: Directory!, dir: String!): String! {
+    distributionName(tomlString(memberProject(source, dir), "name"))
+  }
+
+  let memberRequirements(source: Directory!, dir: String!): [String!]! {
+    tomlStrings(memberProject(source, dir), "dependencies").map { req => requirementName(req) }
+  }
+
+  """
+  The distribution a PEP 508 requirement names, normalized like PEP 503.
+  """
+  let requirementName(requirement: String!): String! {
+    let m = requirement.match("^\\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+    if (m == null) { "" } else { distributionName(m.captures[0] ?? "") }
+  }
+
+  let distributionName(name: String!): String! {
+    name.toLower.replaceMatches("[-_.]+", "-")
   }
 
   """
@@ -348,6 +392,7 @@ type PythonModuleBuild {
       uvVersion: tomlString(dagger, "uv-version"),
       vendorPath: inlineTableString(sources, "dagger-io", "path"),
       members: tomlStrings(workspace, "members"),
+      dependencies: tomlStrings(project, "dependencies"),
       indexURL: indexes
         .filter { table => tomlBool(table, "default", false) }
         .map { table => tomlString(table, "url") }
@@ -393,17 +438,19 @@ type PythonModuleBuild {
   }
 
   """
-  The strings of an array, on one line or over several, comments dropped.
+  The strings of an array, on one line or over several, comments dropped. A
+  bracket or a `#` inside a string is part of it: `httpx[http2]` does not
+  end the array.
   """
   let tomlStrings(table: String!, key: String!): [String!]! {
-    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\[([^\\]]*)\\]"))
+    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\[((?:\"[^\"\\n]*\"|'[^'\\n]*'|#[^\\n]*|[^\\]\"'#])*)\\]"))
     if (m == null) {
       [] :: [String!]!
     } else {
       (m.captures[0] ?? "")
-        .replaceMatches("#[^\\n]*", "")
-        .split(",")
-        .map { item => item.trimSpace.trim("\"'") }
+        .matchAll("\"([^\"\\n]*)\"|'([^'\\n]*)'|#[^\\n]*")
+        .filter { item => item.string.hasPrefix("#") == false }
+        .map { item => item.string.trim("\"'") }
         .filter { item => item != "" }
     }
   }
@@ -432,6 +479,7 @@ type PyConfig {
   The `[tool.uv.workspace] members` of a scope; empty in the layout before.
   """
   pub members: [String!]!
+  pub dependencies: [String!]!
   pub indexURL: String!
   pub extraIndexURL: String!
 
@@ -443,6 +491,7 @@ type PyConfig {
     uvVersion: String! = "",
     vendorPath: String! = "",
     members: [String!]! = [],
+    dependencies: [String!]! = [],
     indexURL: String! = "",
     extraIndexURL: String! = "",
   ) {
@@ -453,6 +502,7 @@ type PyConfig {
     self.uvVersion = uvVersion
     self.vendorPath = vendorPath
     self.members = members
+    self.dependencies = dependencies
     self.indexURL = indexURL
     self.extraIndexURL = extraIndexURL
     self

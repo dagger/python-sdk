@@ -719,6 +719,40 @@ type E2e {
       .stdout rescue "raised"
     assert(refused == "raised", "a scope without its core member was built")
 
+    # Only the members the project depends on are installed, as `uv sync`
+    # installs them: a user member nothing depends on may not even install
+    # here, and pip or an unlocked uv must not try.
+    let members = ws
+      .withNewFile(pyprojectPath, ws.file(pyprojectPath).contents
+        .replace("dependencies = [\"dagger-io\"]", "dependencies = [\"dagger-io\", \"used[extra]>=0.1\"]")
+        .replace("[tool.uv.sources]\n", "[tool.uv.sources]\nused = { workspace = true }\n") +
+        "\n[tool.uv.workspace]\nmembers = [\"tools/used\", \"tools/unused\"]\n")
+      .withNewFile("/" + tomlGenerateModulePath + "/tools/used/pyproject.toml", userMember("used", ">=3.10"))
+      .withNewFile("/" + tomlGenerateModulePath + "/tools/used/src/used/__init__.py", "")
+      .withNewFile("/" + tomlGenerateModulePath + "/tools/unused/pyproject.toml", userMember("unused", ">=99"))
+      .withNewFile("/" + tomlGenerateModulePath + "/tools/unused/src/unused/__init__.py", "")
+    assertMembersInstalled(members, "uv")
+    assertMembersInstalled(members.withNewFile(pyprojectPath, members.file(pyprojectPath).contents + "\n[tool.dagger]\nuse-uv = false\n"), "pip")
+
+    null
+  }
+
+  let userMember(name: String!, requiresPython: String!): String! {
+    "[project]\nname = \"" + name + "\"\nversion = \"0.1.0\"\nrequires-python = \"" + requiresPython + "\"\n" +
+      "[project.optional-dependencies]\nextra = []\n\n" +
+      "[build-system]\nrequires = [\"uv_build>=0.8.4,<0.12.0\"]\nbuild-backend = \"uv_build\"\n"
+  }
+
+  let assertMembersInstalled(seeded: Workspace!, what: String!): Void {
+    let generated = assertInstalled(seeded, what)
+    let out = pythonSdkRuntime
+      .moduleRuntime(modSource: runtimeSource(generated, tomlGenerateModulePath), introspectionJson: null)
+      .withExec(["python", "-c",
+        "import importlib.util as u, sys\n" +
+        "sys.exit('used is missing' if u.find_spec('used') is None else 'unused was installed' if u.find_spec('unused') else print('members') or 0)\n",
+      ])
+      .stdout
+    assertContains(out, "members", what + ": " + out)
     null
   }
 
