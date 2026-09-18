@@ -112,6 +112,9 @@ class _ContributedField(_ObjectField):
     ) -> None:
         super().__init__(ctx, name, field, parent)
         self.receiver = format_name(parent.name)
+        self.receiver_class = (
+            f"_{parent.name}Client" if is_interface_type(parent) else parent.name
+        )
         if self.receiver in {arg.name for arg in self.args}:
             self.receiver += "_"
         for arg in self.args:
@@ -140,6 +143,18 @@ class _ContributedField(_ObjectField):
 
     def select_expr(self) -> str:
         return f'client_select({self.receiver}, TARGET, "{self.graphql_name}", _args)'
+
+    @joiner
+    def func_body(self) -> Iterator[str]:
+        if not self.convert_id:
+            yield super().func_body()
+            return
+        # Never straight through the receiver's context, which would run the
+        # query before the module is loaded: the selection needs the target.
+        yield from self.func_prelude()
+        yield f"_ctx = {self.select_expr()}"
+        yield "_id = await _ctx.execute(Scalar)"
+        yield f'return {self.receiver_class}(_ctx.select_id("{self.parent_name}", _id))'
 
     def render(self, name: str | None = None) -> str:
         return _block(self.func_signature(name), indent(self.func_body()))

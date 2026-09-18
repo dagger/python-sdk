@@ -243,6 +243,18 @@ def test_client_contributed_field_executes_a_leaf():
     assert "return await _ctx.execute(int)" in code
 
 
+def test_client_contributed_field_that_returns_an_id_of_its_receiver():
+    binding = 'linted: ID! @expectedType(name: "Binding") @sourceMap(module: "linter")'
+    code = _linter(_LINTER, Binding=binding)
+
+    assert "async def linted(binding: Binding, /) -> Binding:" in code
+    # Through client_select like any contributed field, so that the module is
+    # loaded before the query, never straight through the receiver's context.
+    assert '_ctx = client_select(binding, TARGET, "linted", _args)' in code
+    assert "binding._ctx" not in code
+    assert "return Binding(" in code
+
+
 def test_client_contributed_field_receiver_avoids_an_argument_name():
     env = """
         withLinter(env: ID @expectedType(name: "Env")): Env!
