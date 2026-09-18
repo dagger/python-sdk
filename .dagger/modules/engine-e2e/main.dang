@@ -18,18 +18,7 @@ type EngineE2e {
   initialize a Python module from it, and run the module.
   """
   pub devSdkCheck(ws: Workspace!): Void @check {
-    let sdkSource = ws.directory("/", exclude: [".git", ".remember", "**/.venv", "**/__pycache__", ".dagger/modules/e2e/out"])
-      .withFile("dagger.toml", ws.file("/.dagger/modules/engine-e2e/workspace.toml"))
-    let engineSource = git("https://github.com/dagger/dagger")
-      .ref(engineCommit)
-      .asWorkspace
-    let client = engineDev(ws: engineSource)
-      .playground
-      .withMountedDirectory("./python-sdk", sdkSource)
-      .withWorkdir("./python-sdk")
-      .withExec(["git", "init", "--quiet"])
-
-    let listed = client.withExec(["dagger", "sdk", "list"])
+    let listed = playground(ws).withExec(["dagger", "sdk", "list"])
     assert(listed.stdout.contains("python"), "the development Python SDK was not listed")
 
     let checked = listed.withExec(["dagger", "check"])
@@ -40,7 +29,9 @@ type EngineE2e {
       .withExec(["test", "!", "-e", modulePath + "/dagger.json"])
       .withExec(["test", "-f", modulePath + "/pyproject.toml"])
       .withExec(["test", "-f", modulePath + "/src/sdk_smoke/__init__.py"])
-      .withExec(["test", "-f", modulePath + "/sdk/src/dagger/client/gen.py"])
+      .withExec(["test", "-f", modulePath + "/sdk/pyproject.toml"])
+      .withExec(["test", "-f", modulePath + "/clients/core/src/dagger_clients/core/__init__.py"])
+      .withExec(["test", "!", "-e", modulePath + "/sdk/src/dagger/client/gen.py"])
 
     let release = initialized
       .withExec(["dagger", "-m", modulePath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
@@ -63,5 +54,55 @@ type EngineE2e {
       .withExec(["grep", "-q", "python:3.13-slim", ".dagger/modules/sdk-settings/pyproject.toml"])
 
     null
+  }
+
+  """
+  A module calls the client it declared, on an engine that has serveModule:
+  `dagger module client add` generates the client into the module's scope,
+  and the module's code imports it and calls the client's module.
+  """
+  pub devClientCallCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/sdk-client-call"
+    let source =
+      "from dagger import function, object_type\n" +
+      "from dagger_clients.client_dep import client_dep\n\n\n" +
+      "@object_type\n" +
+      "class SdkClientCall:\n" +
+      "    @function\n" +
+      "    async def greeting(self) -> str:\n" +
+      "        return await client_dep().greeting()\n"
+    # The runtime of this checkout, not the published shared entrypoint, which
+    # builds the layout before.
+    let manifest = "name = \"sdk-client-call\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../runtime\"\n"
+
+    let called = playground(ws)
+      .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "sdk-client-call", "--path", path])
+      .withWorkdir(path)
+      .withExec(["dagger", "module", "client", "add", "../e2e/fixtures/clients/dep", "--sdk", "python", "--auto-apply"])
+      .withExec(["test", "-f", "clients/client-dep/src/dagger_clients/client_dep/_target.py"])
+      .withNewFile("src/sdk_client_call/__init__.py", source)
+      .withNewFile("dagger-module.toml", manifest)
+      .withExec(["dagger", "-m", ".", "call", "greeting"])
+      .stdout
+    assert(called.contains("hello from the client dependency"), "the module did not call its client: " + called)
+
+    null
+  }
+
+  """
+  This checkout, registered to the SDK the way the e2e workspace registers
+  it, inside a playground of the pinned development engine.
+  """
+  let playground(ws: Workspace!): Container! {
+    let sdkSource = ws.directory("/", exclude: [".git", ".remember", "**/.venv", "**/__pycache__", ".dagger/modules/e2e/out"])
+      .withFile("dagger.toml", ws.file("/.dagger/modules/engine-e2e/workspace.toml"))
+    let engineSource = git("https://github.com/dagger/dagger")
+      .ref(engineCommit)
+      .asWorkspace
+    engineDev(ws: engineSource)
+      .playground
+      .withMountedDirectory("./python-sdk", sdkSource)
+      .withWorkdir("./python-sdk")
+      .withExec(["git", "init", "--quiet"])
   }
 }
