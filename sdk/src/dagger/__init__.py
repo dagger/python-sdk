@@ -18,19 +18,21 @@ from dagger.client._connection import close as close
 # never import it. The one exception is the temporary global client, which
 # keeps dag.container() and dagger.Container working while a module
 # migrates. Its dag is a Session, so it becomes the default one.
+from dagger.client._session import default_session as _default_session
+from dagger.client._session import install_default_session as _install
+
 try:
     from dagger_global import *
-except ModuleNotFoundError:
-    from dagger.client._session import default_session as _default_session
-
+except ModuleNotFoundError as _e:
+    # Only its absence means no flag: a global client that cannot import one
+    # of its clients is broken, not off.
+    if _e.name != "dagger_global":
+        raise
     # With the global client, a type checker sees dag as its Client.
     dag = _default_session()  # type: ignore[assignment, unused-ignore]
-    del _default_session
-else:
-    from dagger.client._session import install_default_session as _install
-
-    _install(dag)
-    del _install
+# A no-op for the default session itself.
+_install(dag)
+del _default_session, _install
 
 # Module support (only makes sense in a module runtime container)
 with contextlib.suppress(ModuleNotFoundError):

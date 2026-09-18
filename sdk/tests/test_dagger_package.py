@@ -136,7 +136,7 @@ NO_GENERATED_CODE = """
         def find_spec(self, name, path=None, target=None):
             generated = ("dagger_clients", "dagger_gen", "dagger_global")
             if name.partition(".")[0] in generated:
-                raise ModuleNotFoundError(name)
+                raise ModuleNotFoundError(name, name=name)
             if name == "dagger.client.gen":
                 raise RuntimeError("the legacy bindings were imported")
 
@@ -207,6 +207,26 @@ WITH_GLOBAL_CLIENT = """
 
 def test_global_client_makes_dag_the_client(generated: pathlib.Path):
     assert _run(WITH_GLOBAL_CLIENT, generated) == "ok\n"
+
+
+BROKEN_GLOBAL_CLIENT = """
+    try:
+        import dagger
+    except ModuleNotFoundError as e:
+        print(e.name)
+    else:
+        print(type(dagger.dag).__name__)
+"""
+
+
+def test_global_client_that_cannot_import_is_not_skipped(tmp_path: pathlib.Path):
+    # Otherwise dag quietly becomes a plain Session, and its message tells a
+    # user who has the flag to set it.
+    (tmp_path / "dagger_clients").mkdir()
+    (tmp_path / "dagger_global").mkdir()
+    (tmp_path / "dagger_global/__init__.py").write_text("import dagger_clients.gone\n")
+
+    assert _run(BROKEN_GLOBAL_CLIENT, tmp_path) == "dagger_clients.gone\n"
 
 
 CONNECTION_WITH_GLOBAL_CLIENT = """

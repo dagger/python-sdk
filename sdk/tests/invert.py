@@ -99,6 +99,12 @@ INVERSIONS = [
         "assert isinstance(dagger.dag, Session)\n"
         "    assert dagger.dag is not default_session()",
     ),
+    # A global client that cannot import is an error, not an absent one.
+    Inversion(
+        PACKAGE + "test_global_client_that_cannot_import_is_not_skipped",
+        'assert _run(BROKEN_GLOBAL_CLIENT, tmp_path) == "dagger_clients.gone\\n"',
+        'assert _run(BROKEN_GLOBAL_CLIENT, tmp_path) == "Session\\n"',
+    ),
     Inversion(
         PACKAGE + "test_connection_yields_the_global_client",
         "assert session is dagger.dag",
@@ -135,6 +141,17 @@ INVERSIONS = [
         CLIENTS + "test_engine_without_serve_module_gets_the_old_chain",
         'assert "serveModule" in attempt',
         'assert "serveModule" not in attempt',
+    ),
+    # The fallback pins no name either.
+    Inversion(
+        CLIENTS + "test_engine_without_serve_module_gets_the_old_chain",
+        '"    asModule {\\n"',
+        '"    withName(name: \\"glow\\") {\\n"',
+    ),
+    Inversion(
+        CLIENTS + "test_engine_without_serve_module_resolves_a_path_in_the_workspace",
+        '"      asModule {\\n"',
+        '"      withName(name: \\"linter\\") {\\n"',
     ),
     Inversion(
         CLIENTS + "test_other_load_errors_do_not_fall_back",
