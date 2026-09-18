@@ -18,6 +18,10 @@
 # without a merge in either branch.
 #
 # E2E_MODULE names the module whose checks run; it defaults to the e2e one.
+#
+# E2E_TIMEOUT stops a named check after that many seconds, 900 by default:
+# on a shared engine a stuck connection otherwise holds a check until the
+# engine drops it, some twenty minutes later.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 scratch=${E2E_SCRATCH:-$(mktemp -d)}
@@ -42,12 +46,17 @@ if [ $# -eq 0 ]; then
 fi
 status=0
 for check in "$@"; do
-  if dagger call -m "$module" "$check" >"$logs/$check.log" 2>&1; then
+  dagger call -m "$module" "$check" >"$logs/$check.log" 2>&1 &
+  call=$!
+  (sleep "${E2E_TIMEOUT:-900}" && kill "$call" 2>/dev/null && echo "TIMEOUT after ${E2E_TIMEOUT:-900}s" >>"$logs/$check.log") &
+  watchdog=$!
+  if wait "$call"; then
     echo "PASS $check" >&2
   else
     echo "FAIL $check ($logs/$check.log)" >&2
-    sed 's/\x1b\[[0-9;]*m//g' "$logs/$check.log" | grep -E '^ *! ' | awk '!seen[$0]++' | head -8 >&2
+    sed 's/\x1b\[[0-9;]*m//g' "$logs/$check.log" | grep -E '^ *! |^TIMEOUT' | awk '!seen[$0]++' | head -8 >&2
     status=1
   fi
+  kill "$watchdog" 2>/dev/null || true
 done
 exit $status
