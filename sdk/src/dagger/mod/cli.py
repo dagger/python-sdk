@@ -1,5 +1,6 @@
 """Command line interface for the dagger extension runtime."""
 
+import contextlib
 import importlib
 import importlib.metadata
 import importlib.util
@@ -12,6 +13,7 @@ import anyio
 from dagger import telemetry
 from dagger._exceptions import QueryError
 from dagger.client._connection import connect
+from dagger.client._descriptor import registering_types
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
 from dagger.mod._module import MAIN_OBJECT, Module
 
@@ -39,7 +41,10 @@ async def main(mod: Module | None = None, register: bool = False) -> int | None:
     async with await connect():
         try:
             if mod is None:
-                mod = load_module()
+                # Only an explicit registration is known before the user's
+                # code is imported; serve() decides after.
+                with registering_types() if register else contextlib.nullcontext():
+                    mod = load_module()
             if register:
                 return await mod.register()
             return await mod.serve()

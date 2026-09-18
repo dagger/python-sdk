@@ -59,11 +59,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _entrypoint(args: argparse.Namespace) -> None:
+    from dagger.client._descriptor import registering_types
     from dagger.mod._entrypoint import write_entrypoint
     from dagger.mod.cli import load_module
 
+    with registering_types():
+        mod = load_module()
     write_entrypoint(
-        load_module().describe(),
+        mod.describe(),
         name=args.name,
         path=args.path,
         root=pathlib.Path.cwd(),
@@ -72,11 +75,14 @@ def _entrypoint(args: argparse.Namespace) -> None:
 
 
 def _describe(args: argparse.Namespace) -> None:
+    from dagger.client._descriptor import registering_types
     from dagger.mod._describe import describe_json
     from dagger.mod.cli import load_module
 
+    with registering_types():
+        mod = load_module()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(describe_json(load_module().describe()))
+    args.output.write_text(describe_json(mod.describe()))
 
 
 def _call(args: argparse.Namespace) -> None:

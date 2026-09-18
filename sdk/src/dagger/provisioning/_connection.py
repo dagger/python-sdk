@@ -4,6 +4,7 @@ import typing
 
 from dagger import telemetry
 from dagger._managers import ResourceManager
+from dagger.client._session import as_session
 from dagger.client.base import root_type
 
 from ._config import Config
@@ -60,8 +61,9 @@ class Connection(ResourceManager):
         logger.debug("Establishing connection with isolated client")
         async with self.get_stack() as stack:
             engine = await Engine(self.cfg, stack).provision()
-            conn = await engine.setup_client(engine.get_client_connection())
-            return root_type().from_connection(conn)
+            session = as_session(engine.get_client_connection())
+            await engine.setup_client(session)
+            return root_type().from_connection(session)
 
     async def close(self):
         logger.debug("Closing connection with isolated client")
@@ -113,7 +115,7 @@ async def connection(config: Config | None = None):
     telemetry.initialize()
     logger.debug("Establishing connection with shared client")
     async with provision_engine(config or Config()) as engine:
-        conn = engine.get_shared_client_connection()
-        await engine.setup_client(conn)
-        yield conn
+        session = as_session(engine.get_shared_client_connection())
+        await engine.setup_client(session)
+        yield session
         logger.debug("Closing connection with shared client")

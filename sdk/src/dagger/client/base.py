@@ -95,8 +95,9 @@ class Root(Type):
     def from_connection(cls, conn: BaseConnection):
         """Create a new instance of the root type, using the given connection."""
         from ._core import Context
+        from ._session import as_session
 
-        return cls(Context(conn))
+        return cls(Context(as_session(conn)))
 
     @classmethod
     def _graphql_name(cls) -> str:
