@@ -55,14 +55,14 @@ import sys
 
 import anyio
 import dagger
-from dagger import dag
+from dagger_clients.core import core
 
 
 async def main(args: list[str]):
     async with dagger.connection():
         # build container with cowsay entrypoint
         ctr = (
-            dag.container()
+            core().container()
             .from_("python:alpine")
             .with_exec(["pip", "install", "cowsay"])
         )

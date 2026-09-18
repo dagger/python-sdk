@@ -16,7 +16,7 @@ GENERATE_HINT = "Run `dagger generate`."
 # What the engine's validator answers when the schema lacks a field the
 # bindings have. Anchored, because a resolver may quote the same words.
 MISSING_FIELD = re.compile(
-    r'^Cannot query field "[^"]*" on type "[^"]*"', re.IGNORECASE
+    r'^Cannot query field "([^"]*)" on type "([^"]*)"', re.IGNORECASE
 )
 
 
@@ -68,18 +68,41 @@ def check_core(client: str, expected: str, installed: str) -> None:
     raise StaleClientError(msg)
 
 
+def missing_field(error: QueryError) -> "re.Match[str] | None":
+    """The validation error for a field the schema lacks, with its two names."""
+    # Validation fails before anything runs, so it carries no path, and says
+    # it is validation in its code; any other error comes from something
+    # that ran, whatever its message says.
+    for e in error.errors:
+        if (
+            e.path is None
+            and e.extensions.get("code") == "GRAPHQL_VALIDATION_FAILED"
+            and (match := MISSING_FIELD.match(e.message))
+        ):
+            return match
+    return None
+
+
 def stale_client_error(
     error: QueryError, targets: Iterable[Target]
 ) -> StaleClientError | None:
     """The error a missing field means once the module was loaded."""
-    # Validation fails before anything runs, so it carries no path; an error
-    # with one comes from a resolver, whatever its message says.
-    missing = next(
-        (e for e in error.errors if not e.path and MISSING_FIELD.match(e.message)),
-        None,
-    )
+    missing = missing_field(error)
     if missing is None:
         return None
-    names = ", ".join(sorted(t.name for t in targets))
-    msg = f"{missing} The client for {names} is out of date. {GENERATE_HINT}"
+    # The name and the address both: a module served under another name
+    # than the one generated against lands here too, and the address is
+    # what the user has to look at.
+    clients = [_describe(t) for t in sorted(targets, key=lambda t: t.name)]
+    which = (
+        f"The client {clients[0]} is"
+        if len(clients) == 1
+        else f"The clients {', '.join(clients)} are"
+    )
+    msg = f"{missing.string} {which} out of date. {GENERATE_HINT}"
     return StaleClientError(msg)
+
+
+def _describe(target: Target) -> str:
+    where = f"{target.ref} at {target.pin}" if target.pin else target.ref
+    return f"{target.name!r} from {where}"

@@ -68,6 +68,32 @@ def main(argv: list[str] | None = None):
     )
     client_parser.set_defaults(run=client)
 
+    global_parser = subparsers.add_parser(
+        "generate-global",
+        help=f"generate the temporary {packages.GLOBAL} package",
+    )
+    global_parser.add_argument(
+        "-i",
+        "--introspection",
+        type=pathlib.Path,
+        required=True,
+        action="append",
+        help=(
+            "path to a .json file holding an introspection result; "
+            "repeat it for the schema of each client"
+        ),
+    )
+    global_parser.add_argument(
+        "-o",
+        "--output",
+        type=pathlib.Path,
+        required=True,
+        help=f"directory to write the {packages.GLOBAL} package into",
+    )
+    global_parser.set_defaults(
+        run=lambda args: global_client(args.introspection, args.output)
+    )
+
     args = parser.parse_args(argv)
 
     # TODO: Add argument for module init.
@@ -141,3 +167,15 @@ def client(args: argparse.Namespace):
     )
     root = packages.write_package(args.output, package, files)
     sys.stdout.write(f"Client generated successfully to {root}\n")
+
+
+def global_client(introspections: list[pathlib.Path], output: pathlib.Path):
+    schemas, versions = zip(
+        *(read_schema(path) for path in introspections), strict=True
+    )
+    if len(set(versions)) > 1:
+        msg = f"the schemas have different versions: {', '.join(sorted(set(versions)))}"
+        raise partition.ClientError(msg)
+    files = packages.global_package(schemas, versions[0])
+    root = packages.write_global(output, files)
+    sys.stdout.write(f"Global client generated successfully to {root}\n")

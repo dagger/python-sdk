@@ -7,7 +7,9 @@ import pytest
 import typing_extensions
 
 import dagger
-from dagger import Doc, Name, dag
+from dagger import Doc, Name
+from dagger.client import gen
+from dagger.client.gen import dag
 from dagger.mod import Module
 from dagger.mod._exceptions import RegistrationError
 
@@ -23,7 +25,7 @@ async def test_unstructure_structure():
     @mod.object_type
     class Bar:
         msg: Annotated[str, Doc("Echo message")] = mod.field(default="foobar")
-        ctr: Annotated[dagger.Container, Doc("A container")] = mod.field()
+        ctr: Annotated[gen.Container, Doc("A container")] = mod.field()
 
         @mod.function
         async def bar(self) -> str:

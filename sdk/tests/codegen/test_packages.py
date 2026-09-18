@@ -9,10 +9,19 @@ import pytest
 from graphql import build_schema
 
 import dagger.client
-from codegen import cli
-from codegen.packages import client_package, core_package, write_package
+from codegen import cli, partition
+from codegen.packages import (
+    SESSION_NAMES,
+    client_package,
+    core_package,
+    global_package,
+    write_global,
+    write_package,
+)
 from codegen.partition import ClientError, ClientNameError, core_digest
+from dagger.client import Session, Target
 from dagger.client._core import Context
+from dagger.client._session import SharedConnection
 
 _CORE = """
     directive @sourceMap(module: String, filename: String)
@@ -826,3 +835,288 @@ def test_cli_still_generates_one_file(tmp_path, introspection):
     assert "class Linter(Type):" in code
     assert "class Client(Query):" in code
     assert "dag = Client()" in code
+
+
+# The temporary global client, generated only with the flag.
+
+
+def _global(*clients: str, **members: str) -> str:
+    return global_package([_schema(*clients, **members)])["__init__.py"]
+
+
+def _exported(code: str) -> set[str]:
+    node = next(
+        n
+        for n in ast.parse(code).body
+        if isinstance(n, ast.Assign) and ast.unparse(n.targets[0]) == "__all__"
+    )
+    return set(ast.literal_eval(node.value))
+
+
+def test_global_client_is_temporary_and_says_so():
+    code = _global(_LINTER)
+
+    assert "Temporary" in code
+    assert "global-client = true" in code
+    assert "dagger generate" in code
+
+
+def test_global_client_delegates_root_fields_to_core():
+    code = _global(_LINTER)
+
+    assert "from dagger.client import Session as _Session" in code
+    assert "class Client(_Session):" in code
+    assert (
+        "    def directory(self) -> Directory:\n"
+        "        return _core.core(session=self).directory()\n"
+    ) in code
+    assert "\ndag = Client()\n" in code
+    assert "from dagger_clients.core import *" in code
+
+
+def test_global_client_has_one_method_per_client():
+    code = _global(_LINTER, _GLOW)
+
+    assert (
+        "    def linter(self, source: Directory, *, config: str | None = None,) "
+        "-> Linter:\n"
+        "        return _linter.linter(source, config=config, session=self)\n"
+    ) in code
+    assert (
+        "    def glow(self) -> Glow:\n        return _glow.glow(session=self)\n" in code
+    )
+    assert "import dagger_clients.linter as _linter" in code
+    assert "import dagger_clients.glow as _glow" in code
+
+
+def test_global_client_keeps_the_legacy_name_of_a_session_argument():
+    query = 'linter(session: String): Linter! @sourceMap(module: "linter")'
+    code = _global(_LINTER, Query=query)
+
+    assert "def linter(self, *, session: str | None = None) -> Linter:" in code
+    assert "return _linter.linter(session_=session, session=self)" in code
+
+
+def test_global_client_has_a_method_for_a_contributed_root_field():
+    query = 'lintAll(strict: Boolean!): String! @sourceMap(module: "linter")'
+    code = _global(_LINTER, Query=query)
+
+    # No entry: the schema has no constructor, but the global client still
+    # carries the field the way the legacy dag did.
+    assert (
+        "    async def lint_all(self, strict: bool) -> str:\n"
+        "        return await _linter.lint_all(_core.core(session=self), strict)\n"
+    ) in code
+
+
+def test_global_client_puts_contributed_fields_on_the_core_classes():
+    env = 'asLinter(strict: Boolean): Linter! @sourceMap(module: "linter")'
+    schema = build_schema(_sdl(_LINTER, _GLOW, Env=env) + _ANIMALS)
+    code = global_package([schema])["__init__.py"]
+
+    assert "Binding.as_linter = _linter.as_linter  # type: ignore[attr-defined]" in code
+    assert "Env.as_linter = _linter.as_linter  # type: ignore[attr-defined]" in code
+    assert "Binding.as_glow = _glow.as_glow  # type: ignore[attr-defined]" in code
+    assert "Zebra.as_linter = _linter.as_linter" in code
+    assert "_AnimalClient.as_linter = _linter.as_linter" in code
+    assert code.count("_AnimalClient.as_linter =") == 1
+    assert "_AnimalClient,\n" in code
+
+
+def test_global_client_exports_the_types_and_itself_only():
+    exported = _exported(_global(_LINTER, _GLOW))
+
+    assert {"Directory", "Binding", "Query", "Severity", "File"} <= exported
+    assert {"Linter", "LinterReport", "Glow"} <= exported
+    assert {"Client", "dag"} <= exported
+    assert not exported & {"core", "CORE_DIGEST", "linter", "glow", "as_linter"}
+    assert not {n for n in exported if n.startswith("_")}
+
+
+def test_global_client_takes_one_schema_per_client():
+    together = global_package([_schema(_LINTER, _GLOW)])
+
+    assert global_package([_schema(_LINTER), _schema(_GLOW)]) == together
+    assert global_package([_schema(_GLOW), _schema(_LINTER)]) == together
+
+
+def test_global_client_refuses_schemas_of_two_cores():
+    other = build_schema(_sdl(_GLOW) + "type Extra { n: Int! }")
+
+    with pytest.raises(ClientError, match="two cores"):
+        global_package([_schema(_LINTER), other])
+
+
+def test_global_client_refuses_two_clients_that_become_one_package():
+    schemas = [
+        build_schema(_sdl() + _named("my-linter", "MyLinter", "myLinter")),
+        build_schema(_sdl() + _named("my.linter", "MyLinter2", "myLinter2")),
+    ]
+
+    with pytest.raises(ClientNameError, match='both become the package "my_linter"'):
+        global_package(schemas)
+
+
+@pytest.mark.parametrize("field", ["close", "load", "execute"])
+def test_global_client_refuses_a_core_field_that_hides_the_session(field: str):
+    schema = _schema(Query=f"{field}: String!")
+
+    with pytest.raises(ClientError) as info:
+        global_package([schema])
+
+    assert str(info.value) == (
+        f'the global client cannot have a method for "Query.{field}" of core: '
+        f"it would hide Session.{field}"
+    )
+
+
+def test_global_client_refuses_a_client_that_hides_the_session():
+    schema = build_schema(_sdl() + _named("connect", "Connect", "connect"))
+
+    with pytest.raises(ClientError) as info:
+        global_package([schema])
+
+    assert str(info.value) == (
+        'the global client cannot have a method for "Query.connect" of the '
+        'client "connect": it would hide Session.connect'
+    )
+
+
+def test_global_client_knows_every_name_of_a_session():
+    # The generator cannot import the SDK, so it keeps its own list.
+    instance = Session(SharedConnection())
+
+    assert {n for n in dir(instance) if not n.startswith("__")} == SESSION_NAMES
+
+
+def test_global_client_with_no_client():
+    code = _global()
+
+    assert "def directory(self) -> Directory:" in code
+    assert "import dagger_clients.core as _core" in code
+    assert code.count("dagger_clients.") == 2
+    compile(code, "dagger_global", "exec")
+
+
+@pytest.mark.parametrize("schema_version", ["v0.20.0", "v0.21.0"])
+def test_global_package_compiles(schema_version: str):
+    env = 'asLinter(strict: Boolean): Linter! @sourceMap(module: "linter")'
+    schema = build_schema(_sdl(_LINTER, _GLOW, Env=env) + _ANIMALS)
+
+    files = global_package([schema], schema_version)
+
+    assert files["py.typed"] == ""
+    compile(files["__init__.py"], "dagger_global", "exec")
+
+
+@pytest.fixture
+def installed(monkeypatch):
+    """Load core, every client and the global client on the real runtime."""
+    namespace = types.ModuleType("dagger_clients")
+    monkeypatch.setitem(sys.modules, "dagger_clients", namespace)
+
+    def _module(name: str, code: str) -> types.ModuleType:
+        module = types.ModuleType(name)
+        module.__package__ = name.rpartition(".")[0] or name
+        monkeypatch.setitem(sys.modules, name, module)
+        exec(compile(code, name, "exec"), module.__dict__)
+        return module
+
+    def load(schema: graphql.GraphQLSchema) -> types.ModuleType:
+        _module("dagger_clients.core", core_package(schema)["__init__.py"])
+        for name in partition.modules(schema):
+            package, files = client_package(schema, name, ".")
+            client = f"dagger_clients.{package}"
+            module = types.ModuleType(client)
+            module.__package__ = client
+            monkeypatch.setitem(sys.modules, client, module)
+            _module(f"{client}._target", files["_target.py"])
+            exec(compile(files["__init__.py"], client, "exec"), module.__dict__)
+        return _module("dagger_global", global_package([schema])["__init__.py"])
+
+    return load
+
+
+def test_global_dag_is_a_session_over_the_shared_connection(installed):
+    global_ = installed(_schema(_LINTER))
+
+    assert isinstance(global_.dag, Session)
+    assert type(global_.dag) is global_.Client
+    assert global_.dag.connection is SharedConnection()
+
+
+def test_global_dag_returns_the_core_classes(installed):
+    global_ = installed(_schema(_LINTER))
+    core = sys.modules["dagger_clients.core"]
+
+    directory = global_.dag.directory()
+
+    assert type(directory) is core.Directory
+    assert directory._ctx.conn is global_.dag
+    assert global_.Directory is core.Directory
+
+
+def test_old_and_new_calls_mix(installed):
+    global_ = installed(_schema(_LINTER))
+    core = sys.modules["dagger_clients.core"]
+    linter = sys.modules["dagger_clients.linter"]
+    target = Target(name="linter", ref=".")
+
+    new_with_old = linter.linter(global_.dag.directory())
+    old_with_new = global_.dag.linter(core.core().directory(), config="x")
+
+    assert type(new_with_old) is type(old_with_new) is linter.Linter
+    assert new_with_old._ctx.targets == old_with_new._ctx.targets == {target}
+    assert old_with_new._ctx.conn is global_.dag
+    assert [f.name for f in old_with_new._ctx.selections] == ["linter"]
+    assert old_with_new._ctx.selections[0].args["config"] == "x"
+
+
+def test_contributed_field_is_a_method_at_run_time(installed):
+    global_ = installed(_schema(_LINTER))
+    core = sys.modules["dagger_clients.core"]
+    linter = sys.modules["dagger_clients.linter"]
+    binding = core.Binding(Context(global_.dag))
+
+    result = binding.as_linter()
+
+    assert type(result) is linter.Linter
+    assert result._ctx.targets == {Target(name="linter", ref=".")}
+    assert result._ctx.conn is global_.dag
+
+
+def test_cli_generates_the_global_client_from_one_schema_per_client(tmp_path):
+    linter = tmp_path / "linter.json"
+    glow = tmp_path / "glow.json"
+    linter.write_text(json.dumps(_introspection(_sdl(_LINTER))))
+    glow.write_text(json.dumps(_introspection(_sdl(_GLOW))))
+    out = tmp_path / "src"
+
+    cli.main(["generate-global", "-i", str(linter), "-i", str(glow), "-o", str(out)])
+
+    code = (out / "dagger_global/__init__.py").read_text()
+    assert (out / "dagger_global/py.typed").read_text() == ""
+    assert "def linter(self, source: Directory" in code
+    assert "def glow(self) -> Glow:" in code
+    assert not (out / "dagger_clients").exists()
+
+
+def test_cli_refuses_global_schemas_of_two_cores(tmp_path, introspection, capsys):
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps(_introspection(_sdl() + "type Extra { n: Int! }")))
+
+    with pytest.raises(SystemExit):
+        cli.main(
+            ["generate-global", "-i", str(introspection), "-i", str(other), "-o", "x"]
+        )
+
+    assert "two cores" in capsys.readouterr().err
+
+
+def test_write_global_writes_next_to_the_namespace(tmp_path):
+    files = global_package([_schema(_LINTER)])
+
+    root = write_global(tmp_path, files)
+
+    assert root == tmp_path / "dagger_global"
+    assert {p.name: p.read_text() for p in root.iterdir()} == files
