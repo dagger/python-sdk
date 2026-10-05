@@ -134,10 +134,11 @@ the shared one, and writes `sdk/entrypoint/` next to the vendored library:
 
 The types come from importing the module in its own container and reading
 what its decorators registered, so they are the ones the runtime would
-register. `main.dang` bakes a content digest of every source file that can
-change them; a call after an edit is refused with a message to run
-`dagger generate`. A lock file added afterwards is refused the same way, and
-only file contents count, not permissions.
+register. They are baked, so a change that alters them — a new function, a
+changed argument or return type — is served only after `dagger generate`;
+`dagger generate` in CI, which must leave no diff, is what catches a module
+that forgot it. A change the types do not describe, such as a function body,
+runs as edited.
 
 What the static path cannot do yet, and refuses at `dagger generate`:
 any `cache=` value

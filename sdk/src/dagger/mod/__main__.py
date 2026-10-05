@@ -64,12 +64,7 @@ def _entrypoint(args: argparse.Namespace) -> None:
 
     with registering_types():
         mod = load_module()
-    write_entrypoint(
-        mod.describe(),
-        name=args.name,
-        root=pathlib.Path.cwd(),
-        output=args.output,
-    )
+    write_entrypoint(mod.describe(), name=args.name, output=args.output)
 
 
 def _describe(args: argparse.Namespace) -> None:

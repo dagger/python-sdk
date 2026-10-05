@@ -2,15 +2,6 @@
 
 type Entrypoint implements ModuleEntrypoint {
   let moduleName: String! = "main"
-  let skippedDirs: [String!]! = [".venv", "__pycache__", "sdk"]
-  let sourceFiles: [SourceFile!]! = [
-    SourceFile(path: ".python-version", digest: ""),
-    SourceFile(path: "pyproject.toml", digest: "sha256:aefe03a941c71de872fd1c1f4b9eda3c91e1c32b4a80d1e50c91cd9405950ef5"),
-    SourceFile(path: "requirements.lock", digest: ""),
-    SourceFile(path: "uv.lock", digest: ""),
-    SourceFile(path: "src/main/__init__.py", digest: "sha256:7a18d55cea9842deb80ff288c43596d282d4121879ebe6ec06055ea057b1af52"),
-    SourceFile(path: "src/main/extra.py", digest: "sha256:29a8358f62c5e515e9e5e903df20673f5db196b8ae119d521b0ffc1f88267f00"),
-  ]
 
   pub types(workspace: Workspace!): [TypeDef!]! {
     ModuleTypes().all
@@ -39,42 +30,10 @@ type Entrypoint implements ModuleEntrypoint {
   # The module's own source, not the workspace the engine hands over: that is
   # the caller's, which holds the module only when the module sits in it.
   let runtime: Container! {
-    let module = currentModule.source
-    let changed = sourceFiles.filter { f =>
-      if (f.digest == "") {
-        module.exists(f.path)
-      } else {
-        module.exists(f.path) == false or module.file(f.path).digest(excludeMetadata: true) != f.digest
-      }
-    }.map { f => f.path }
-    let added = module.glob("**/*.py").filter { p =>
-      isSource(p) and sourceFiles.filter { f => f.path == p }.length == 0
-    }
-    if ((changed + added).length > 0) {
-      raise "module \"" + moduleName + "\" changed since its entrypoint was generated (" + (changed + added).join(", ") + "); run `dagger generate`"
-    } else {
-      PythonModuleBuild(
-        contextDir: directory.withDirectory(".", module, exclude: ["**/.venv", "**/__pycache__"]),
-        subPath: ".",
-        moduleName: moduleName,
-      ).installed
-    }
-  }
-
-  let isSource(path: String!): Boolean! {
-    path.split("/").dropLast(1).filter { segment =>
-      segment.hasPrefix(".") or skippedDirs.contains(segment)
-    }.length == 0
-  }
-}
-
-type SourceFile {
-  pub path: String!
-  pub digest: String!
-
-  new(path: String!, digest: String!) {
-    self.path = path
-    self.digest = digest
-    self
+    PythonModuleBuild(
+      contextDir: directory.withDirectory(".", currentModule.source, exclude: ["**/.venv", "**/__pycache__"]),
+      subPath: ".",
+      moduleName: moduleName,
+    ).installed
   }
 }

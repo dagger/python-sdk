@@ -1135,6 +1135,24 @@ type E2e {
     let ran = cli(runnable, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
     assert(ran.stdout.trimSpace != "", "the " + form + " module " + name + " did not run")
     ran.withExec(["test", "-f", path + "/src/" + pkg + "/__init__.py"]).sync
+    if (static) { editedBodyRuns(ran, path, pkg) } else { null }
+    null
+  }
+
+  """
+  A function body the module changed after generation runs as edited, with no
+  second `dagger generate`: the body changes nothing types.dang describes.
+  """
+  let editedBodyRuns(ctr: Container!, path: String!, pkg: String!): Void {
+    let sourcePath = path + "/src/" + pkg + "/__init__.py"
+    let before = ctr.file(sourcePath).contents
+    let edited = before.replace(
+      ".with_workdir(\"/src\")",
+      ".with_workdir(\"/src\")\n            .with_new_file(\"/edited\", \"body edited\")",
+    )
+    assert(edited != before, "the template body held nothing to edit")
+    let ran = cli(ctr.withNewFile(sourcePath, edited), ["-m", path, "call", "container", "file", "--path", "/edited", "contents"])
+    assert(ran.stdout.trimSpace == "body edited", "the edited body did not run: " + ran.stdout)
     null
   }
 
@@ -1195,7 +1213,8 @@ type E2e {
 
     let withTarget = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", target, "--path", targetPath] + static)
       .withNewFile(targetPath + "/src/ep_target_" + form + "/__init__.py", targetSource)
-    # A static entrypoint carries the digests of the source it was generated from.
+    # A static entrypoint bakes the module's types, so the source is in place
+    # before generation.
     let targetReady = if (form == "static") {
       cli(withTarget, ["-y", "call", "python-sdk", "mod", "--path", targetPath, "generate"])
     } else {
@@ -1474,8 +1493,8 @@ type E2e {
 
   """
   A static entrypoint scope: the entrypoint manifest, the template, bindings
-  from the current schema view, and the generated entrypoint whose digests
-  are the engine's.
+  from the current schema view, and the generated entrypoint, which builds the
+  module from its own source.
   """
   pub staticScopeInitCheck(ws: Workspace!): Void @check {
     let scope = outputRoot + "/static-init"
@@ -1497,17 +1516,15 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
-      "let module = currentModule.source",
+      "contextDir: directory.withDirectory(\".\", currentModule.source",
     ])
     assertNotContains(main, "workspace.id", "the static entrypoint hands the module the caller's workspace")
     assertNotContains(main, "clients:", "the static entrypoint still hands the module its clients")
     # Found through its own source, so a moved module needs no regeneration.
     assertNotContains(main, "modulePath", "the entrypoint still finds the module through the workspace")
-    ["pyproject.toml", "src/static_init/__init__.py"].each { path =>
-      let digest = changes.after.directory(scope).file(path).digest(excludeMetadata: true)
-      assertContains(main, "SourceFile(path: \"" + path + "\", digest: \"" + digest + "\")", "the baked digest of " + path + " is not the engine's")
-      null
-    }
+    # No staleness guard: an edit that leaves the described types alone runs
+    # without another `dagger generate`.
+    assertContainsNone(main, ["SourceFile", "sourceFiles", "skippedDirs", "changed since its entrypoint"])
     let types = changes.layer.file(scope + "/sdk/entrypoint/types.dang").contents
     assertContainsAll(types, ["typeDef.withObject(\"StaticInit\"", "function(\"container\"", "withConstructor("])
     assertContainsNone(types, ["withField(", "withCachePolicy("])
