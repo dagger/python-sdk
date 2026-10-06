@@ -478,7 +478,58 @@ type Scope {
   }
 
   let clientSchema(member: ClientMember!): File! {
-    member.source.withEngineVersion(view).clientSchemaIntrospectionJSON
+    let schema = member.source.withEngineVersion(view).clientSchemaIntrospectionJSON
+    checkClientLoads(member, schema)
+    schema
+  }
+
+  """
+  Read the schema here, where the client it belongs to is known, so that a
+  target this SDK cannot load is reported with its name and a way out instead
+  of the engine's message where the schema is mounted.
+  """
+  let checkClientLoads(member: ClientMember!, schema: File!): Void {
+    schema.size rescue {
+      err: Error => raise clientLoadMessage(member, err.message)
+    }
+    null
+  }
+
+  """
+  An entrypoint older than this layout asks for the bindings the layout
+  stopped writing, and tells the user to run `dagger generate`, which cannot
+  write them. Every other failure keeps its own message.
+  """
+  let clientLoadMessage(member: ClientMember!, message: String!): String! {
+    if (message.contains(staleEntrypointRefusal) == false) {
+      message
+    } else {
+      let named = if (targetEntrypoint(member) == "") {
+        ""
+      } else {
+        " \"" + targetEntrypoint(member) + "\""
+      }
+      "the client \"" + member.name + "\" cannot be loaded: its entrypoint" + named +
+        " is older than this SDK; point its [entrypoint] source at a newer ref"
+    }
+  }
+
+  let sdkGenPath: String! = "sdk/src/dagger/client/gen.py"
+
+  let staleEntrypointRefusal: String! = "generated file \"" + sdkGenPath + "\" is missing"
+
+  """
+  The entrypoint source of a client's target, or empty when its manifest
+  cannot be read.
+  """
+  let targetEntrypoint(member: ClientMember!): String! {
+    let manifest = member.source.contextDirectory
+      .directory(member.source.sourceRootSubpath)
+      .file("dagger-module.toml")
+      .contents rescue {
+        err: Error => ""
+      }
+    if (manifest == "") { "" } else { ManifestToml(manifest).entrypointSource }
   }
 
   let clientSource(member: ClientMember!): Directory! {

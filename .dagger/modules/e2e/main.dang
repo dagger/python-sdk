@@ -15,6 +15,8 @@ type E2e {
   let runtimeModulePath: String! = fixtureRoot + "/runtime/app"
   let tomlGenerateModulePath: String! = fixtureRoot + "/toml-generate/app"
   let clientDepPath: String! = fixtureRoot + "/clients/dep"
+  let staleEntrypointPath: String! = fixtureRoot + "/stale-entrypoint"
+  let otherRefusalPath: String! = fixtureRoot + "/other-refusal"
   let plainScopePath: String! = fixtureRoot + "/plain"
   let markerTextPath: String! = fixtureRoot + "/lookup/marker-text"
   let staticTypesModulePath: String! = fixtureRoot + "/static-types"
@@ -359,6 +361,38 @@ type E2e {
       .generateScope(with.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
       .withWorkdir(".")
     assert(removed.changes(without).isEmpty, "removing the client did not undo adding it")
+
+    null
+  }
+
+  """
+  A client whose target refuses to load with the advice of an SDK older than
+  this layout: generation says which client cannot load, that `dagger
+  generate` cannot help, and the two ways out. Another refusal from the same
+  place keeps its own words.
+  """
+  pub generateScopeStaleTargetCheck(ws: Workspace!): Void @check {
+    let scoped = ws.withWorkdir(tomlGenerateModulePath)
+    let stale = pythonSdk
+      .generateScope(scoped, isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + staleEntrypointPath)])
+      .file("/" + tomlGenerateModulePath + "/clients/stale-entrypoint-target/pyproject.toml")
+      .contents rescue {
+        err: Error => err.message
+      }
+    assertContainsAll(stale, [
+      "the client \"stale-entrypoint-target\" cannot be loaded",
+      "its entrypoint \"./entrypoint\" is older than this SDK",
+      "[entrypoint] source",
+    ])
+
+    let other = pythonSdk
+      .generateScope(scoped, isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + otherRefusalPath)])
+      .file("/" + tomlGenerateModulePath + "/clients/other-refusal-target/pyproject.toml")
+      .contents rescue {
+        err: Error => err.message
+      }
+    assertContains(other, "generated file \"src/dagger_gen.py\" is missing; run `dagger generate` and commit the generated files", "another refusal did not pass through: " + other)
+    assertNotContains(other, "cannot be loaded", "another refusal was rewritten: " + other)
 
     null
   }

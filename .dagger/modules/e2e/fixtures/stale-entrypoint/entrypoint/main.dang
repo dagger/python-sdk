@@ -1,0 +1,19 @@
+"""
+An entrypoint that refuses the module the way an SDK older than this
+layout does, so a check can read what generation says about it.
+"""
+type Entrypoint implements ModuleEntrypoint {
+  pub types(workspace: Workspace!): [TypeDef!]! {
+    raise "module \"stale-entrypoint-target\": generated file \"sdk/src/dagger/client/gen.py\" is missing; run `dagger generate` and commit the generated files"
+  }
+
+  pub call(
+    workspace: Workspace!,
+    receiverType: String!,
+    receiverValue: JSON,
+    fnName: String!,
+    fnArgs: JSON!,
+  ): JSON! {
+    raise "module \"stale-entrypoint-target\": generated file \"sdk/src/dagger/client/gen.py\" is missing; run `dagger generate` and commit the generated files"
+  }
+}

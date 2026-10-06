@@ -1,0 +1,5 @@
+name = "stale-entrypoint-target"
+
+[entrypoint]
+  kind = "dang"
+  source = "./entrypoint"
