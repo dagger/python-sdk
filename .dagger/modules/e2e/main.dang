@@ -323,7 +323,9 @@ type E2e {
     let scopeFilePath = "/" + tomlGenerateModulePath + "/pyproject.toml"
     let member = "/" + tomlGenerateModulePath + "/" + clientDepMember
     let client = ws.moduleSource("/" + clientDepPath)
-    let seeded = ws.withNewFile(manifestPath, ws.file(manifestPath).contents +
+    # The manifest is written whole, naming no runtime: a module the builtin
+    # runtime ran gets the global client, which moves with every client added.
+    let seeded = ws.withNewFile(manifestPath, "name = \"toml-generate-app\"\n" +
       "\n[[dependencies]]\nname = \"client-dep\"\nsource = \"../../clients/dep\"\n")
     let without = pythonSdk
       .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
@@ -452,11 +454,12 @@ type E2e {
   }
 
   """
-  A module upgraded from the bindings of the layout before gets the temporary
-  global client once: the flag is written, dagger_global joins the SDK files,
-  which then depend on core and each client, and the old bindings go.
-  Turning the flag off with `mod config set` removes the global client at the
-  next generation.
+  A module whose code is the code of the layout before gets the temporary
+  global client once, told by its bindings or by the runtime its manifest
+  names: the flag is written, dagger_global joins the SDK files, which then
+  depend on core and each client, and the old bindings go. A scope file that
+  turns the flag off keeps it off. Turning the flag off with `mod config set`
+  removes the global client at the next generation.
   """
   pub generateScopeGlobalClientCheck(ws: Workspace!): Void @check {
     let root = "/" + runtimeModulePath
@@ -514,6 +517,36 @@ type E2e {
     assertNotContains(stays.file(published + "/pyproject.toml").contents, "global-client", "src/dagger_gen.py turned the global client on again")
     assert(stays.directory(published).exists("sdk/src/" + globalPackage) == false, "src/dagger_gen.py brought the global client back")
 
+    # A module the builtin runtime ran has no bindings of its own to go by:
+    # its manifest says so, whether it is still a pre-1.0 dagger.json or the
+    # manifest `dagger module migrate` wrote from one.
+    let fromRuntime = pythonSdk
+      .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    assertContains(fromRuntime.file(published + "/pyproject.toml").contents, "global-client = true", "a module converted from the builtin runtime did not get the flag")
+    assertContains(fromRuntime.file(published + "/sdk/src/" + globalPackage + "/__init__.py").contents, "class Client(", "a module converted from the builtin runtime got no global client")
+    let againFromRuntime = pythonSdk
+      .generateScope(fromRuntime.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    assert(againFromRuntime.changes(fromRuntime).isEmpty, "a second generation changed a module converted from the builtin runtime")
+
+    let fromJson = "/" + generateModulePath
+    let migrated = pythonSdk
+      .generateScope(ws.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])
+      .withWorkdir(".")
+    assertContains(migrated.file(fromJson + "/pyproject.toml").contents, "global-client = true", "a module converted from a pre-1.0 dagger.json did not get the flag")
+    assert(migrated.directory(fromJson).exists("sdk/src/" + globalPackage), "a module converted from a pre-1.0 dagger.json got no global client")
+
+    # A scope file that already turns the flag off keeps it off: the code of a
+    # module that says so is not the code the global client is for.
+    let scopeFilePath = published + "/pyproject.toml"
+    let saysNo = ws.withNewFile(scopeFilePath, ws.file(scopeFilePath).contents + "\n[tool.dagger]\nglobal-client = false\n")
+    let refused = pythonSdk
+      .generateScope(saysNo.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    assertContains(refused.file(scopeFilePath).contents, "global-client = false", "generation rewrote a scope file that turns the global client off")
+    assert(refused.directory(published).exists("sdk/src/" + globalPackage) == false, "a scope file that turns the global client off got one anyway")
+
     null
   }
 
@@ -525,8 +558,11 @@ type E2e {
   pub generateScopeGlobalClientFlagCheck(ws: Workspace!): Void @check {
     let root = "/" + tomlGenerateModulePath
     let client = ws.moduleSource("/" + clientDepPath)
+    # A manifest of this SDK's own, so that nothing but the flag asks for the
+    # global client: the fixture's names the builtin runtime, which does.
+    let plain = ws.withNewFile(root + "/dagger-module.toml", "name = \"toml-generate-app\"\n")
     let fresh = pythonSdk
-      .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [client])
+      .generateScope(plain.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [client])
       .withWorkdir(".")
     assert(fresh.directory(root).exists("sdk/src/" + globalPackage) == false, "a module without the flag got the global client")
 

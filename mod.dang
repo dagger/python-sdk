@@ -20,6 +20,12 @@ type Mod {
   pub entrypointMode: String!
 
   """
+  Whether this generation converts a module the builtin Python runtime ran,
+  whose code expects the global client.
+  """
+  let migrating: Boolean!
+
+  """
   The module scope's clients, as the engine hands them to generation. Null
   reads them from the workspace config, for a module generated directly.
   """
@@ -81,6 +87,7 @@ type Mod {
         clients: clients ?? declaredClients,
         isModule: true,
         engineVersion: engineVersion,
+        migrating: migrating,
       ).generated
       if (entrypointMode == "generated") {
         let entrypointPath = vendorDirName + "/" + entrypointDirName

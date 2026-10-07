@@ -146,7 +146,7 @@ type PythonSdk {
     # Resolve local client paths from the workspace root.
     let rooted = ws.withWorkdir(".")
     if (isModule == false) {
-      Scope(path: scope, ws: rooted, clients: clients, isModule: false, engineVersion: "").generated.withWorkdir(scope)
+      Scope(path: scope, ws: rooted, clients: clients, isModule: false, engineVersion: "", migrating: false).generated.withWorkdir(scope)
     } else {
       let hadConfig = hasModuleConfig(ws, scope)
       let initialized = if (hadConfig) {
@@ -160,11 +160,13 @@ type PythonSdk {
       if (mode == generatedMode) {
         checkStaticScope(initialized, scope, hadConfig)
       }
+      let migrating = migratingModule(initialized, scope)
       let configured = generateScopeManifest(initialized, scope, name)
       Mod(
         rootPath: scope,
         ws: configured,
         entrypointMode: mode,
+        migrating: migrating,
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -231,21 +233,53 @@ type PythonSdk {
   }
 
   """
-  Whether a manifest names a runtime of the user's own: anything but the
-  builtin `python` this SDK wrote. Read with a TOML or JSON parser, because
-  the manifest is the user's content; a dagger.json names it as `sdk`.
+  The runtime a manifest names, or empty for one that names none. Read with a
+  TOML or JSON parser, because the manifest is the user's content; a
+  dagger.json names it as `sdk`, as a string or as a table.
   """
-  let keepsItsRuntime(config: JSONValue!): Boolean! {
+  let runtimeSource(config: JSONValue!): String! {
     let fields = config.fields
     let key = if (fields.contains("runtime")) { "runtime" } else if (fields.contains("sdk")) { "sdk" } else { "" }
     if (key == "") {
-      false
+      ""
     } else {
       let value = config.field([key])
-      let source = value.asString rescue {
+      value.asString rescue {
         err: Error => value.field(["source"]).asString
       }
-      source != "" and source != "python"
+    }
+  }
+
+  """
+  Whether a manifest names a runtime of the user's own: anything but the
+  builtin `python` this SDK wrote.
+  """
+  let keepsItsRuntime(config: JSONValue!): Boolean! {
+    let source = runtimeSource(config)
+    source != "" and source != "python"
+  }
+
+  """
+  Whether a manifest names the Python runtime built into the engine, which
+  generated the module's bindings at load time and gave its code a global
+  `dag`. The code is the old code, so the scope gets the global client.
+  """
+  let namesBuiltinRuntime(config: JSONValue!): Boolean! {
+    runtimeSource(config) == "python"
+  }
+
+  """
+  Whether this generation converts a module the builtin Python runtime ran,
+  from a pre-1.0 dagger.json or from a manifest that still names that
+  runtime. Only the generation that rewrites the manifest can tell.
+  """
+  let migratingModule(ws: Workspace!, scope: String!): Boolean! {
+    if (scopeHasFile(ws, scope, "dagger-module.toml")) {
+      namesBuiltinRuntime(tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents))
+    } else if (scopeHasFile(ws, scope, "dagger.json")) {
+      namesBuiltinRuntime(json.withContents((ws.file("/" + scopePath(scope, "dagger.json")).contents :: Dagger.JSON!)))
+    } else {
+      false
     }
   }
 
@@ -265,13 +299,6 @@ type PythonSdk {
         "Remove [entrypoint] to run on your runtime, or [runtime] to run on the entrypoint"
     }
     null
-  }
-
-  let runtimeSource(config: JSONValue!): String! {
-    let value = config.field(["runtime"])
-    value.asString rescue {
-      err: Error => value.field(["source"]).asString
-    }
   }
 
   """
@@ -483,6 +510,7 @@ type PythonSdk {
       rootPath: modPath,
       ws: ws,
       entrypointMode: entrypointModeOf(ws, modPath),
+      migrating: migratingModule(ws, modPath),
       clients: null,
     )
   }
