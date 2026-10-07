@@ -34,27 +34,69 @@ using the Python SDK that is built into the engine.
 
 ## How a module runs
 
-A module this SDK generates runs on a Dang entrypoint and on nothing else:
-the one generated into it, which is what a new module gets, or the shared one
-below. Its manifest names no `[runtime]`. That needs an engine that runs Dang
-entrypoints and serves `serveModule`: `v1.0.0-beta.14` or later.
+A module's manifest names what runs it, and generation follows the manifest.
+There are three answers, and a new module gets the first:
 
-Generating a module that has a manifest already:
+| `dagger-module.toml` | What runs the module |
+| --- | --- |
+| `[entrypoint] source = "./sdk/entrypoint"` | the entrypoint generated into it, with its types baked |
+| `[entrypoint] source = <a ref>` | an entrypoint served from elsewhere, the shared one below among them |
+| `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-- `[runtime] source = "python"`, which this SDK wrote before, is replaced by
-  the entrypoint, and `engineVersion` and `[[dependencies]]` go with it. An
-  entrypoint runs a module on the engine's own version.
-- Any other `[runtime]` is the user's choice, and the manifest keeps it as
-  written, with no entrypoint added: the engine follows an entrypoint over a
-  runtime. `runtime/` is such a runtime, named by module ref or by a path
-  relative to the module.
-- `include`, `exclude`, or a `source` other than `.` next to the builtin
-  runtime are refused, because an entrypoint manifest cannot carry them and
-  dropping them would change which files the module is.
+An entrypoint needs an engine that runs Dang entrypoints and serves
+`serveModule`: `v1.0.0-beta.14` or later. It runs a module on the engine's own
+version, so an entrypoint manifest keeps no `engineVersion`.
+
+Generating a module that has a manifest already keeps the kind it names:
+
+- `[runtime] source = "python"`, the runtime built into the engine, which this
+  SDK wrote before, is replaced by a generated entrypoint, and `engineVersion`
+  and `[[dependencies]]` go with it.
+- A `[runtime]` of the user's own is kept as written, with no entrypoint added:
+  the engine follows an entrypoint over a runtime, so adding one would take the
+  runtime out of the picture. `runtime/` is such a runtime, named by module ref
+  or by a path relative to the module.
+- A manifest that says which files the module is (`include`, `exclude`) or
+  roots it elsewhere (`source` other than `.`) keeps its runtime too, whichever
+  runtime that is: an entrypoint takes the module's whole directory, and
+  dropping the setting would change which files the module is.
+- An entrypoint of another kind, a pin of the shared one or a fork, is kept as
+  written. `--remote-entrypoint` asks for the shared one instead.
+- `[entrypoint]` and `[runtime]` together are refused, naming both: only one
+  thing can run the module.
+- `disableDefaultFunctionCaching` and `[codegen]` are refused one at a time:
+  the first is a function's own `cache=` on an entrypoint, and the second is
+  read by no entrypoint. A `[clients]` table is refused as well: a module's
+  clients are its scope's, in `dagger.toml`.
 
 An unmanaged legacy `dagger.json` with `"sdk": {"source": "python"}` still
 resolves to the runtime built into the engine (`dagger/dagger`'s
 `sdk/python`), which generates bindings at module load.
+
+## Migrate a module
+
+`dagger module migrate <path>` (the engine's command) converts a pre-1.0
+`dagger.json` into `dagger-module.toml`, keeping the legacy shape
+(`engineVersion`, `[runtime] source = "python"`, `[[dependencies]]`), and
+records the scope in `dagger.toml` with its dependencies as clients. Running
+`dagger generate` afterwards is what moves the module to this layout: the
+manifest keeps only `name` and `[entrypoint]`, the dependencies become
+generated clients, and the SDK files are written into the module.
+
+Migrate dependencies before the module that calls them. A client loads its
+target with `serveModule`, which asks the engine for a module by its manifest,
+so a target that still has only a `dagger.json` cannot be served; generation
+names the target and the command to convert it.
+
+Code written against the layout before calls `dag` and `dagger.Container`.
+Generation keeps that code working by writing the temporary global client,
+`sdk/src/dagger_global/`, and `global-client = true` under `[tool.dagger]`,
+when the module is one the builtin runtime ran: its vendored bindings say so
+(`sdk/src/dagger/client/gen.py` or `src/dagger_gen.py` with the generator's
+header), or its manifest does (a pre-1.0 `dagger.json`, or `[runtime] source =
+"python"`). A scope file that already sets `global-client = false` keeps it
+off. The global client is temporary: move the code to
+`from dagger_clients.core import ...` and turn the flag off.
 
 ## Shared entrypoint
 
@@ -139,13 +181,10 @@ changed argument or return type — is served only after `dagger generate`;
 that forgot it. A change the types do not describe, such as a function body,
 runs as edited.
 
-What the static path cannot do yet, and refuses at `dagger generate`:
-the `legacy` template, and a manifest with `include`,
-`disableDefaultFunctionCaching`, a runtime other than `python`, a `source`
-other than `.`, or `codegen`, `clients` or `dependencies` tables. Such
-modules keep the default path. There is no `debug` terminal on the static
-path, and a function error reaches the caller as the exec failure with the
-process's stderr.
+What a generated entrypoint cannot carry is in the list above: a module whose
+manifest says which files it is, or names a runtime, keeps that runtime
+instead. There is no `debug` terminal on this path, and a function error
+reaches the caller as the exec failure with the process's stderr.
 
 A module keeps the kind of entrypoint its manifest names: generation writes
 one into a module that has none, and leaves a Dang entrypoint of another kind
@@ -154,7 +193,7 @@ alone, so a module on the shared entrypoint or on a fork stays there.
 one that has an entrypoint of its own, and then `sdk/entrypoint/` goes. A
 module that names a runtime of its own keeps it, with or without the flag. See
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
-for the design and the plan to make it the default.
+for the design.
 
 ## Install
 
