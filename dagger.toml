@@ -7,6 +7,10 @@ source = ".dagger/modules/e2e"
 [modules.python-sdk]
 source = "."
 check.skip = ["*"]
+# Every Python scope here is an e2e fixture, and the checks generate them
+# themselves, from a workspace of their own. Generating them in place would
+# write the whole SDK into each of them.
+generate.skip = ["*"]
 
 [sdks.python]
 module = "python-sdk"
