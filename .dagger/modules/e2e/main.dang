@@ -1796,12 +1796,6 @@ type E2e {
     assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"/" + clientDepPath + "\"", "a static entrypoint refused a client")
     assertContains(withClient.file("dagger-module.toml").contents, "./sdk/entrypoint", "a client took the module off the static path")
 
-    let legacyScope = outputRoot + "/static-legacy"
-    let legacy = pythonSdk(template: "legacy")
-      .generateScope(ws.withNewDirectory("/" + legacyScope, directory).withWorkdir(legacyScope), isModule: true, name: "static-legacy", clients: [])
-      .cwd rescue "raised"
-    assert(legacy == "raised", "the legacy template was generated with a static entrypoint")
-
     let cached = static.generateScope(ws.withNewFile(manifestPath, "disableDefaultFunctionCaching = true\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
     assert(cached == "raised", "disableDefaultFunctionCaching was dropped silently")
 

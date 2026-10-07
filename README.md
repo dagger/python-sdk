@@ -185,7 +185,7 @@ The SDK settings below become typed flags on `dagger module init python` and
 are persisted on the scope:
 
 ```sh
-dagger module init python --name my-module --template legacy
+dagger module init python --name my-module --template empty
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
@@ -193,10 +193,9 @@ dagger module init python --name my-module \
 ```
 
 `--template` picks a starter template: `default` (a small working module) when
-you pass nothing, `empty` for a bare object class, or `legacy` for a
-container-echo example. The three `pyproject.toml` flags are optional; by
-default the template's Python version is used, uv is enabled, and no base image
-override is written.
+you pass nothing, or `empty` for a bare object class. The three
+`pyproject.toml` flags are optional; by default the template's Python version
+is used, uv is enabled, and no base image override is written.
 
 ## Configure an existing module
 

@@ -158,7 +158,7 @@ type PythonSdk {
       # table, and a module keeps the kind it came with.
       let mode = entrypointModeOf(initialized, scope)
       if (mode == generatedMode) {
-        checkStaticScope(initialized, scope, hadConfig)
+        checkStaticScope(initialized, scope)
       }
       let migrating = migratingModule(initialized, scope)
       let configured = generateScopeManifest(initialized, scope, name)
@@ -371,10 +371,7 @@ type PythonSdk {
   written. A manifest that names a runtime, or says what only a runtime can
   honour, never reaches here: it keeps its runtime instead.
   """
-  let checkStaticScope(ws: Workspace!, scope: String!, hadConfig: Boolean!): Void {
-    if (hadConfig == false and template == "legacy") {
-      raise "the legacy template is not available with a static entrypoint"
-    }
+  let checkStaticScope(ws: Workspace!, scope: String!): Void {
     if (scopeHasFile(ws, scope, "dagger-module.toml") and
         tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents).fields.contains("clients")) {
       raise "dagger-module.toml has a [clients] table, which this SDK does not generate: a module's clients are its scope's, in dagger.toml; remove the table"
