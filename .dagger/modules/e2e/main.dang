@@ -1454,6 +1454,18 @@ type E2e {
   let floorVersion: String! = "1.0.0-beta.14"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
+  """
+  The image the playground takes its CLI from: the release of the engine
+  running the check, so that the CLI it drives and the engine it reaches
+  through nesting are one version. A CLI older than that engine waits for an
+  answer it never gets, and the floor is proven by running these checks on the
+  floor engine (hack/e2e-floor.sh), not by pinning an older CLI in here. An
+  engine built from source names the release it came from before the `+`.
+  """
+  let playgroundImage: String! {
+    "registry.dagger.io/engine:" + (version.split("+")[0] ?? version)
+  }
+
   let playgroundRoot: String! = "/work/python-sdk"
 
   """
@@ -1482,7 +1494,7 @@ type E2e {
   """
   let playgroundOf(tree: Directory!): Container! {
     container
-      .from(floorImage)
+      .from(playgroundImage)
       .withoutEntrypoint
       .withMountedDirectory(playgroundRoot, tree)
       .withWorkdir(playgroundRoot)
@@ -1697,7 +1709,7 @@ type E2e {
     let source = "import time\n\nfrom dagger import function, object_type\n\n\n@object_type\nclass CacheProbe:\n" +
       "    @function\n    def plain(self) -> str:\n        return str(time.time_ns())\n\n" +
       "    @function(cache=\"never\")\n    def never(self) -> str:\n        return str(time.time_ns())\n"
-    let image = if (engineImage == "") { floorImage } else { engineImage }
+    let image = if (engineImage == "") { playgroundImage } else { engineImage }
     let base = container
       .from(image)
       .withoutEntrypoint
