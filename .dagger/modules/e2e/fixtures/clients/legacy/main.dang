@@ -1,0 +1,6 @@
+"""
+A module with a pre-1.0 manifest, which the e2e checks add as a client.
+"""
+type LegacyDep {
+  pub greeting: String! { "hello from the module that was never migrated" }
+}

@@ -54,6 +54,7 @@ type Scope {
     let existing = ws.directory(root)
     let members = clientMembers
     checkNames(members)
+    checkClientTargets(members)
     checkMembers(existing, members)
     let stale = staleClients(existing, members)
     let withoutStale = stale.reduce(ws) { target, dir =>
@@ -255,6 +256,27 @@ type Scope {
   }
 
   """
+  A client of a module in the workspace loads it with serveModule, which asks
+  the engine for a module by its manifest; a module that still has only a
+  pre-1.0 dagger.json has none, and the call fails in the user's code with
+  the engine's own words. Name the target and the command that converts it.
+  """
+  let checkClientTargets(members: [ClientMember!]!): Void {
+    let objections = members.reduce([] :: [String!]!) { found, member =>
+      if (member.local and ws.directory(member.ref).exists("dagger-module.toml") == false) {
+        found + ["the client \"" + member.name + "\" loads " + member.ref +
+          ", which has no dagger-module.toml: run dagger module migrate " + member.ref + ", then generate again"]
+      } else {
+        found
+      }
+    }
+    if (objections.length > 0) {
+      raise objections.join(". ")
+    }
+    null
+  }
+
+  """
   A committed uv.lock names the members, so it is locked again against the
   new ones; `uv sync --locked` in the module build refuses a stale lock. The
   uv is the one the module build runs, so the build can read the lock. A
@@ -347,6 +369,7 @@ type Scope {
         name: client.moduleName,
         ref: if (isGit) { client.asString } else { localRef(client.sourceRootSubpath) },
         pin: if (isGit and client.pin != "") { client.pin } else { null },
+        local: isGit == false,
         source: client,
       )
     }
@@ -685,6 +708,11 @@ type ClientMember {
   The commit a Git ref is pinned to, or null.
   """
   pub pin: String
+
+  """
+  Whether the client loads a module from the workspace rather than from Git.
+  """
+  pub local: Boolean!
 
   let source: ModuleSource!
 

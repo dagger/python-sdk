@@ -15,6 +15,7 @@ type E2e {
   let runtimeModulePath: String! = fixtureRoot + "/runtime/app"
   let tomlGenerateModulePath: String! = fixtureRoot + "/toml-generate/app"
   let clientDepPath: String! = fixtureRoot + "/clients/dep"
+  let legacyClientDepPath: String! = fixtureRoot + "/clients/legacy"
   let staleEntrypointPath: String! = fixtureRoot + "/stale-entrypoint"
   let otherRefusalPath: String! = fixtureRoot + "/other-refusal"
   let plainScopePath: String! = fixtureRoot + "/plain"
@@ -546,6 +547,38 @@ type E2e {
       .withWorkdir(".")
     assertContains(refused.file(scopeFilePath).contents, "global-client = false", "generation rewrote a scope file that turns the global client off")
     assert(refused.directory(published).exists("sdk/src/" + globalPackage) == false, "a scope file that turns the global client off got one anyway")
+
+    null
+  }
+
+  """
+  A client whose target is a module in the workspace that was never migrated
+  is refused before anything is written: the engine serves a module by its
+  manifest, and a target with only a pre-1.0 dagger.json has none. The
+  refusal names the target and the command that converts it.
+  """
+  pub clientTargetManifestCheck(ws: Workspace!): Void @check {
+    let refused = pythonSdk
+      .generateScope(
+        ws.withWorkdir(tomlGenerateModulePath),
+        isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + legacyClientDepPath)],
+      )
+      .cwd rescue {
+        err: Error => err.message
+      }
+    assertContainsAll(refused, [
+      "the client \"legacy-dep\" loads /" + legacyClientDepPath,
+      "has no dagger-module.toml",
+      "dagger module migrate /" + legacyClientDepPath,
+    ])
+
+    let migrated = pythonSdk
+      .generateScope(
+        ws.withWorkdir(tomlGenerateModulePath),
+        isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + clientDepPath)],
+      )
+      .withWorkdir(".")
+    assert(migrated.directory("/" + tomlGenerateModulePath).exists(clientDepMember), "a client whose target has a manifest was refused")
 
     null
   }
