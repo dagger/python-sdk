@@ -13,10 +13,11 @@ type Mod {
   let ws: Workspace!
 
   """
-  Whether the module gets a static entrypoint, from the SDK setting or from
-  the manifest it already has.
+  How the engine runs this module: "generated" for an entrypoint written into
+  it, "remote" for the one this SDK publishes, "runtime" for a runtime the
+  manifest names. A module keeps the kind its manifest has.
   """
-  pub dangEntrypoint: Boolean!
+  pub entrypointMode: String!
 
   """
   The module scope's clients, as the engine hands them to generation. Null
@@ -81,7 +82,7 @@ type Mod {
         isModule: true,
         engineVersion: engineVersion,
       ).generated
-      if (dangEntrypoint) {
+      if (entrypointMode == "generated") {
         let entrypointPath = vendorDirName + "/" + entrypointDirName
         entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped)), entrypointPath)
       } else {

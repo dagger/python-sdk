@@ -107,6 +107,15 @@ type PythonSdk {
   let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
   """
+  The kinds of entrypoint a module runs on, as Mod.entrypointMode names them.
+  """
+  let generatedMode: String! = "generated"
+
+  let remoteMode: String! = "remote"
+
+  let runtimeMode: String! = "runtime"
+
+  """
   Whether a module config, dagger-module.toml or the pre-1.0 dagger.json,
   exists at a workspace-root-relative scope.
   """
@@ -154,7 +163,7 @@ type PythonSdk {
       Mod(
         rootPath: scope,
         ws: configured,
-        dangEntrypoint: dangEntrypoint or hasEntrypointManifest(configured, scope),
+        entrypointMode: entrypointModeOf(configured, scope),
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -358,6 +367,29 @@ type PythonSdk {
   """
   let staticEntrypointPath: String! = vendorDirName + "/entrypoint"
 
+  """
+  How the engine runs a module: the kind its manifest already names, and the
+  SDK setting for one that has no manifest yet.
+  """
+  let entrypointModeOf(ws: Workspace!, scope: String!): String! {
+    if (dangEntrypoint or hasEntrypointManifest(ws, scope)) {
+      generatedMode
+    } else if (keepsOwnRuntime(ws, scope)) {
+      runtimeMode
+    } else {
+      remoteMode
+    }
+  }
+
+  """
+  Whether a module's manifest names a runtime of the user's own, which
+  generation keeps and puts no entrypoint in front of.
+  """
+  let keepsOwnRuntime(ws: Workspace!, scope: String!): Boolean! {
+    scopeHasFile(ws, scope, "dagger-module.toml") and
+      keepsItsRuntime(tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents))
+  }
+
   let hasEntrypointManifest(ws: Workspace!, scope: String!): Boolean! {
     scopeHasFile(ws, scope, "dagger-module.toml") and isEntrypointManifest(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
   }
@@ -433,7 +465,7 @@ type PythonSdk {
     Mod(
       rootPath: modPath,
       ws: ws,
-      dangEntrypoint: dangEntrypoint or hasEntrypointManifest(ws, modPath),
+      entrypointMode: entrypointModeOf(ws, modPath),
       clients: null,
     )
   }

@@ -1034,6 +1034,7 @@ type E2e {
     let own = manifestOf(ws.withNewFile(manifestPath, ownRuntime))
     assertContainsAll(own, ["[runtime]", "source = \"../../../../../../runtime\"", "engineVersion = \"v1.0.0-0\""])
     assertNotContains(own, "[entrypoint]", "an entrypoint was put in front of the user's own runtime")
+    assert(pythonSdk.mod(ws.withNewFile(manifestPath, ownRuntime), path: tomlGenerateModulePath, findUp: false).entrypointMode == "runtime", "a module on a runtime of its own was not read as one")
 
     # A runtime of the user's own beside an entrypoint is refused, whichever
     # entrypoint: the engine would run the entrypoint on the session's
@@ -1071,9 +1072,9 @@ type E2e {
     # path generation writes, not by its kind, its quoting or its key order.
     let static = ws.withNewFile(manifestPath,
       "name = \"" + name + "\"\n\n[ entrypoint ]\nsource = './sdk/entrypoint'\nkind = \"dang\"\n")
-    assert(pythonSdk.mod(static, path: tomlGenerateModulePath, findUp: false).dangEntrypoint, "a static entrypoint written source-first was not recognised")
+    assert(pythonSdk.mod(static, path: tomlGenerateModulePath, findUp: false).entrypointMode == "generated", "a static entrypoint written source-first was not recognised")
     let shared = ws.withNewFile(manifestPath, plain)
-    assert(pythonSdk.mod(shared, path: tomlGenerateModulePath, findUp: false).dangEntrypoint == false, "the shared entrypoint was taken for a static one")
+    assert(pythonSdk.mod(shared, path: tomlGenerateModulePath, findUp: false).entrypointMode == "remote", "the shared entrypoint was taken for a static one")
 
     # An entrypoint this SDK did not write is the user's, and is kept as
     # written: a path of their own in the module, and a fork quoted their way.
@@ -1081,7 +1082,7 @@ type E2e {
     let ownManifest = manifestOf(ws.withNewFile(manifestPath, ownPath))
     assertContains(ownManifest, "source = \"./my-entrypoint\"", "a Dang entrypoint of the user's own was replaced: " + ownManifest)
     assertNotContains(ownManifest, sharedEntrypointSource, "a Dang entrypoint of the user's own was replaced: " + ownManifest)
-    assert(pythonSdk.mod(ws.withNewFile(manifestPath, ownPath), path: tomlGenerateModulePath, findUp: false).dangEntrypoint == false, "an entrypoint of the user's own was taken for the static one")
+    assert(pythonSdk.mod(ws.withNewFile(manifestPath, ownPath), path: tomlGenerateModulePath, findUp: false).entrypointMode == "remote", "an entrypoint of the user's own was taken for the static one")
     let quoted = manifestOf(ws.withNewFile(manifestPath, head + runtimeTable + "\n[entrypoint]\nkind = 'dang'\nsource = '" + fork + "'\n"))
     assertContains(quoted, fork, "a single-quoted Dang entrypoint was replaced: " + quoted)
     assertNotContains(quoted, sharedEntrypointSource, "a single-quoted Dang entrypoint was replaced: " + quoted)
