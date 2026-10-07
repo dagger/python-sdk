@@ -259,6 +259,11 @@ INVERSIONS = [
     ),
     # The generated global client.
     Inversion(
+        PACKAGES + "test_global_client_imports_the_helpers_its_signatures_name",
+        "assert used <= imported",
+        "assert used > imported",
+    ),
+    Inversion(
         PACKAGES + "test_global_client_delegates_root_fields_to_core",
         'assert "class Client(_Session):" in code',
         'assert "class Client(_Root):" in code',

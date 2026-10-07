@@ -874,6 +874,29 @@ def test_global_client_delegates_root_fields_to_core():
     assert "from dagger_clients.core import *" in code
 
 
+def test_global_client_imports_the_helpers_its_signatures_name():
+    # An id argument that names no type is annotated with the base class of
+    # every object, which the global client must import like a client does.
+    code = _global(Query="node(id: ID!): Directory!")
+
+    assert "def node(self, id: _Type) -> Directory:" in code
+    tree = ast.parse(code)
+    imported = {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import | ast.ImportFrom)
+        for alias in node.names
+    }
+    used = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id.startswith("_")
+    }
+    assert used <= imported
+
+
 def test_global_client_has_one_method_per_client():
     code = _global(_LINTER, _GLOW)
 

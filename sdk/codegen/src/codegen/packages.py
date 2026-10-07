@@ -486,6 +486,7 @@ _GLOBAL_HEADER = """\
 # without the flag removes it.
 
 from dagger.client import Session as _Session
+from dagger.client.base import Type as _Type  # noqa: F401
 """
 
 
