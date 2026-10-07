@@ -75,18 +75,50 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 
 ## Migrate a module
 
-`dagger module migrate <path>` (the engine's command) converts a pre-1.0
-`dagger.json` into `dagger-module.toml`, keeping the legacy shape
-(`engineVersion`, `[runtime] source = "python"`, `[[dependencies]]`), and
-records the scope in `dagger.toml` with its dependencies as clients. Running
-`dagger generate` afterwards is what moves the module to this layout: the
-manifest keeps only `name` and `[entrypoint]`, the dependencies become
-generated clients, and the SDK files are written into the module.
+Migrating takes two commands per module: the engine converts the module's
+config, and this SDK generates its scope. Run both from the workspace root,
+and take the modules in dependency order, each dependency before the modules
+that call it.
 
-Migrate dependencies before the module that calls them. A client loads its
-target with `serveModule`, which asks the engine for a module by its manifest,
-so a target that still has only a `dagger.json` cannot be served; generation
-names the target and the command to convert it.
+1. Install this SDK. The command creates `dagger.toml` if the workspace has
+   none:
+   ```sh
+   dagger module install github.com/dagger/python-sdk
+   ```
+2. Convert one module's `dagger.json` and record its scope:
+   ```sh
+   dagger module migrate <path> -y
+   ```
+3. Generate that scope, before migrating anything that depends on this module:
+   ```sh
+   dagger generate -y
+   ```
+
+Step 2 writes `dagger-module.toml` keeping the legacy shape (`engineVersion`,
+`[runtime] source = "python"`, `[[dependencies]]`), removes `dagger.json`, and
+records `[sdks.python.scopes."<path>"]` in `dagger.toml` with the module's
+dependencies as its clients. Step 3 is what moves the module to this layout:
+the manifest keeps only `name` and `[entrypoint]`, the dependencies become
+generated clients, the SDK files are written into the module, and the version
+the pre-1.0 config declared goes, since an entrypoint runs the module on the
+engine's own version.
+
+Keep steps 2 and 3 paired, in that order. Converting a module loads its
+dependencies as modules, and a dependency that was converted but not yet
+generated has no generated files for a runtime to build: that fails with
+`generated file "sdk/pyproject.toml" is missing`, naming the dependency.
+
+`dagger workspace migrate` is not a shortcut for the whole repository. It
+migrates the workspace config and the modules the workspace installs; a module
+of your own is an optional candidate, which it lists as
+`dagger module migrate <path>` and then skips, so it can report
+"No migration needed" while every module is still pre-1.0. Select them
+explicitly, with `--module <path>` repeated, or take them one at a time as
+above.
+
+A client loads its target with `serveModule`, which asks the engine for a
+module by its manifest, so a target that still has only a `dagger.json` cannot
+be served; generation names the target and the command to convert it.
 
 Code written against the layout before calls `dag` and `dagger.Container`.
 Generation keeps that code working by writing the temporary global client,
