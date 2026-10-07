@@ -465,6 +465,18 @@ def test_client_refuses_a_core_digest_that_is_not_its_schema_core(given: str):
         client_package(schema, "glow", "./glow", core_digest=given)
 
 
+def test_client_core_skew_names_the_view_and_the_way_out():
+    schema = _schema(_GLOW)
+
+    with pytest.raises(ClientError) as caught:
+        client_package(schema, "glow", "./glow", core_digest="sha256:other")
+
+    message = str(caught.value)
+    assert '"glow"' in message
+    assert "engineVersion" in message
+    assert "in the engine's own view" in message
+
+
 class _Runtime:
     """Fake of what the generated code needs from dagger.client, recording calls."""
 
@@ -966,8 +978,13 @@ def test_global_client_takes_one_schema_per_client():
 def test_global_client_refuses_schemas_of_two_cores():
     other = build_schema(_sdl(_GLOW) + "type Extra { n: Int! }")
 
-    with pytest.raises(ClientError, match="two cores"):
+    with pytest.raises(ClientError, match="two cores") as caught:
         global_package([_schema(_LINTER), other])
+
+    # Which clients disagree, and what to do about it.
+    message = str(caught.value)
+    for part in ('"glow"', '"linter"', "engineVersion", "engine's own view"):
+        assert part in message
 
 
 def test_global_client_refuses_two_clients_that_become_one_package():

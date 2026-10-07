@@ -464,8 +464,11 @@ def client_package(  # noqa: PLR0913
         core_digest = expected
     elif core_digest != expected:
         msg = (
-            f'the core digest "{core_digest}" given for the client "{name}" '
-            f"is not that of its schema's core, {expected}"
+            f'the scope\'s core "{core_digest}" is not the core the client '
+            f'"{name}" holds, {expected}: the two were read in different '
+            "engine views, which the engineVersion a module declares selects. "
+            "Generate the scope in the engine's own view, or point the client "
+            "at a module built for that view"
         )
         raise partition.ClientError(msg)
     return package, {
@@ -670,6 +673,12 @@ def _global_init(
     yield _all([*exported, "Client", "dag"])
 
 
+def _schema_clients(schema: GraphQLSchema) -> str:
+    """The clients a schema stands for, as the error messages name them."""
+    names = sorted(partition.modules(schema))
+    return ", ".join(f'"{name}"' for name in names) or "core"
+
+
 def _lines(names: Sequence[str]) -> str:
     return "\n" + "".join(indent(f"{name},") + "\n" for name in names)
 
@@ -685,11 +694,18 @@ def global_package(schemas: Sequence[GraphQLSchema], schema_version: str = "") -
         raise partition.ClientError(msg)
     legacy = legacy_sdk_compat(schema_version)
     digest = partition.core_digest(schemas[0], legacy_sdk_compat=legacy)
+    first = _schema_clients(schemas[0])
     for schema in schemas:
         partition.check_attribution(schema)
         other = partition.core_digest(schema, legacy_sdk_compat=legacy)
         if other != digest:
-            msg = f"the schemas hold two cores, {digest} and {other}"
+            msg = (
+                f"the clients {_schema_clients(schema)} and {first} hold two "
+                f"cores, {other} and {digest}: they were read in different "
+                "engine views, which the engineVersion a module declares "
+                "selects. Generate the scope in the engine's own view, or "
+                "point the client at a module built for that view"
+            )
             raise partition.ClientError(msg)
     return {
         "__init__.py": _global_init(schemas, schema_version),

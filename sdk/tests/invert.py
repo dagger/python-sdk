@@ -259,6 +259,16 @@ INVERSIONS = [
     ),
     # The generated global client.
     Inversion(
+        PACKAGES + "test_client_core_skew_names_the_view_and_the_way_out",
+        'assert "in the engine\'s own view" in message',
+        'assert "in the engine\'s own view" not in message',
+    ),
+    Inversion(
+        PACKAGES + "test_global_client_refuses_schemas_of_two_cores",
+        'for part in (\'"glow"\', \'"linter"\', "engineVersion", "engine\'s own view"):',
+        'for part in (\'"glow"\', \'"linter"\', "engineVersion", "no such words"):',
+    ),
+    Inversion(
         PACKAGES + "test_global_client_imports_the_helpers_its_signatures_name",
         "assert used <= imported",
         "assert used > imported",
