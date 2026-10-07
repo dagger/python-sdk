@@ -167,6 +167,7 @@ type PythonSdk {
         ws: configured,
         entrypointMode: mode,
         migrating: migrating,
+        engineVersion: scopeEngineVersion(initialized, scope),
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -301,6 +302,28 @@ type PythonSdk {
   """
   let migratingModule(ws: Workspace!, scope: String!): Boolean! {
     hasModuleConfig(ws, scope) and namesBuiltinRuntime(manifestSettings(ws, scope))
+  }
+
+  """
+  The engine version a module's scope generates against: the one its manifest
+  declares, and only while the module keeps a runtime of its own, which runs
+  it on that version. A module on an entrypoint runs on the engine's own
+  version, and so does one this SDK takes over from the builtin runtime. A
+  pre-1.0 manifest's version outlives `dagger module migrate`, and generating
+  against that view writes bindings around a core the session does not serve,
+  which the generator then refuses beside a client read in the engine's view.
+  """
+  let scopeEngineVersion(ws: Workspace!, scope: String!): String! {
+    if (keepsOwnRuntime(ws, scope)) {
+      let config = manifestSettings(ws, scope)
+      if (config.fields.contains("engineVersion")) {
+        config.field(["engineVersion"]).asString
+      } else {
+        ""
+      }
+    } else {
+      ""
+    }
   }
 
   """
@@ -526,6 +549,7 @@ type PythonSdk {
       ws: ws,
       entrypointMode: entrypointModeOf(ws, modPath),
       migrating: migratingModule(ws, modPath),
+      engineVersion: scopeEngineVersion(ws, modPath),
       clients: null,
     )
   }

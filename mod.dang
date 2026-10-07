@@ -26,6 +26,14 @@ type Mod {
   let migrating: Boolean!
 
   """
+  The engine version the scope's code is generated against, empty for the
+  engine's own view. Only a module that keeps a runtime of its own runs on a
+  version of its own, and only the caller knows which runtime the manifest
+  names.
+  """
+  let engineVersion: String!
+
+  """
   The module scope's clients, as the engine hands them to generation. Null
   reads them from the workspace config, for a module generated directly.
   """
@@ -161,13 +169,6 @@ type Mod {
     }
   }
 
-  let engineVersion: String! {
-    if (manifestConfig.fields.contains("engineVersion")) {
-      manifestConfig.field(["engineVersion"]).asString
-    } else {
-      ""
-    }
-  }
 
   """
   The generated workspace with the module's own manifest, entrypoint table

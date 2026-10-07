@@ -451,6 +451,22 @@ type E2e {
     assertContains(migrated.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "a module moved onto the entrypoint kept the view of its runtime")
     assertNotContains(own.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "core was not generated in the view of the module's own runtime")
 
+    # The version a pre-1.0 config declared outlives `dagger module migrate`,
+    # in the manifest it writes. A module generated on its own reads the
+    # manifest as it stands, so it must still take the engine's view: the
+    # builtin runtime is the one this SDK takes over.
+    let stale = ws.withNewFile(manifestPath, older + "\"python\"\n")
+    let direct = stale.withChanges(pythonSdk.mod(stale, path: tomlGenerateModulePath, findUp: false).generate)
+    assertContains(direct.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "generating a module on its own kept the view its migrated manifest declares")
+
+    # Nor does a module that keeps the builtin runtime because of what only a
+    # runtime can honour: it runs on the engine's version like the rest.
+    let keptPath = "name = \"toml-generate-app\"\nengineVersion = \"v0.21.9\"\ninclude = [\"src\"]\n\n[runtime]\nsource = \"python\"\n"
+    let kept = pythonSdk
+      .generateScope(ws.withNewFile(manifestPath, keptPath).withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    assertContains(kept.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "a module kept on the builtin runtime generated in the view its manifest declares")
+
     null
   }
 
