@@ -1646,6 +1646,38 @@ type E2e {
   }
 
   """
+  `--remote-entrypoint` puts a module on the entrypoint this SDK publishes:
+  a new module names it instead of one of its own, a module that has one of
+  its own moves onto it and the files go, and a module on a runtime of its own
+  keeps the runtime.
+  """
+  pub remoteEntrypointCheck(ws: Workspace!): Void @check {
+    let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
+    let name = "toml-generate-app"
+    let remote = pythonSdk(remoteEntrypoint: true)
+
+    let fresh = remote.generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    assertContains(fresh.file(manifestPath).contents, "source = \"" + sharedEntrypointSource + "\"", "a module did not name the published entrypoint")
+    assert(fresh.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "a module on the published entrypoint got one of its own")
+
+    let generated = pythonSdk.generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    assert(generated.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint"), "a module was not given an entrypoint of its own")
+    let moved = remote.generateScope(generated.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    assertContains(moved.file(manifestPath).contents, "source = \"" + sharedEntrypointSource + "\"", "the flag did not move the module onto the published entrypoint")
+    assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "moving onto the published entrypoint left the files behind")
+    assert(moved.changes(fresh).isEmpty, "a module moved onto the published entrypoint differs from one generated on it")
+
+    # A runtime of the user's own is theirs to remove, so the flag leaves it.
+    let ownRuntime = "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
+    let kept = remote.generateScope(ws.withNewFile(manifestPath, ownRuntime).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    let keptManifest = kept.file(manifestPath).contents
+    assertContains(keptManifest, "source = \"../../../../../../runtime\"", "the flag took a runtime of the user's own away: " + keptManifest)
+    assertNotContains(keptManifest, "[entrypoint]", "the flag put an entrypoint in front of the user's own runtime")
+
+    null
+  }
+
+  """
   The static path refuses what an entrypoint manifest cannot carry, before
   writing anything.
   """

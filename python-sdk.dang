@@ -23,6 +23,12 @@ type PythonSdk {
   pub baseImage: String! = ""
 
   """
+  Put a module on the shared entrypoint this SDK publishes instead of one
+  generated into it. A module that names a runtime of its own keeps it.
+  """
+  pub remoteEntrypoint: Boolean! = false
+
+  """
   Find the Python client root containing the workspace cwd: the directory of
   the nearest pyproject.toml, relative to the workspace root. A generated
   member, marked `[tool.dagger] generated` in its pyproject.toml, belongs to
@@ -372,6 +378,8 @@ type PythonSdk {
     # names both, rather than by a generated entrypoint's own objections.
     if (keepsOwnRuntime(ws, scope)) {
       runtimeMode
+    } else if (remoteEntrypoint) {
+      remoteMode
     } else if (hasEntrypointManifest(ws, scope)) {
       generatedMode
     } else if (namesDangEntrypoint(ws, scope)) {

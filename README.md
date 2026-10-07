@@ -149,7 +149,10 @@ process's stderr.
 
 A module keeps the kind of entrypoint its manifest names: generation writes
 one into a module that has none, and leaves a Dang entrypoint of another kind
-alone, so a module on the shared entrypoint or on a fork stays there. See
+alone, so a module on the shared entrypoint or on a fork stays there.
+`--remote-entrypoint` asks for the shared one instead, for a new module or for
+one that has an entrypoint of its own, and then `sdk/entrypoint/` goes. A
+module that names a runtime of its own keeps it, with or without the flag. See
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design and the plan to make it the default.
 
