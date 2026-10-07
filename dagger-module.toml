@@ -7,7 +7,7 @@ source = "dang"
 
 [[dependencies]]
 name = "sdk-helpers"
-source = "dagger.io/sdk/helpers@v1"
+source = "github.com/dagger/sdk-helpers@v1.0.6"
 
 [[dependencies]]
 name = "python-sdk-runtime"
