@@ -120,6 +120,18 @@ A client loads its target with `serveModule`, which asks the engine for a
 module by its manifest, so a target that still has only a `dagger.json` cannot
 be served; generation names the target and the command to convert it.
 
+Two shapes keep a module on the runtime its manifest names, which migration
+leaves as `[runtime] source = "python"`, the runtime built into the engine:
+`include` or `exclude`, which an entrypoint cannot honour because it takes the
+module's own directory and all of it, and a `source` other than `.`, which puts
+the module's code elsewhere. Such a module generates, and does not run: the
+builtin runtime reads the layout before this one, `sdk/src/dagger/client/gen.py`
+among it. It needs a `[runtime] source` that names a runtime which builds this
+layout — `runtime/` of this repository is one — or a shape an entrypoint can
+serve: no `include`, and the code in the module's own directory. With a `source`
+of its own there is more to it, since generation writes the scope beside the
+manifest and the module builds from `source`.
+
 Code written against the layout before calls `dag` and `dagger.Container`.
 Generation keeps that code working by writing the temporary global client,
 `sdk/src/dagger_global/`, and `global-client = true` under `[tool.dagger]`,
