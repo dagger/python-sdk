@@ -51,17 +51,24 @@ Generating a module that has a manifest already keeps the kind it names:
 
 - `[runtime] source = "python"`, the runtime built into the engine, which this
   SDK wrote before, is replaced by a generated entrypoint, and `engineVersion`
-  and `[[dependencies]]` go with it.
+  and `[[dependencies]]` go with it. A module that cannot run on an entrypoint
+  moves to the runtime this SDK publishes instead, on the version the generator
+  reads core in.
 - A `[runtime]` of the user's own is kept as written, with no entrypoint added:
   the engine follows an entrypoint over a runtime, so adding one would take the
   runtime out of the picture. `runtime/` is such a runtime, named by module ref
   or by a path relative to the module.
-- A manifest that says which files the module is (`include`, `exclude`) or
-  roots it elsewhere (`source` other than `.`) keeps its runtime too, whichever
-  runtime that is: an entrypoint takes the module's whole directory, and
-  dropping the setting would change which files the module is.
+- A manifest that says which files the module is (`include`, `exclude`) or roots
+  it elsewhere (`source` other than `.`) stays on a runtime: an entrypoint takes
+  the module's own directory and all of it, and dropping the setting would
+  change which files the module is. The runtime it stays on is the one this SDK
+  publishes, `dagger.io/sdk/python/runtime@v1`, since the runtime built into the
+  engine reads the layout before this one; `--legacy-runtime` asks for it for
+  any module.
 - An entrypoint of another kind, a pin of the shared one or a fork, is kept as
   written. `--remote-entrypoint` asks for the shared one instead.
+- `--legacy-runtime` and `--remote-entrypoint` cannot be set together: each asks
+  for a different way to run the module, and a manifest names one.
 - `[entrypoint]` and `[runtime]` together are refused, naming both: only one
   thing can run the module.
 - `disableDefaultFunctionCaching` and `[codegen]` are refused one at a time:
@@ -120,17 +127,28 @@ A client loads its target with `serveModule`, which asks the engine for a
 module by its manifest, so a target that still has only a `dagger.json` cannot
 be served; generation names the target and the command to convert it.
 
-Two shapes keep a module on the runtime its manifest names, which migration
-leaves as `[runtime] source = "python"`, the runtime built into the engine:
-`include` or `exclude`, which an entrypoint cannot honour because it takes the
-module's own directory and all of it, and a `source` other than `.`, which puts
-the module's code elsewhere. Such a module generates, and does not run: the
-builtin runtime reads the layout before this one, `sdk/src/dagger/client/gen.py`
-among it. It needs a `[runtime] source` that names a runtime which builds this
-layout — `runtime/` of this repository is one — or a shape an entrypoint can
-serve: no `include`, and the code in the module's own directory. With a `source`
-of its own there is more to it, since generation writes the scope beside the
-manifest and the module builds from `source`.
+Two shapes keep a module on a runtime rather than an entrypoint: `include` or
+`exclude`, which an entrypoint cannot honour because it takes the module's own
+directory and all of it, and a `source` other than `.`, which puts the module's
+code elsewhere. Generation moves such a module from the runtime built into the
+engine, which reads the layout before this one, to the runtime this SDK
+publishes, which builds this one:
+
+```toml
+# <module>/dagger-module.toml
+name = "my-module"
+engineVersion = "v1.0.0-0"
+include = ["../shared-package"]
+
+[runtime]
+  source = "dagger.io/sdk/python/runtime@v1"
+```
+
+A module reference is a legal `[runtime] source`, and so is a path relative to
+the module, which is how this repository's e2e checks point at `runtime/` in the
+working tree. A module whose `source` is not `.` needs more than the move:
+generation writes the scope beside the manifest, and the module builds from
+`source`.
 
 Code written against the layout before calls `dag` and `dagger.Container`.
 Generation keeps that code working by writing the temporary global client,
@@ -269,11 +287,17 @@ are persisted on the scope:
 
 ```sh
 dagger module init python --name my-module --template empty
+dagger module init python --name my-module --legacy-runtime
+dagger module init python --name my-module --remote-entrypoint
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
     --base-image python:3.13-slim
 ```
+
+`--legacy-runtime` and `--remote-entrypoint` pick what runs the module, as
+"How a module runs" describes; without either, a new module gets an entrypoint
+generated into it.
 
 `--template` picks a starter template: `default` (a small working module) when
 you pass nothing, or `empty` for a bare object class. The three

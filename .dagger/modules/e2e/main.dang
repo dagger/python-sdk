@@ -466,6 +466,11 @@ type E2e {
       .generateScope(ws.withNewFile(manifestPath, keptPath).withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
       .withWorkdir(".")
     assertContains(kept.file("/" + tomlGenerateModulePath + "/" + coreInitPath).contents, "def cwd(", "a module kept on the builtin runtime generated in the view its manifest declares")
+    # And the manifest it moves to says the same version, so the module's calls
+    # run in the view its bindings were generated in.
+    let keptManifest = kept.file(manifestPath).contents
+    assertContains(keptManifest, "source = \"" + sdkRuntimeSource + "\"", "the module was left on the builtin runtime: " + keptManifest)
+    assertNotContains(keptManifest, "v0.21.9", "the version the pre-1.0 config declared survived the move: " + keptManifest)
 
     null
   }
@@ -1124,6 +1129,8 @@ type E2e {
 
   let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
+  let sdkRuntimeSource: String! = "dagger.io/sdk/python/runtime@v1"
+
   """The manifest generating the toml-generate fixture leaves, from a seeded workspace."""
   let manifestOf(seeded: Workspace!): String! {
     manifestWithClients(seeded, [])
@@ -1201,18 +1208,22 @@ type E2e {
     }
     assertContainsAll(bothStatic, ["both a runtime", "./sdk/entrypoint"])
 
+    # The builtin runtime cannot build this layout, so a module that stays on a
+    # runtime moves to the one this SDK publishes, on the version it generates
+    # against rather than the one the pre-1.0 config declared.
     let included = manifestOf(ws.withNewFile(manifestPath, head + "include = [\"src\"]\n\n" + runtimeTable))
-    assertContainsAll(included, ["include = [\"src\"]", "[runtime]", "source = \"python\""])
+    assertContainsAll(included, ["include = [\"src\"]", "[runtime]", "source = \"" + sdkRuntimeSource + "\""])
     assertNotContains(included, "[entrypoint]", "a module of some files only was put on an entrypoint")
+    assertContains(included, "engineVersion", "the runtime manifest lost the version it runs on")
     let elsewhere = manifestOf(ws.withNewFile(manifestPath, head + "source = \"sub\"\n\n" + runtimeTable))
-    assertContainsAll(elsewhere, ["source = \"sub\"", "[runtime]"])
+    assertContainsAll(elsewhere, ["source = \"sub\"", "source = \"" + sdkRuntimeSource + "\""])
     assertNotContains(elsewhere, "[entrypoint]", "a module rooted elsewhere was put on an entrypoint")
     let here = manifestOf(ws.withNewFile(manifestPath, head + "source = \".\"\n\n" + runtimeTable))
     assertContains(here, "[entrypoint]", "source = \".\" was refused")
     let jsonExcluded = legacyManifestOf(ws.withNewFile("/" + generateModulePath + "/dagger.json",
       "{\"name\": \"generate-app\", \"engineVersion\": \"v0.20.8\", \"sdk\": {\"source\": \"python\"}, \"exclude\": [\"tmp\"]}"))
     # Manifest version 2 has no exclude: the conversion negates it in include.
-    assertContainsAll(jsonExcluded, ["include = [\"!tmp\"]", "[runtime]"])
+    assertContainsAll(jsonExcluded, ["include = [\"!tmp\"]", "source = \"" + sdkRuntimeSource + "\""])
     assertNotContains(jsonExcluded, "[entrypoint]", "a pre-1.0 module of some files only was put on an entrypoint")
 
     # This SDK's static entrypoint is told from any other by its source, the
@@ -1792,6 +1803,61 @@ type E2e {
   }
 
   """
+  `--legacy-runtime` runs a module on the runtime this SDK publishes instead of
+  an entrypoint: a new module names it, a module that carries an entrypoint of
+  its own moves onto it and the entrypoint goes, and a module on a runtime of
+  the user's own keeps theirs. The flag cannot be combined with
+  `--remote-entrypoint`. The module runs, which the check proves through this
+  checkout's runtime: the published reference the SDK writes resolves to a tag,
+  and that tag moves only with a release.
+  """
+  pub legacyRuntimeCheck(ws: Workspace!): Void @check {
+    let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
+    let name = "toml-generate-app"
+    let scoped = ws.withWorkdir(tomlGenerateModulePath)
+    let runtime = pythonSdk(legacyRuntime: true)
+
+    let fresh = runtime.generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".")
+    let freshManifest = fresh.file(manifestPath).contents
+    assertContainsAll(freshManifest, ["[runtime]", "source = \"" + sdkRuntimeSource + "\"", "engineVersion"])
+    assertNotContains(freshManifest, "[entrypoint]", "a module asked for the runtime got an entrypoint")
+    assert(fresh.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "a module on the runtime got an entrypoint of its own")
+    assertScopeTree(fresh, tomlGenerateModulePath)
+
+    # A module with an entrypoint of its own moves onto the runtime, and the
+    # files of the entrypoint go with the move.
+    let generated = pythonSdk.generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".")
+    assert(generated.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint"), "a module was not given an entrypoint of its own")
+    let moved = runtime.generateScope(generated.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    assertContains(moved.file(manifestPath).contents, "source = \"" + sdkRuntimeSource + "\"", "the flag did not move the module onto the runtime")
+    assertNotContains(moved.file(manifestPath).contents, "[entrypoint]", "the entrypoint table survived the move to a runtime")
+    assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "moving onto the runtime left the entrypoint behind")
+
+    # A runtime of the user's own is theirs, flag or no flag.
+    let ownRuntime = "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
+    let kept = runtime
+      .generateScope(ws.withNewFile(manifestPath, ownRuntime).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .withWorkdir(".")
+    assertContains(kept.file(manifestPath).contents, "source = \"../../../../../../runtime\"", "the flag took a runtime of the user's own away")
+
+    # The two flags ask for two runners.
+    let both = pythonSdk(legacyRuntime: true, remoteEntrypoint: true)
+      .generateScope(scoped, isModule: true, name: name, clients: [])
+      .cwd rescue {
+        err: Error => err.message
+      }
+    assertContainsAll(both, ["--remote-entrypoint", "--legacy-runtime", "cannot be set together"])
+
+    # It runs: the same scope, with this checkout's runtime in place of the
+    # published reference, called through the floor release's CLI.
+    let onCheckout = fresh.withNewFile(manifestPath, runtimeOnlyManifest(name))
+    let called = cli(playground(onCheckout), ["-m", tomlGenerateModulePath, "call", "hello"]).stdout
+    assertContains(called, "hello", "the module did not run on the runtime: " + called)
+
+    null
+  }
+
+  """
   `--remote-entrypoint` puts a module on the entrypoint this SDK publishes:
   a new module names it instead of one of its own, a module that has one of
   its own moves onto it and the files go, and a module on a runtime of its own
@@ -1847,7 +1913,7 @@ type E2e {
     # setting kept as written and no entrypoint put in front of it.
     let included = static.generateScope(ws.withNewFile(manifestPath, "include = [\"src\"]\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
       .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents
-    assertContainsAll(included, ["include = [\"src\"]", "[runtime]", "source = \"python\""])
+    assertContainsAll(included, ["include = [\"src\"]", "[runtime]", "source = \"" + sdkRuntimeSource + "\""])
     assertNotContains(included, "[entrypoint]", "a module of some files only was put on an entrypoint")
 
     let clients = static.generateScope(ws.withNewFile(manifestPath, "name = \"toml-generate-app\"\n\n[clients]\ngo = { path = \"gen\" }\n").withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue {
