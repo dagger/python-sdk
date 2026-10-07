@@ -89,6 +89,7 @@ class FunctionDescription:
     generator: bool = False
     service: bool = False
     agent: bool = False
+    collection_get: bool = False
     args: tuple[ArgumentDescription, ...] = ()
 
 
@@ -99,6 +100,7 @@ class FieldDescription:
     description: str | None = None
     deprecated: str | None = None
 
+    collection_role: str | None = None
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class EnumMemberDescription:
@@ -119,6 +121,7 @@ class EnumDescription:
 class ObjectDescription:
     name: str
     interface: bool = False
+    collection: bool = False
     description: str | None = None
     deprecated: str | None = None
     fields: tuple[FieldDescription, ...] = ()

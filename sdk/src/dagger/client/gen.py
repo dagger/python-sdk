@@ -1625,6 +1625,78 @@ class Cloud(Type):
         return await _ctx.execute(str)
 
 
+class CollectionDelta(Type):
+    async def added_keys(self) -> list[str]:
+        """Current keys absent from the original collection, in current order.
+
+        Returns
+        -------
+        list[str]
+            The `String` scalar type represents textual data, represented as
+            UTF-8 character sequences. The String type is most often used by
+            GraphQL to represent free-form human-readable text.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[Arg] = []
+        _ctx = self._select("addedKeys", _args)
+        return await _ctx.execute(list[str])
+
+    async def id(self) -> str:
+        """A unique identifier for this CollectionDelta.
+
+        Note
+        ----
+        This is lazily evaluated, no operation is actually run.
+
+        Returns
+        -------
+        str
+            The `ID` scalar type represents a unique identifier, often used to
+            refetch an object or as key for a cache. The ID type appears in a
+            JSON response as a String; however, it is not intended to be
+            human-readable. When expected as an input type, any string (such
+            as `"4"`) or integer (such as `4`) input value will be accepted as
+            an ID.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[Arg] = []
+        _ctx = self._select("id", _args)
+        return await _ctx.execute(str)
+
+    async def removed_keys(self) -> list[str]:
+        """Original keys absent from the current collection, in original order.
+
+        Returns
+        -------
+        list[str]
+            The `String` scalar type represents textual data, represented as
+            UTF-8 character sequences. The String type is most often used by
+            GraphQL to represent free-form human-readable text.
+
+        Raises
+        ------
+        ExecuteTimeoutError
+            If the time to execute the query exceeds the configured timeout.
+        QueryError
+            If the API returns an error.
+        """
+        _args: list[Arg] = []
+        _ctx = self._select("removedKeys", _args)
+        return await _ctx.execute(list[str])
+
+
 class Container(Type):
     """An OCI-compatible container, also known as a Docker container."""
 
@@ -16622,6 +16694,36 @@ class TypeDef(Type):
         _ctx = self._select("optional", _args)
         return await _ctx.execute(bool)
 
+    def with_collection(self) -> Self:
+        """Mark this object as a collection."""
+        _args: list[Arg] = []
+        _ctx = self._select("withCollection", _args)
+        return TypeDef(_ctx)
+
+    def with_collection_delta(self, name: str) -> Self:
+        """Select the field that receives changes from the original collection."""
+        _args = [
+            Arg("name", name),
+        ]
+        _ctx = self._select("withCollectionDelta", _args)
+        return TypeDef(_ctx)
+
+    def with_collection_get(self, name: str) -> Self:
+        """Select the item lookup function for this collection."""
+        _args = [
+            Arg("name", name),
+        ]
+        _ctx = self._select("withCollectionGet", _args)
+        return TypeDef(_ctx)
+
+    def with_collection_keys(self, name: str) -> Self:
+        """Select the stored keys field for this collection."""
+        _args = [
+            Arg("name", name),
+        ]
+        _ctx = self._select("withCollectionKeys", _args)
+        return TypeDef(_ctx)
+
     def with_constructor(self, function: Function) -> Self:
         """Adds a function for constructing a new instance of an Object TypeDef,
         failing if the type is not an object.
@@ -19059,6 +19161,7 @@ __all__ = [
     "Client",
     "ClientFilesyncMirror",
     "Cloud",
+    "CollectionDelta",
     "Container",
     "CurrentModule",
     "CurrentModuleAsSDK",
