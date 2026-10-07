@@ -348,8 +348,8 @@ type E2e {
     let target = with.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents
     assertContainsAll(target, [
       "NAME = \"client-dep\"",
-      "REF = \"/" + clientDepPath + "\"",
-      "PIN = None",
+      "REF = \"" + clientRef(client, clientDepPath) + "\"",
+      "PIN = " + clientPin(client),
       "CORE_DIGEST = \"" + coreDigestOf(with, tomlGenerateModulePath) + "\"",
     ])
     assertContains(with.file(member + "/src/dagger_clients/client_dep/__init__.py").contents, "def client_dep(", "the client has no entry function")
@@ -638,19 +638,29 @@ type E2e {
   refusal names the target and the command that converts it.
   """
   pub clientTargetManifestCheck(ws: Workspace!): Void @check {
-    let refused = pythonSdk
+    let legacy = ws.moduleSource("/" + legacyClientDepPath)
+    let generated = pythonSdk
       .generateScope(
         ws.withWorkdir(tomlGenerateModulePath),
-        isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + legacyClientDepPath)],
+        isModule: true, name: "toml-generate-app", clients: [legacy],
       )
       .cwd rescue {
         err: Error => err.message
       }
-    assertContainsAll(refused, [
-      "the client \"legacy-dep\" loads /" + legacyClientDepPath,
-      "has no dagger-module.toml",
-      "dagger module migrate /" + legacyClientDepPath,
-    ])
+    if (legacy.kind == ModuleSourceKind.GIT_SOURCE) {
+      # A workspace loaded from a ref makes every module in it a Git client,
+      # which the engine serves from the repository rather than the workspace,
+      # and `dagger module migrate` is no answer for one. Generation says
+      # nothing then, which is what this asserts, and the refusal is checked
+      # wherever the workspace is the one on disk, the floor job among them.
+      assertNotContains(generated, "dagger module migrate", "a Git client target was told to migrate in place: " + generated)
+    } else {
+      assertContainsAll(generated, [
+        "the client \"legacy-dep\" loads /" + legacyClientDepPath,
+        "has no dagger-module.toml",
+        "dagger module migrate /" + legacyClientDepPath,
+      ])
+    }
 
     let migrated = pythonSdk
       .generateScope(
@@ -841,7 +851,8 @@ type E2e {
       .withWorkdir(".")
     let generated = pythonSdk.mod(scoped, path: tomlGenerateModulePath).generated
     assertScopeTree(generated, tomlGenerateModulePath)
-    assertContains(generated.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents, "REF = \"/" + clientDepPath + "\"", "mod generate missed the scope's client")
+    let declared = ws.moduleSource("/" + clientDepPath)
+    assertContains(generated.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents, "REF = \"" + clientRef(declared, clientDepPath) + "\"", "mod generate missed the scope's client")
     let viaScope = pythonSdk
       .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + clientDepPath)])
       .withWorkdir(".")
@@ -1123,6 +1134,21 @@ type E2e {
   A manifest on this working tree's runtime and nothing else, so a released
   CLI runs the module on this repository's build, not a published entrypoint.
   """
+  """
+  The reference a client's descriptor must name, which is what the workspace
+  resolved the client to: a path from the workspace root for a client the
+  engine serves out of the workspace, and a Git address for one in a workspace
+  that is itself loaded from a ref, as it is when these checks run on a commit.
+  """
+  let clientRef(client: ModuleSource!, path: String!): String! {
+    if (client.kind == ModuleSourceKind.GIT_SOURCE) { client.asString } else { "/" + path }
+  }
+
+  """The pin that goes with it: a commit for a Git client, nothing for a local one."""
+  let clientPin(client: ModuleSource!): String! {
+    if (client.kind == ModuleSourceKind.GIT_SOURCE) { "\"" + (client.pin ?? "") + "\"" } else { "None" }
+  }
+
   let runtimeOnlyManifest(name: String!): String! {
     "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
   }
@@ -1914,8 +1940,9 @@ type E2e {
 
     # A client is a member of the scope, not a dependency the manifest must
     # carry, so the static path takes one like the runtime path.
-    let withClient = static.generateScope(scoped, isModule: true, name: name, clients: [ws.moduleSource("/" + clientDepPath)])
-    assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"/" + clientDepPath + "\"", "a static entrypoint refused a client")
+    let client = ws.moduleSource("/" + clientDepPath)
+    let withClient = static.generateScope(scoped, isModule: true, name: name, clients: [client])
+    assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"" + clientRef(client, clientDepPath) + "\"", "a static entrypoint refused a client")
     assertContains(withClient.file("dagger-module.toml").contents, "./sdk/entrypoint", "a client took the module off the static path")
 
     let cached = static.generateScope(ws.withNewFile(manifestPath, "disableDefaultFunctionCaching = true\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
