@@ -1107,11 +1107,12 @@ type E2e {
   A stale module-kind entrypoint is replaced, because the engine rejects the
   kind. A Dang entrypoint the user wrote is kept: a pinned version, or a fork.
   A runtime of the user's own is kept as it is, with no entrypoint put in
-  front of it for the engine to follow instead, and refused beside one. What
-  only a runtime manifest
-  can say, which files the module is and where its source sits, is refused
-  rather than dropped. The manifests carry their keys in either order and a
-  "[" inside a comment, which must not be read as the start of the next table.
+  front of it for the engine to follow instead, and refused beside one. A
+  manifest that says what only a runtime can honour, which files the module
+  is and where its source sits, keeps its runtime for the same reason, rather
+  than losing the setting or being refused. The manifests carry their keys in
+  either order and a "[" inside a comment, which must not be read as the
+  start of the next table.
   """
   pub entrypointManifestCheck(ws: Workspace!): Void @check {
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
@@ -1156,25 +1157,19 @@ type E2e {
     }
     assertContainsAll(bothStatic, ["both a runtime", "./sdk/entrypoint"])
 
-    let included = manifestOf(ws.withNewFile(manifestPath, head + "include = [\"src\"]\n\n" + runtimeTable)) rescue {
-      err: Error => err.message
-    }
-    assertContainsAll(included, ["cannot carry", "include"])
-    let elsewhere = manifestOf(ws.withNewFile(manifestPath, head + "source = \"sub\"\n\n" + runtimeTable)) rescue {
-      err: Error => err.message
-    }
-    assertContainsAll(elsewhere, ["cannot carry", "source"])
+    let included = manifestOf(ws.withNewFile(manifestPath, head + "include = [\"src\"]\n\n" + runtimeTable))
+    assertContainsAll(included, ["include = [\"src\"]", "[runtime]", "source = \"python\""])
+    assertNotContains(included, "[entrypoint]", "a module of some files only was put on an entrypoint")
+    let elsewhere = manifestOf(ws.withNewFile(manifestPath, head + "source = \"sub\"\n\n" + runtimeTable))
+    assertContainsAll(elsewhere, ["source = \"sub\"", "[runtime]"])
+    assertNotContains(elsewhere, "[entrypoint]", "a module rooted elsewhere was put on an entrypoint")
     let here = manifestOf(ws.withNewFile(manifestPath, head + "source = \".\"\n\n" + runtimeTable))
     assertContains(here, "[entrypoint]", "source = \".\" was refused")
-    let jsonIncluded = pythonSdk
-      .generateScope(
-        ws.withNewFile("/" + generateModulePath + "/dagger.json", "{\"name\": \"generate-app\", \"engineVersion\": \"v0.20.8\", \"sdk\": {\"source\": \"python\"}, \"exclude\": [\"tmp\"]}").withWorkdir(generateModulePath),
-        isModule: true, name: "generate-app", clients: [],
-      )
-      .cwd rescue {
-        err: Error => err.message
-      }
-    assertContainsAll(jsonIncluded, ["dagger.json", "cannot carry", "exclude"])
+    let jsonExcluded = legacyManifestOf(ws.withNewFile("/" + generateModulePath + "/dagger.json",
+      "{\"name\": \"generate-app\", \"engineVersion\": \"v0.20.8\", \"sdk\": {\"source\": \"python\"}, \"exclude\": [\"tmp\"]}"))
+    # Manifest version 2 has no exclude: the conversion negates it in include.
+    assertContainsAll(jsonExcluded, ["include = [\"!tmp\"]", "[runtime]"])
+    assertNotContains(jsonExcluded, "[entrypoint]", "a pre-1.0 module of some files only was put on an entrypoint")
 
     # This SDK's static entrypoint is told from any other by its source, the
     # path generation writes, not by its kind, its quoting or its key order.
@@ -1810,8 +1805,17 @@ type E2e {
     let cached = static.generateScope(ws.withNewFile(manifestPath, "disableDefaultFunctionCaching = true\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
     assert(cached == "raised", "disableDefaultFunctionCaching was dropped silently")
 
-    let included = static.generateScope(ws.withNewFile(manifestPath, "include = [\"src\"]\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
-    assert(included == "raised", "an include list was dropped silently")
+    # What only a runtime can honour keeps the module on its runtime, with the
+    # setting kept as written and no entrypoint put in front of it.
+    let included = static.generateScope(ws.withNewFile(manifestPath, "include = [\"src\"]\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
+      .file("/" + tomlGenerateModulePath + "/dagger-module.toml").contents
+    assertContainsAll(included, ["include = [\"src\"]", "[runtime]", "source = \"python\""])
+    assertNotContains(included, "[entrypoint]", "a module of some files only was put on an entrypoint")
+
+    let clients = static.generateScope(ws.withNewFile(manifestPath, "name = \"toml-generate-app\"\n\n[clients]\ngo = { path = \"gen\" }\n").withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(clients, ["[clients] table", "dagger.toml", "remove the table"])
 
     # Read as TOML: the builtin runtime quoted another way is still the one
     # this SDK wrote, not a runtime of the user's own.

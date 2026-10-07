@@ -201,13 +201,14 @@ type PythonSdk {
       let manifest = ws.file(root + "/dagger-module.toml")
       let config = tomlConfig(manifest.contents)
       let loaded = sdkHelpers.moduleManifest(loadToml: withoutStaleEntrypoint(manifest))
-      if (keepsItsRuntime(config)) {
+      let namesEntrypoint = ManifestToml(manifest.contents).entrypointKind == "dang"
+      if (keepsItsRuntime(config) or (needsRuntimeSettings(config) and namesEntrypoint == false)) {
         loaded
       } else {
         checkEntrypointOnly(config, "dagger-module.toml")
         # A Dang entrypoint already there is kept: the shared one, or one the
         # user chose, a pinned version, a fork or one of their own.
-        let entrypointed = if (ManifestToml(manifest.contents).entrypointKind == "dang") {
+        let entrypointed = if (namesEntrypoint) {
           loaded
         } else {
           loaded.withDangEntrypoint(source: sharedEntrypointSource)
@@ -218,7 +219,7 @@ type PythonSdk {
       let manifest = ws.file(root + "/dagger.json")
       let config = json.withContents((manifest.contents :: Dagger.JSON!))
       let loaded = sdkHelpers.moduleManifest(loadJson: manifest)
-      if (keepsItsRuntime(config)) {
+      if (keepsItsRuntime(config) or needsRuntimeSettings(config)) {
         loaded
       } else {
         checkEntrypointOnly(config, "dagger.json")
@@ -260,6 +261,18 @@ type PythonSdk {
   }
 
   """
+  Whether a manifest says what only a runtime can honour: which files are the
+  module, and where its source sits. A module that says either stays on a
+  runtime, because an entrypoint roots the module at its own directory and
+  takes all of it.
+  """
+  let needsRuntimeSettings(config: JSONValue!): Boolean! {
+    let fields = config.fields
+    fields.contains("include") or fields.contains("exclude") or
+      (fields.contains("source") and normalizePath(config.field(["source"]).asString) != ".")
+  }
+
+  """
   Whether a manifest names the Python runtime built into the engine, which
   generated the module's bindings at load time and gave its code a global
   `dag`. The code is the old code, so the scope gets the global client.
@@ -269,18 +282,25 @@ type PythonSdk {
   }
 
   """
+  A scope's module config, whichever it has: dagger-module.toml, or the
+  pre-1.0 dagger.json generation converts. Read it only once hasModuleConfig
+  says there is one.
+  """
+  let manifestSettings(ws: Workspace!, scope: String!): JSONValue! {
+    if (scopeHasFile(ws, scope, "dagger-module.toml")) {
+      tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
+    } else {
+      json.withContents((ws.file("/" + scopePath(scope, "dagger.json")).contents :: Dagger.JSON!))
+    }
+  }
+
+  """
   Whether this generation converts a module the builtin Python runtime ran,
   from a pre-1.0 dagger.json or from a manifest that still names that
   runtime. Only the generation that rewrites the manifest can tell.
   """
   let migratingModule(ws: Workspace!, scope: String!): Boolean! {
-    if (scopeHasFile(ws, scope, "dagger-module.toml")) {
-      namesBuiltinRuntime(tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents))
-    } else if (scopeHasFile(ws, scope, "dagger.json")) {
-      namesBuiltinRuntime(json.withContents((ws.file("/" + scopePath(scope, "dagger.json")).contents :: Dagger.JSON!)))
-    } else {
-      false
-    }
+    hasModuleConfig(ws, scope) and namesBuiltinRuntime(manifestSettings(ws, scope))
   }
 
   """
@@ -347,41 +367,19 @@ type PythonSdk {
   }
 
   """
-  What a static entrypoint cannot carry, refused before anything is written.
+  What a generated entrypoint cannot carry, refused before anything is
+  written. A manifest that names a runtime, or says what only a runtime can
+  honour, never reaches here: it keeps its runtime instead.
   """
   let checkStaticScope(ws: Workspace!, scope: String!, hadConfig: Boolean!): Void {
     if (hadConfig == false and template == "legacy") {
       raise "the legacy template is not available with a static entrypoint"
     }
-    if (scopeHasFile(ws, scope, "dagger-module.toml")) {
-      let objections = staticObjections(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
-      if (objections.length > 0) {
-        raise "dagger-module.toml has settings a generated entrypoint cannot carry (" + objections.join(", ") + "); remove them, or name a runtime of your own under [runtime]"
-      }
+    if (scopeHasFile(ws, scope, "dagger-module.toml") and
+        tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents).fields.contains("clients")) {
+      raise "dagger-module.toml has a [clients] table, which this SDK does not generate: a module's clients are its scope's, in dagger.toml; remove the table"
     }
     null
-  }
-
-  """
-  Manifest keys and tables that an entrypoint manifest has no place for, read
-  with a TOML parser.
-  """
-  let staticObjections(toml: String!): [String!]! {
-    let config = tomlConfig(toml)
-    let fields = config.fields
-    let keys = ["include"].filter { key => fields.contains(key) }
-    # An entrypoint manifest roots a module at its own directory, which is what
-    # `source = "."` says; any other source is what it cannot carry.
-    let source = if (fields.contains("source") and normalizePath(config.field(["source"]).asString) != ".") {
-      ["source"]
-    } else {
-      [] :: [String!]!
-    }
-    # [[dependencies]] is not among them: generation removes it on every path,
-    # and [codegen] has a refusal of its own.
-    let tables = ["clients"].filter { name => fields.contains(name) }
-    let runtime = if (keepsItsRuntime(config)) { ["runtime"] } else { [] :: [String!]! }
-    keys + source + tables + runtime
   }
 
   let tomlConfig(toml: String!): JSONValue! {
@@ -420,6 +418,10 @@ type PythonSdk {
       generatedMode
     } else if (namesDangEntrypoint(ws, scope)) {
       remoteMode
+    } else if (needsOwnRuntime(ws, scope)) {
+      # After the entrypoint a manifest names, so that an entrypoint beside
+      # these settings is still refused rather than quietly kept.
+      runtimeMode
     } else {
       generatedMode
     }
@@ -439,8 +441,15 @@ type PythonSdk {
   generation keeps and puts no entrypoint in front of.
   """
   let keepsOwnRuntime(ws: Workspace!, scope: String!): Boolean! {
-    scopeHasFile(ws, scope, "dagger-module.toml") and
-      keepsItsRuntime(tomlConfig(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents))
+    hasModuleConfig(ws, scope) and keepsItsRuntime(manifestSettings(ws, scope))
+  }
+
+  """
+  Whether a module's manifest keeps it on a runtime by what it says, rather
+  than by naming one: a module of some files only, or rooted elsewhere.
+  """
+  let needsOwnRuntime(ws: Workspace!, scope: String!): Boolean! {
+    hasModuleConfig(ws, scope) and needsRuntimeSettings(manifestSettings(ws, scope))
   }
 
   let hasEntrypointManifest(ws: Workspace!, scope: String!): Boolean! {
