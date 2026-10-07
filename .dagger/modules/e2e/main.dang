@@ -1527,6 +1527,42 @@ type E2e {
 
 
   """
+  Whether a cache policy reaches the exec an entrypoint starts: the answers of
+  a `cache="never"` function twice over, then of a plain one twice over. The
+  first pair differs and the second does not once the engine passes callDigest
+  (dagger/dagger#14491).
+
+  No `@check`: it needs such an engine, and a CLI of that engine's own version
+  in the playground, which engineImage names.
+
+      dagger call -m .dagger/modules/e2e cache-policy-probe --engine-image registry.dagger.io/engine:v<version>
+  """
+  pub cachePolicyProbe(ws: Workspace!, engineImage: String! = ""): String! {
+    let path = ".dagger/modules/cache-probe"
+    let source = "import time\n\nfrom dagger import function, object_type\n\n\n@object_type\nclass CacheProbe:\n" +
+      "    @function\n    def plain(self) -> str:\n        return str(time.time_ns())\n\n" +
+      "    @function(cache=\"never\")\n    def never(self) -> str:\n        return str(time.time_ns())\n"
+    let image = if (engineImage == "") { floorImage } else { engineImage }
+    let base = container
+      .from(image)
+      .withoutEntrypoint
+      .withMountedDirectory(playgroundRoot, playgroundTree(ws))
+      .withWorkdir(playgroundRoot)
+      .withExec(["git", "init", "--quiet"])
+    let ready = cli(
+      cli(base, ["module", "init", "python", "--auto-apply", "--name", "cache-probe", "--path", path, "--dang-entrypoint"])
+        .withNewFile(path + "/src/cache_probe/__init__.py", source),
+      ["generate", "-y"],
+    )
+    # One env variable per answer: two identical execs here would be one.
+    let answer(fn: String!, run: String!): String! {
+      cli(ready.withEnvVariable("E2E_PROBE_RUN", run), ["-m", path, "call", fn]).stdout.trimSpace
+    }
+    "never: " + answer("never", "1") + " " + answer("never", "2") +
+      ", plain: " + answer("plain", "3") + " " + answer("plain", "4")
+  }
+
+  """
   A static entrypoint scope: the entrypoint manifest, the template, bindings
   from the current schema view, and the generated entrypoint, which builds the
   module from its own source.
@@ -1654,11 +1690,9 @@ type E2e {
 
     let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
     let neverCached = "from dagger import function, object_type\n\n\n@object_type\nclass TomlGenerateApp:\n    @function(cache=\"never\")\n    def hello(self) -> str:\n        return \"hello\"\n"
-    # Refused by the container that renders the types, so reading the
-    # rendered file is what triggers the refusal.
     let fresh = static.generateScope(ws.withNewFile(sourcePath, neverCached).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
-      .file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang").contents rescue "raised"
-    assert(fresh == "raised", "a cache policy was accepted on the static path")
+      .file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang").contents
+    assertContains(fresh, "withCachePolicy(FunctionCachePolicy.Never)", "a generated entrypoint dropped the cache policy: " + fresh)
 
     null
   }

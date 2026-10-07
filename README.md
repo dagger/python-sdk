@@ -141,9 +141,7 @@ that forgot it. A change the types do not describe, such as a function body,
 runs as edited.
 
 What the static path cannot do yet, and refuses at `dagger generate`:
-any `cache=` value
-on a function (the entrypoint's exec is content-cached and receives no
-per-call signal), the `legacy` template, and a manifest with `include`,
+the `legacy` template, and a manifest with `include`,
 `disableDefaultFunctionCaching`, a runtime other than `python`, a `source`
 other than `.`, or `codegen`, `clients` or `dependencies` tables. Such
 modules keep the default path. There is no `debug` terminal on the static

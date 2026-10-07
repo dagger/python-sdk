@@ -18,7 +18,6 @@ from dagger.mod._entrypoint import (
     render_types,
     write_entrypoint,
 )
-from dagger.mod._exceptions import BadUsageError
 
 GOLDEN = pathlib.Path(__file__).parent / "golden"
 
@@ -121,16 +120,23 @@ def test_one_constructor_no_cache_policy(mod: Module):
     assert "withCachePolicy" not in rendered
 
 
-def test_refuses_cache_policy():
+@pytest.mark.parametrize(
+    ("cache", "policy"),
+    [
+        ("never", "FunctionCachePolicy.Never"),
+        ("session", "FunctionCachePolicy.PerSession"),
+        ("30m", 'FunctionCachePolicy.Default, timeToLive: "30m"'),
+    ],
+)
+def test_renders_cache_policy(cache: str, policy: str):
     mod = Module("Foo")
 
     @mod.object_type
     class Foo:
-        @mod.function(cache="never")
+        @mod.function(cache=cache)
         def fresh(self) -> str: ...
 
-    with pytest.raises(BadUsageError, match="cache='never'"):
-        render_types(mod.describe())
+    assert f".withCachePolicy({policy})" in render_types(mod.describe())
 
 
 def test_write_entrypoint(mod: Module, tmp_path: pathlib.Path):

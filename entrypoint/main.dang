@@ -38,6 +38,7 @@ type Entrypoint implements ModuleEntrypoint {
     receiverValue: JSON,
     fnName: String!,
     fnArgs: JSON!,
+    callDigest: String,
   ): JSON! {
     let request = JSON.encode({{
       receiverType: receiverType,
@@ -46,6 +47,10 @@ type Entrypoint implements ModuleEntrypoint {
       fnArgs: fnArgs,
     }})
     let result = build.installed
+      # The exec is cached on its own recipe, which holds neither the call's
+      # arguments nor its cache policy; the engine's digest of the call does
+      # (dagger/dagger#14491), so a policy reaches the exec through it.
+      .withEnvVariable(callDigestVariable, callDigest ?? "")
       .withExec(
         ["python", "-m", "dagger.mod", "call", "--output", callResultPath],
         stdin: request,
@@ -58,6 +63,8 @@ type Entrypoint implements ModuleEntrypoint {
 
   let describePath: String! = "/dagger/describe.json"
   let callResultPath: String! = "/dagger/result.json"
+
+  let callDigestVariable: String! = "DAGGER_MODULE_CALL_DIGEST"
 
   """The module's type description, as the JSON its own tools already emit."""
   let describeJSON: Dagger.JSON! {
