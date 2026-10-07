@@ -111,7 +111,8 @@ type E2e {
   """
   Mod lookup should find the owning Python SDK module when called from a nested path.
   """
-  pub moduleLookupCheck(ws: Workspace!): Void @check {
+  pub moduleLookupCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, lookupModulePath, "lookup-app")
     let nested = pythonSdk.mod(ws, path: lookupNestedPath)
     let exact = pythonSdk.mod(ws, path: lookupModulePath, findUp: false)
 
@@ -137,7 +138,8 @@ type E2e {
   Lookup must choose the nearest registered module even when an ancestor holds
   a module config of the other format.
   """
-  pub mixedConfigLookupCheck(ws: Workspace!): Void @check {
+  pub mixedConfigLookupCheck(scope: Workspace!): Void @check {
+    let ws = withScope(withScope(scope, mixedDiscoveryModulePath, "mixed-discovery-app"), tomlModulePath, "toml-app")
     let mixed = pythonSdk.mod(ws, path: mixedDiscoveryNestedPath)
     assert(mixed.rootPath == mixedDiscoveryModulePath, "lookup chose the ancestor dagger-module.toml instead of the nearer registered module")
 
@@ -844,7 +846,8 @@ type E2e {
   `mod generate` writes the same tree as the scope generation, with the
   clients the workspace declares for the module's scope.
   """
-  pub modGenerateClientsCheck(ws: Workspace!): Void @check {
+  pub modGenerateClientsCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, tomlGenerateModulePath, "toml-generate-app")
     # A client added from the scope names its module from there.
     let scoped = ws.withWorkdir(tomlGenerateModulePath)
       .withClient(module: "../../clients/dep", sdk: "python")
@@ -869,7 +872,8 @@ type E2e {
   .gitattributes are already on disk, so a changeset adding either describes
   the workspace base, not the generated context.
   """
-  pub generateSkipsExistingFilesCheck(ws: Workspace!): Void @check {
+  pub generateSkipsExistingFilesCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, generateModulePath, "generate-app")
     let existing = [
       generateModulePath + "/dagger.json",
       generateModulePath + "/.gitattributes",
@@ -885,7 +889,8 @@ type E2e {
   SDK, which vendors its bindings; the module is not upgraded behind the
   user's back.
   """
-  pub generateCheck(ws: Workspace!): Void @check {
+  pub generateCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, generateModulePath, "generate-app")
     let changes = pythonSdk.mod(ws, path: generateModulePath).generate
 
     assertAdded(changes, generateModulePath + "/" + legacyBindingsPath)
@@ -899,7 +904,8 @@ type E2e {
   engine's builtin: the tell is that the builtin vendors its whole sdk/python
   tree, runtime included.
   """
-  pub tomlGenerateCheck(ws: Workspace!): Void @check {
+  pub tomlGenerateCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, tomlGenerateModulePath, "toml-generate-app")
     let changes = pythonSdk.mod(ws, path: tomlGenerateModulePath).generate
 
     assertAdded(changes, tomlGenerateModulePath + "/" + sdkMemberFile)
@@ -1574,6 +1580,17 @@ type E2e {
     null
   }
 
+  """
+  The workspace with one fixture scope registered, as a repository that keeps
+  Python modules records them. This repository's own config registers none:
+  its Python scopes are fixtures, and the engine generates every registered
+  scope, which would write the whole SDK into each of them.
+  """
+  let withScope(ws: Workspace!, path: String!, name: String!): Workspace! {
+    ws.withNewFile("/dagger.toml", ws.file("/dagger.toml").contents +
+      "\n[sdks.python.scopes.\"" + path + "\"]\nis-module = true\nname = \"" + name + "\"\n")
+  }
+
   let cli(ctr: Container!, args: [String!]!): Container! {
     ctr.withExec(["dagger"] + args, experimentalPrivilegedNesting: true)
   }
@@ -1697,7 +1714,8 @@ type E2e {
   config.get should reflect pyproject.toml and report unset values as null
   rather than guessing, and config.set should edit only pyproject.toml.
   """
-  pub configCheck(ws: Workspace!): Void @check {
+  pub configCheck(scope: Workspace!): Void @check {
+    let ws = withScope(withScope(scope, configModulePath, "config-app"), configuredModulePath, "config-configured")
     let app = pythonSdk.mod(ws, path: configModulePath).config
     let configured = pythonSdk.mod(ws, path: configuredModulePath).config
 
