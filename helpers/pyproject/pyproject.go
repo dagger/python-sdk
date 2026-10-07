@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -73,6 +74,29 @@ func getMembers(doc map[string]any) string {
 	for _, m := range members {
 		if s, ok := m.(string); ok {
 			out.WriteString(s + "\n")
+		}
+	}
+	return out.String()
+}
+
+// getPathSources lists the path of every [tool.uv.sources] entry that names
+// one, by entry name. A path that leaves the scope names a directory the lock
+// reads and the scope does not hold.
+func getPathSources(doc map[string]any) string {
+	sources := table(table(table(doc, "tool"), "uv"), "sources")
+	names := make([]string, 0, len(sources))
+	for name := range sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out strings.Builder
+	for _, name := range names {
+		entry, ok := sources[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		if path, ok := entry["path"].(string); ok {
+			out.WriteString(path + "\n")
 		}
 	}
 	return out.String()

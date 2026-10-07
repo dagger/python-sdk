@@ -285,16 +285,38 @@ type Scope {
   let relocked(existing: Directory!, target: Workspace!): Workspace! {
     if (existing.exists(lockFileName)) {
       let scopeDir = target.directory(root).filter(exclude: [".venv", "**/.venv", "**/__pycache__"])
+      # A path dependency of the user's own may sit outside the scope: a
+      # package the modules of one repository share. uv reads it to lock, so
+      # the workspace comes in behind the scope when the scope file names one,
+      # which keeps the lock's inputs to the scope alone for every other.
+      let tree = if (leavesScope(scopeDir)) {
+        ws.directory("/")
+          .filter(exclude: [".git", "**/.venv", "**/__pycache__", "**/node_modules"])
+          .withDirectory(path, scopeDir)
+      } else {
+        directory.withDirectory(path, scopeDir)
+      }
+      let at = "/scope/" + path
       let lockFile = codegenBase
         .withMountedFile("/usr/local/bin/uv", container.from(buildUvImage).rootfs.file("uv"))
-        .withDirectory("/scope", scopeDir)
-        .withWorkdir("/scope")
+        .withDirectory("/scope", tree)
+        .withWorkdir(at)
         .withExec(["uv", "lock"])
-        .file("/scope/" + lockFileName)
+        .file(at + "/" + lockFileName)
       target.withFile(memberPath(lockFileName), lockFile)
     } else {
       target
     }
+  }
+
+  """
+  Whether the scope file names a path dependency that leaves the scope, which
+  only the workspace around it holds.
+  """
+  let leavesScope(scopeDir: Directory!): Boolean! {
+    PyprojectHelper().pathSources(scopeDir.file(scopeFileName))
+      .filter { source => source.hasPrefix("../") }
+      .length > 0
   }
 
   let buildUvImage: String! {
@@ -757,6 +779,18 @@ type PyprojectHelper {
   """
   pub generatedKind(pyproject: File!): String! {
     tool.withFile(path, pyproject).withExec(["pyproject", "get-generated", path]).stdout
+  }
+
+  """
+  The path of every [tool.uv.sources] entry that names one, in the order the
+  helper lists them.
+  """
+  pub pathSources(pyproject: File!): [String!]! {
+    tool.withFile(path, pyproject)
+      .withExec(["pyproject", "get-path-sources", path])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
   }
 
   """

@@ -599,6 +599,34 @@ type E2e {
   }
 
   """
+  A scope whose file names a path dependency outside it locks all the same:
+  the package a repository shares between its modules is in the workspace, and
+  uv reads it to lock what the scope depends on. Such a module names the
+  package under include, which is what puts it in the module source, and keeps
+  its runtime for that reason.
+  """
+  pub generateScopeSharedPathCheck(ws: Workspace!): Void @check {
+    let scope = "/" + tomlGenerateModulePath
+    let pyprojectPath = scope + "/pyproject.toml"
+    let shared = "shared-pkg = { path = \"../../shared-pkg\", editable = true }\n"
+    let seeded = ws
+      .withNewFile(scope + "/dagger-module.toml",
+        "name = \"toml-generate-app\"\nengineVersion = \"v1.0.0-0\"\ninclude = [\"../../shared-pkg\"]\n\n[runtime]\nsource = \"python\"\n")
+      .withNewFile(pyprojectPath, ws.file(pyprojectPath).contents
+        .replace("dependencies = [\"dagger-io\"]", "dependencies = [\"dagger-io\", \"shared-pkg\"]") + shared)
+      # A lock of the layout before, which generation locks again.
+      .withNewFile(scope + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
+    let generated = pythonSdk
+      .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    let lock = generated.file(scope + "/uv.lock").contents
+    assertContainsAll(lock, ["name = \"shared-pkg\"", "name = \"dagger-io\"", "name = \"dagger-clients-core\""])
+    assertContains(generated.file(pyprojectPath).contents, shared, "generation dropped the shared path dependency")
+
+    null
+  }
+
+  """
   A client whose target is a module in the workspace that was never migrated
   is refused before anything is written: the engine serves a module by its
   manifest, and a target with only a pre-1.0 dagger.json has none. The

@@ -76,6 +76,9 @@ func run(args []string) error {
 	case "get-members":
 		fmt.Print(getMembers(doc))
 		return nil
+	case "get-path-sources":
+		fmt.Print(getPathSources(doc))
+		return nil
 	case "get-global-client":
 		if v, ok := getGlobalClient(doc); ok {
 			fmt.Print(boolStr(v))

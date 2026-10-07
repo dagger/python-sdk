@@ -145,6 +145,24 @@ func TestGetGlobalClient(t *testing.T) {
 	}
 }
 
+func TestGetPathSources(t *testing.T) {
+	doc := mustLoad(t, `[tool.uv.sources]
+dagger-io = { workspace = true }
+agent-base = { path = "../_agent_base", editable = true }
+vendored = { path = "sdk" }
+remote = { git = "https://example.test/pkg" }
+`)
+	if got := getPathSources(doc); got != "../_agent_base\nsdk\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := getPathSources(mustLoad(t, sample)); got != "sdk\n" {
+		t.Errorf("the vendored library of the layout before: got %q", got)
+	}
+	if got := getPathSources(mustLoad(t, configured)); got != "" {
+		t.Errorf("a file without sources: got %q", got)
+	}
+}
+
 func TestGetMembers(t *testing.T) {
 	doc := mustLoad(t, `["tool"."uv"."workspace"]
 members = ["sdk", "clients/core", ["clients/unowned"]]
