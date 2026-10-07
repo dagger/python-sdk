@@ -552,6 +552,37 @@ type E2e {
   }
 
   """
+  Two settings only a runtime reads are refused one at a time, in either
+  manifest: the message names the setting and the way out, rather than listing
+  it among others. Generation dropped them silently from a dagger.json.
+  """
+  pub manifestRuntimeSettingsCheck(ws: Workspace!): Void @check {
+    let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
+    let head = "name = \"toml-generate-app\"\n"
+    let caching = manifestOf(ws.withNewFile(manifestPath, head + "disableDefaultFunctionCaching = true\n")) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(caching, ["dagger-module.toml sets disableDefaultFunctionCaching", "pass cache="])
+    let codegen = manifestOf(ws.withNewFile(manifestPath, head + "\n[codegen]\nautomaticGitignore = true\n")) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(codegen, ["dagger-module.toml has a [codegen] table", "remove the table"])
+
+    let jsonPath = "/" + generateModulePath + "/dagger.json"
+    let jsonHead = "{\"name\": \"generate-app\", \"engineVersion\": \"v0.20.8\", \"sdk\": {\"source\": \"python\"}"
+    let jsonCaching = legacyManifestOf(ws.withNewFile(jsonPath, jsonHead + ", \"disableDefaultFunctionCaching\": true}")) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(jsonCaching, ["dagger.json sets disableDefaultFunctionCaching", "pass cache="])
+    let jsonCodegen = legacyManifestOf(ws.withNewFile(jsonPath, jsonHead + ", \"codegen\": {\"automaticGitignore\": true}}")) rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(jsonCodegen, ["dagger.json has a [codegen] table", "remove the table"])
+
+    null
+  }
+
+  """
   A client whose target is a module in the workspace that was never migrated
   is refused before anything is written: the engine serves a module by its
   manifest, and a target with only a pre-1.0 dagger.json has none. The
@@ -1052,6 +1083,13 @@ type E2e {
   """The manifest generating the toml-generate fixture leaves, from a seeded workspace."""
   let manifestOf(seeded: Workspace!): String! {
     manifestWithClients(seeded, [])
+  }
+
+  let legacyManifestOf(seeded: Workspace!): String! {
+    pythonSdk
+      .generateScope(seeded.withWorkdir(generateModulePath), isModule: true, name: "generate-app", clients: [])
+      .withWorkdir(".")
+      .file("/" + generateModulePath + "/dagger-module.toml").contents
   }
 
   let manifestWithClients(seeded: Workspace!, clients: [ModuleSource!]!): String! {

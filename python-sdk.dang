@@ -305,9 +305,17 @@ type PythonSdk {
   Refuse what a runtime manifest can say and an entrypoint manifest cannot,
   before anything is written: which files are the module (include, exclude)
   and where its source is. Dropping either would change the module silently.
+  Two settings the builtin runtime read have a way out of their own, so they
+  are named one at a time.
   """
   let checkEntrypointOnly(config: JSONValue!, file: String!): Void {
     let fields = config.fields
+    if (fields.contains("disableDefaultFunctionCaching")) {
+      raise file + " sets disableDefaultFunctionCaching, which only a runtime reads: remove it, and pass cache= to the functions that must not be cached"
+    }
+    if (fields.contains("codegen")) {
+      raise file + " has a [codegen] table, which only a runtime reads: remove the table"
+    }
     let listed = ["include", "exclude"].filter { key => fields.contains(key) }
     let source = if (fields.contains("source") and normalizePath(config.field(["source"]).asString) != ".") {
       ["source"]
@@ -361,7 +369,7 @@ type PythonSdk {
   let staticObjections(toml: String!): [String!]! {
     let config = tomlConfig(toml)
     let fields = config.fields
-    let keys = ["include", "disableDefaultFunctionCaching"].filter { key => fields.contains(key) }
+    let keys = ["include"].filter { key => fields.contains(key) }
     # An entrypoint manifest roots a module at its own directory, which is what
     # `source = "."` says; any other source is what it cannot carry.
     let source = if (fields.contains("source") and normalizePath(config.field(["source"]).asString) != ".") {
@@ -369,8 +377,9 @@ type PythonSdk {
     } else {
       [] :: [String!]!
     }
-    # [[dependencies]] is not among them: generation removes it on every path.
-    let tables = ["codegen", "clients"].filter { name => fields.contains(name) }
+    # [[dependencies]] is not among them: generation removes it on every path,
+    # and [codegen] has a refusal of its own.
+    let tables = ["clients"].filter { name => fields.contains(name) }
     let runtime = if (keepsItsRuntime(config)) { ["runtime"] } else { [] :: [String!]! }
     keys + source + tables + runtime
   }
