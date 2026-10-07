@@ -95,10 +95,19 @@ def __getattr__(name: str) -> _typing.Any:
             "and the API is on core() from dagger_clients.core."
         )
     elif name[:1].isupper():
-        msg += (
-            f". Core types moved to dagger_clients.core: "
-            f"from dagger_clients.core import {name}"
-        )
+        # The global client names every type of the core it was generated
+        # against, so a name it lacks is a name this engine's core lacks:
+        # pointing at the new home would send the reader after nothing.
+        if global_ is None:
+            msg += (
+                f". Core types moved to dagger_clients.core: "
+                f"from dagger_clients.core import {name}"
+            )
+        else:
+            msg += (
+                f". The core of this engine has no {name}: the code is written "
+                "against an API it no longer serves"
+            )
     raise AttributeError(msg)
 
 

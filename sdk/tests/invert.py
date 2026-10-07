@@ -69,6 +69,11 @@ INVERSIONS = [
     ),
     # dagger.Container names its new home.
     Inversion(
+        PACKAGE + "test_a_core_name_this_engine_lost_says_so",
+        'assert "The core of this engine has no Gone" in str(e), e',
+        'assert "The core of this engine has no Nothing" in str(e), e',
+    ),
+    Inversion(
         PACKAGE + "test_core_name_points_to_its_new_home",
         'dagger_clients.core: from dagger_clients.core import Container"',
         'dagger_clients.core: from dagger_clients.core import Directory"',
@@ -265,8 +270,8 @@ INVERSIONS = [
     ),
     Inversion(
         PACKAGES + "test_global_client_refuses_schemas_of_two_cores",
-        'for part in (\'"glow"\', \'"linter"\', "engineVersion", "engine\'s own view"):',
-        'for part in (\'"glow"\', \'"linter"\', "engineVersion", "no such words"):',
+        'for part in (\'"glow"\', \'"linter"\', "engineVersion", "own view"):',
+        'for part in (\'"glow"\', \'"linter"\', "engineVersion", "no such"):',
     ),
     Inversion(
         PACKAGES + "test_global_client_imports_the_helpers_its_signatures_name",

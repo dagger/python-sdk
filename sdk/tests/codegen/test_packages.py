@@ -983,7 +983,7 @@ def test_global_client_refuses_schemas_of_two_cores():
 
     # Which clients disagree, and what to do about it.
     message = str(caught.value)
-    for part in ('"glow"', '"linter"', "engineVersion", "engine's own view"):
+    for part in ('"glow"', '"linter"', "engineVersion", "own view"):
         assert part in message
 
 

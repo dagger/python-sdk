@@ -179,8 +179,28 @@ NO_GENERATED_CODE = """
 """
 
 
+A_NAME_THE_CORE_LOST = """
+    import dagger
+
+    # A type the module's code names and this engine's core does not have,
+    # which the global client would hold if it did.
+    try:
+        dagger.Gone
+    except AttributeError as e:
+        assert "The core of this engine has no Gone" in str(e), e
+        assert "from dagger_clients.core import Gone" not in str(e), e
+    else:
+        raise AssertionError("dagger.Gone exists")
+    print("ok")
+"""
+
+
 def test_package_imports_with_no_generated_code():
     assert _run(NO_GENERATED_CODE) == "ok\n"
+
+
+def test_a_core_name_this_engine_lost_says_so(generated: pathlib.Path):
+    assert _run(A_NAME_THE_CORE_LOST, generated) == "ok\n"
 
 
 @pytest.fixture
