@@ -1,0 +1,9 @@
+[project]
+name = "notes"
+version = "0.1.0"
+
+[tool.notes]
+example = """
+[tool.dagger]
+generated = "client"
+"""

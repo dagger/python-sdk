@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -18,6 +19,15 @@ func main() {
 	}
 }
 
+var nonAlphanumeric = regexp.MustCompile(`[^a-z0-9]+`)
+
+// packageName must match packageNameFor in runtime/build.dang: the runtime
+// imports that package, and uv_build expects the same directory.
+func packageName(moduleName string) string {
+	project := strings.Trim(nonAlphanumeric.ReplaceAllString(strings.ToLower(moduleName), "-"), "-")
+	return strings.ReplaceAll(project, "-", "_")
+}
+
 func run(args []string) error {
 	if len(args) != 3 {
 		return fmt.Errorf("usage: render-template MODULE_NAME TEMPLATE_DIR OUT_DIR")
@@ -28,9 +38,10 @@ func run(args []string) error {
 	outDir := args[2]
 	data := map[string]string{
 		"ModuleName":    moduleName,
+		"ModuleProject": strings.ToLower(moduleName),
 		"ModuleType":    strcase.ToCamel(moduleName),
 		"ModuleImport":  "dagger/" + strcase.ToKebab(moduleName),
-		"ModulePackage": strcase.ToSnake(moduleName),
+		"ModulePackage": packageName(moduleName),
 	}
 
 	return filepath.WalkDir(templateDir, func(path string, entry os.DirEntry, err error) error {

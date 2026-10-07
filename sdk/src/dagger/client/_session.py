@@ -1,17 +1,29 @@
+import atexit
 import logging
 import os
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anyio
 import httpx
 from opentelemetry import propagate
 from typing_extensions import Self
 
-from dagger import ClientConnectionError, TransportError, telemetry
-from dagger._exceptions import _query_error_from_response
+from dagger import telemetry
+from dagger._exceptions import (
+    ClientConnectionError,
+    ClientLoadError,
+    DaggerError,
+    TransportError,
+    _query_error_from_response,
+)
 from dagger._managers import ResourceManager
 from dagger.client._config import ConnectConfig
+
+if TYPE_CHECKING:
+    from dagger.client._descriptor import Target
 
 logger = logging.getLogger(__name__)
 
@@ -176,12 +188,22 @@ def _unexpected(response: httpx.Response) -> str:
 
 class BaseConnection:
     session: ClientSession
+    # Kept on the connection so the session dies with it, and so every
+    # execution over one connection shares one load memo and name guard.
+    _as_session: "Session | None" = None
+
+    async def _ready(self) -> ClientSession:
+        """The session, once there is an engine behind it."""
+        return self.session
 
     async def connect(self) -> Self:
-        await self.session.start()
+        await (await self._ready()).start()
         return self
 
     async def close(self) -> None:
+        # The transport forgets its served modules; so must the session.
+        if self._as_session is not None:
+            self._as_session.forget()
         await self.session.close()
 
     async def aclose(self) -> None:
@@ -215,6 +237,9 @@ class SharedConnection(BaseConnection):
     _session: ClientSession | None = None
     _params: ConnectParams | None = None
     _cfg: ConnectConfig
+    # Set while this process runs an engine it provisioned itself.
+    _stop_engine: Callable[[], None] | None = None
+    _provisioning: anyio.Lock | None = None
 
     def __new__(cls):
         if not cls._instance:
@@ -262,6 +287,55 @@ class SharedConnection(BaseConnection):
             self._session = ClientSession(self._params, self._cfg)
         return self._session
 
+    async def _ready(self) -> ClientSession:
+        """The session, provisioning an engine if nothing gave one.
+
+        A module and `dagger run` put a session in the environment, and
+        `dagger.connection()` passes its own, so both come first: a module
+        must never try to provision. Only a plain program with no connection
+        handling gets here with neither.
+        """
+        if not self._session and not self._params:
+            self._params = ConnectParams.from_env()
+            if not self._params:
+                await self._provision()
+        return self.session
+
+    async def _provision(self) -> None:
+        if self._provisioning is None:
+            self._provisioning = anyio.Lock()
+        async with self._provisioning:
+            if self._params:
+                return
+            if _module_runtime:
+                # The engine gives a module its session; one that lacks it
+                # must say so, not download a CLI in the module's container.
+                msg = "No active engine session to connect to"
+                raise ClientConnectionError(msg)
+            try:
+                # Not at import: an older module runtime has no provisioning.
+                from dagger.provisioning._config import Config
+                from dagger.provisioning._engine import provision_default_session
+            except ModuleNotFoundError as e:
+                if not (e.name or "").startswith("dagger.provisioning"):
+                    raise
+                msg = "No active engine session to connect to"
+                raise ClientConnectionError(msg) from e
+
+            cfg = Config(timeout=self._cfg.timeout, retry=self._cfg.retry)
+            self._params, self._stop_engine = await provision_default_session(cfg)
+            # The engine is a subprocess, and closing it is sync, so it can
+            # run at exit, after the program's event loop is gone.
+            atexit.register(self.stop_engine)
+
+    def stop_engine(self) -> None:
+        """End the engine this process provisioned, if it did."""
+        stop, self._stop_engine = self._stop_engine, None
+        if stop is not None:
+            atexit.unregister(self.stop_engine)
+            self._params = None
+            stop()
+
     def is_connected(self) -> bool:
         return self._session is not None and self._session.has_session()
 
@@ -269,3 +343,151 @@ class SharedConnection(BaseConnection):
         if self._session:
             await super().close()
             self._session = None
+        if self._stop_engine is not None:
+            await anyio.to_thread.run_sync(self.stop_engine)
+
+
+@dataclass(slots=True)
+class _Load:
+    target: "Target"
+    lock: anyio.Lock = field(default_factory=anyio.Lock)
+    done: bool = False
+
+
+class Session(BaseConnection):
+    """A connection to one engine, and what has been loaded into it.
+
+    Owns the connection, the query transport and the load memo. It has no
+    API field: a client is the way in.
+    """
+
+    def __init__(self, connection: BaseConnection | None = None) -> None:
+        # No connection is the shared one, which a module and `dagger run`
+        # set up: the session the generated global client builds is over it.
+        self.connection = SharedConnection() if connection is None else connection
+        self._loads: dict[str, _Load] = {}
+
+    @property
+    def session(self) -> ClientSession:  # type: ignore[override]
+        return self.connection.session
+
+    async def _ready(self) -> ClientSession:
+        return await self.connection._ready()  # noqa: SLF001
+
+    async def connect(self) -> Self:
+        await self.connection.connect()
+        return self
+
+    async def close(self) -> None:
+        self.forget()
+        await self.connection.close()
+
+    def forget(self) -> None:
+        """Drop the load memo: a new engine behind the connection has nothing."""
+        self._loads.clear()
+
+    async def execute(self, query: str) -> Any:
+        return await (await self._ready()).execute(query)
+
+    def __getattr__(self, name: str) -> Any:
+        # Only reached for a name the session lacks, and the likely ask is
+        # an API field of the global client that dag used to be. Telling a
+        # core field from a client would take importing core, so the message
+        # names both.
+        msg = f"{type(self).__name__!r} object has no attribute {name!r}"
+        if not name.startswith("_"):
+            msg += (
+                f". The API is on the clients now: core().{name}() for a core "
+                "field (from dagger_clients.core import core), "
+                f"or {name}() from the client's package for a client. "
+                f"To keep dag.{name}() while migrating, set "
+                "global-client = true under [tool.dagger] and run dagger generate."
+            )
+        raise AttributeError(msg, name=name, obj=self)
+
+    async def load(self, target: "Target") -> None:
+        """Serve the module a target names, once per session."""
+        entry = self._loads.setdefault(target.name, _Load(target))
+        if entry.target != target:
+            # Whole descriptors: the two may differ only by pin, and the
+            # first is held from its first attempt, loaded or not.
+            msg = (
+                f"This session already holds {entry.target!r} "
+                f"and cannot also take {target!r}"
+            )
+            raise ClientLoadError(msg, target=target)
+        async with entry.lock:
+            if entry.done:
+                return
+            # The loader builds its query with Context, which imports this
+            # module, so it can only be reached from inside a function.
+            from dagger.client._load import load_target
+
+            try:
+                await load_target(self, target)
+            except DaggerError as e:
+                msg = f"Failed to load client {target.name!r} from {target.ref!r}: {e}"
+                raise ClientLoadError(msg, target=target) from e
+            entry.done = True
+
+
+_module_runtime = False
+
+
+def mark_module_runtime() -> None:
+    """Say this process serves a module, so it never provisions an engine.
+
+    The module entrypoints call it first. A module's session comes from the
+    engine that runs it; without this, only that session being there would
+    keep the default session from provisioning one.
+    """
+    global _module_runtime  # noqa: PLW0603
+    _module_runtime = True
+
+
+_default: Session | None = None
+# Sessions are looked up from threads too, before any event loop exists.
+_sessions_lock = threading.Lock()
+
+
+def _no_default() -> Session | None:
+    return None
+
+
+_find_default: Callable[[], Session | None] = _no_default
+
+
+def set_default_finder(find: Callable[[], Session | None]) -> None:
+    """Say where to find a default session before making one.
+
+    Only the temporary global client needs this: its ``dag`` is a Session,
+    and it has to be the default one, so that a client called without
+    ``session=`` and ``dagger.connection()`` share its loads.
+    """
+    global _find_default  # noqa: PLW0603
+    _find_default = find
+
+
+def default_session() -> Session:
+    """The one session per process, over the shared connection."""
+    global _default  # noqa: PLW0603
+    if _default is None:
+        # Outside the lock: finding it can import generated code, which must
+        # not run while other threads wait on the lock.
+        found = _find_default()
+        with _sessions_lock:
+            if _default is None:
+                _default = Session() if found is None else found
+    return _default
+
+
+def as_session(conn: BaseConnection) -> Session:
+    """The session a connection belongs to."""
+    if isinstance(conn, Session):
+        return conn
+    if isinstance(conn, SharedConnection):
+        return default_session()
+    with _sessions_lock:
+        if conn._as_session is None:  # noqa: SLF001
+            conn._as_session = Session(conn)  # noqa: SLF001
+        return conn._as_session  # noqa: SLF001

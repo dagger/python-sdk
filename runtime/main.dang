@@ -31,6 +31,14 @@ type PythonSdkRuntime {
   }
 
   """
+  The workspace members this runtime reads from a scope's pyproject.toml.
+  Generation checks the file it writes with it.
+  """
+  pub scopeMembers(pyproject: File!): [String!]! {
+    PythonModuleBuild().scopeMembers(pyproject)
+  }
+
+  """
   The class name of a module's main object.
   """
   pub mainObjectName(name: String!): String! {

@@ -3,14 +3,16 @@ import logging
 import os
 import shutil
 import sys
-import typing
+from collections.abc import Callable
 from typing import TextIO
 
 from exceptiongroup import ExceptionGroup
 from typing_extensions import Self
 
-import dagger
 from dagger._engine._version import CLI_VERSION
+from dagger._exceptions import QueryError
+from dagger._managers import SyncResource, asyncify
+from dagger.client._core import Context
 from dagger.client._session import (
     BaseConnection,
     ConnectConfig,
@@ -23,12 +25,9 @@ from ._config import Config
 from ._download import Downloader
 from ._exceptions import CLIReleaseUnavailableError, ProvisionError
 from ._progress import Progress
-from ._session import start_cli_session
+from ._session import start_cli_session_sync
 
 logger = logging.getLogger(__name__)
-
-if typing.TYPE_CHECKING:
-    from dagger import Client
 
 
 @contextlib.asynccontextmanager
@@ -99,8 +98,8 @@ class Engine:
 
             await self.progress.update("Creating new Engine session")
             try:
-                connect_params = await self.stack.enter_async_context(
-                    start_cli_session(self.cfg, cli_bin)
+                connect_params = await self.enter_session(
+                    start_cli_session_sync(self.cfg, cli_bin)
                 )
             except Exception as e:
                 if download_error is not None:
@@ -119,6 +118,12 @@ class Engine:
 
         return self
 
+    async def enter_session(
+        self, session: contextlib.AbstractContextManager[ConnectParams]
+    ) -> ConnectParams:
+        """Start the CLI session, closed with this engine's stack."""
+        return await self.stack.enter_async_context(SyncResource(session))
+
     async def get_cli(self) -> str:
         """Get path to CLI."""
         if cli_bin := os.getenv("_EXPERIMENTAL_DAGGER_CLI_BIN"):
@@ -127,15 +132,14 @@ class Engine:
         # Get from cache or download.
         return await Downloader(progress=self.progress)
 
-    async def setup_client(self, conn: BaseConnection) -> "Client":
-        """Setup client instance from connection."""
+    async def setup_client(self, conn: BaseConnection) -> BaseConnection:
+        """Open the connection and check the engine behind it."""
         await self.progress.update("Establishing connection to the API server")
         conn = await self.stack.enter_async_context(conn)
 
-        client = dagger.Client.from_connection(conn)
         self.stack.push_async_callback(self.progress.stop)
 
-        return await self.verify(client)
+        return await self.verify(conn)
 
     def get_shared_client_connection(self) -> SharedConnection:
         """Global client connection to the GraphQL server."""
@@ -156,15 +160,53 @@ class Engine:
             self.connect_config,
         )
 
-    async def verify(self, client: "Client") -> "Client":
+    async def verify(self, conn: BaseConnection) -> BaseConnection:
         """Check if the Dagger CLI version is compatible with the engine."""
         await self.progress.update("Checking version compatibility")
         try:
-            await client.version()
-        except dagger.QueryError as e:
+            await Context(conn).root_select("version", []).execute(str)
+        except QueryError as e:
             logger.warning("Failed to check Dagger engine version compatibility: %s", e)
 
         await self.progress.update("Running pipelines")
         await self.progress.stop()
 
-        return client
+        return conn
+
+
+class _UnmanagedEngine(Engine):
+    """An engine whose CLI session outlives any event loop."""
+
+    def __init__(self, cfg: Config, stack: contextlib.AsyncExitStack) -> None:
+        super().__init__(cfg, stack)
+        # Nothing to close until a CLI session starts.
+        self.close_session: Callable[[], None] = lambda: None
+
+    async def enter_session(
+        self, session: contextlib.AbstractContextManager[ConnectParams]
+    ) -> ConnectParams:
+        params = await asyncify(session.__enter__)
+
+        def close() -> None:
+            # Closing stdin ends the CLI; this waits for it to drain its logs.
+            session.__exit__(None, None, None)
+
+        self.close_session = close
+        return params
+
+
+async def provision_default_session(
+    cfg: Config,
+) -> tuple[ConnectParams, Callable[[], None]]:
+    """Provision an engine for the default session of a plain program.
+
+    The default session has no ``async with`` to close it, so the caller gets
+    the close instead. It is sync: it may run at exit, when no event loop does.
+    """
+    engine = _UnmanagedEngine(cfg, contextlib.AsyncExitStack())
+    try:
+        await engine.provision()
+    finally:
+        await engine.progress.stop()
+    assert engine.connect_params
+    return engine.connect_params, engine.close_session

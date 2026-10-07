@@ -11,8 +11,9 @@ from opentelemetry.semconv.attributes.exception_attributes import (
     EXCEPTION_TYPE,
 )
 
-import dagger
-from dagger import DaggerError, dag, telemetry
+from dagger import telemetry
+from dagger._exceptions import DaggerError, QueryError
+from dagger.mod import _api
 
 logger = logging.getLogger(__package__)
 
@@ -136,15 +137,15 @@ async def record_exception(exc: Exception):
         attrs = {**extra, **attrs}
 
     # Preserve original API error so it's properly propagated.
-    if isinstance(exc, dagger.QueryError):
+    if isinstance(exc, QueryError):
         msg = str(exc)
         attrs.update(exc.error.extensions)
 
-    dag_err = dag.error(msg)
+    dag_err = _api.error(msg)
     for key, value in attrs.items():
-        dag_err = dag_err.with_value(key, dagger.JSON(_safe_json_dumps(value)))
+        dag_err = dag_err.with_value(key, _safe_json_dumps(value))
 
-    await dag.current_function_call().return_error(dag_err)
+    await _api.current_function_call().return_error(dag_err)
 
     # When an error occurs within a started span context the OTel SDK
     # automatically sends an event with details about the exception.

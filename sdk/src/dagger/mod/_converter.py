@@ -4,11 +4,10 @@ import typing
 
 from cattrs.preconf.json import make_converter as make_json_converter
 
-import dagger
-from dagger import dag
-from dagger.client._core import Arg, configure_converter_enum
+from dagger.client._core import Arg, Context, configure_converter_enum
 from dagger.client._guards import is_id_type, is_id_type_subclass
 from dagger.client.base import Interface, Scalar, Type
+from dagger.mod import _api
 from dagger.mod._describe import TypeRef, describe_type
 from dagger.mod._resolver import Function
 from dagger.mod._utils import (
@@ -23,9 +22,6 @@ from dagger.mod._utils import (
 )
 
 logger = logging.getLogger(__name__)
-
-if typing.TYPE_CHECKING:
-    from dagger import TypeDef
 
 
 def make_converter():
@@ -58,9 +54,7 @@ def dagger_type_structure(id_: str | Scalar, cls: type[Type]):
         msg = f"Unsupported type '{cls.__name__}'"
         raise TypeError(msg)
 
-    return cls(
-        dag._ctx.select_id(cls._graphql_name(), id_)  # noqa: SLF001
-    )
+    return cls(Context().select_id(cls._graphql_name(), id_))
 
 
 def dagger_interface_structure(id_, cls: type[Interface]):
@@ -155,29 +149,29 @@ def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # n
 
 
 @functools.cache
-def to_typedef(annotation: typing.Any, context: str = "type") -> "TypeDef":
+def to_typedef(annotation: typing.Any, context: str = "type") -> _api.TypeDef:
     """Convert Python object to API type."""
     return typedef_from(describe_type(annotation, context))
 
 
-def typedef_from(ref: TypeRef) -> "TypeDef":
+def typedef_from(ref: TypeRef) -> _api.TypeDef:
     """Build the API type from its description."""
-    td = dag.type_def()
+    td = _api.type_def()
 
     if ref.optional:
         td = td.with_optional(True)
 
     match ref.kind:
-        case dagger.TypeDefKind.LIST_KIND:
+        case "LIST_KIND":
             assert ref.elem is not None
             return td.with_list_of(typedef_from(ref.elem))
-        case dagger.TypeDefKind.ENUM_KIND:
+        case "ENUM_KIND":
             return td.with_enum(ref.name, description=ref.description)
-        case dagger.TypeDefKind.SCALAR_KIND:
+        case "SCALAR_KIND":
             return td.with_scalar(ref.name, description=ref.description)
-        case dagger.TypeDefKind.INTERFACE_KIND:
+        case "INTERFACE_KIND":
             return td.with_interface(ref.name)
-        case dagger.TypeDefKind.OBJECT_KIND:
+        case "OBJECT_KIND":
             return td.with_object(ref.name)
         case _:
             return td.with_kind(ref.kind)

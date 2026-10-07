@@ -1,4 +1,12 @@
-# Run SDK checks inside the development engine.
+# This checkout as the workspace's python SDK, and the e2e checks of it, which
+# run on the local engine: `dagger check`, or hack/e2e-local.sh for a copy.
 
-[modules.engine-e2e]
-source = ".dagger/modules/engine-e2e"
+[modules.e2e]
+source = ".dagger/modules/e2e"
+
+[modules.python-sdk]
+source = "."
+check.skip = ["*"]
+
+[sdks.python]
+module = "python-sdk"

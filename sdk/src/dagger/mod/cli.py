@@ -1,5 +1,6 @@
 """Command line interface for the dagger extension runtime."""
 
+import contextlib
 import importlib
 import importlib.metadata
 import importlib.util
@@ -9,8 +10,11 @@ import typing
 
 import anyio
 
-import dagger
 from dagger import telemetry
+from dagger._exceptions import QueryError
+from dagger.client._connection import connect
+from dagger.client._descriptor import registering_types
+from dagger.client._session import mark_module_runtime
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
 from dagger.mod._module import MAIN_OBJECT, Module
 
@@ -23,6 +27,7 @@ IMPORT_PKG: typing.Final[str] = os.getenv("DAGGER_DEFAULT_PYTHON_PACKAGE", "main
 
 def app(mod: Module | None = None, register: bool = False) -> int | None:
     """Entrypoint for a Python Dagger module."""
+    mark_module_runtime()
     telemetry.initialize()
     try:
         return anyio.run(main, mod, register)
@@ -35,14 +40,17 @@ async def main(mod: Module | None = None, register: bool = False) -> int | None:
     # Establishing connection early on to allow returning dag.error().
     # Note: if there's a connection error dag.error() won't be sent but
     # should be logged and the traceback shown on the function's stderr output.
-    async with await dagger.connect():
+    async with await connect():
         try:
             if mod is None:
-                mod = load_module()
+                # Only an explicit registration is known before the user's
+                # code is imported; serve() decides after.
+                with registering_types() if register else contextlib.nullcontext():
+                    mod = load_module()
             if register:
                 return await mod.register()
             return await mod.serve()
-        except (ModuleError, dagger.QueryError) as e:
+        except (ModuleError, QueryError) as e:
             await record_exception(e)
             return 2
         except Exception as e:

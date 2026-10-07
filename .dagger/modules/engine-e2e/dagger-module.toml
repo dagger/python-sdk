@@ -1,9 +1,0 @@
-name = "engine-e2e"
-engineVersion = "v1.0.0-0"
-
-[runtime]
-  source = "dang"
-
-[[dependencies]]
-  name = "engine-dev"
-  source = "github.com/dagger/dagger/.dagger/modules/engine-dev@6bf59d50654ce9244ebeee1cc090b7dce3fe3083"

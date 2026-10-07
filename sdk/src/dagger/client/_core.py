@@ -21,8 +21,14 @@ import exceptiongroup
 from cattrs.preconf.json import make_converter as make_json_converter
 from typing_extensions import TypeForm
 
-from dagger import DaggerError, InvalidQueryError
-from dagger.client._session import BaseConnection, SharedConnection
+from dagger._exceptions import DaggerError, InvalidQueryError, QueryError
+from dagger.client._descriptor import Target, stale_client_error
+from dagger.client._session import (
+    BaseConnection,
+    Session,
+    as_session,
+    default_session,
+)
 from dagger.client.base import Input, Scalar, Type
 
 from ._guards import (
@@ -39,6 +45,7 @@ Obj_T = TypeVar("Obj_T", bound=Type)
 INDENT = "  "
 
 _SNAKE_TO_CAMEL_RE = re.compile(r"(_)([a-z\d])")
+_ENUM_NAME_RE = re.compile(r"[_A-Za-z][_0-9A-Za-z]*")
 
 
 def snake_to_camel(s: str, upper: bool = True) -> str:
@@ -51,6 +58,12 @@ def snake_to_camel(s: str, upper: bool = True) -> str:
     if upper:
         s = s[:1].upper() + s[1:]
     return s
+
+
+class EnumName(str):
+    """A schema enum value, for callers that have no generated enum to send."""
+
+    __slots__ = ()
 
 
 class Arg(typing.NamedTuple):
@@ -115,8 +128,8 @@ def _scalar_literal(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     # Before str: an enum may subclass str, and goes by name.
-    if isinstance(value, enum.Enum):
-        return value.name
+    if isinstance(value, (enum.Enum, EnumName)):
+        return _enum_literal(value)
     if isinstance(value, str):
         # GraphQL string escapes are a subset of JSON's.
         return json.dumps(value)
@@ -126,6 +139,16 @@ def _scalar_literal(value: Any) -> str:
         return repr(value)
     msg = f"Cannot serialize {value!r} as a GraphQL value"
     raise InvalidQueryError(msg)
+
+
+def _enum_literal(value: enum.Enum | EnumName) -> str:
+    if isinstance(value, enum.Enum):
+        return value.name
+    # Rendered bare, so anything but a name would inject query syntax.
+    if not _ENUM_NAME_RE.fullmatch(value):
+        msg = f"Invalid enum value name: {str(value)!r}"
+        raise InvalidQueryError(msg)
+    return str(value)
 
 
 def _input_literal(obj: Input) -> str:
@@ -161,7 +184,7 @@ def _snapshot(value: Any) -> Any:
 @dataclasses.dataclass(slots=True)
 class Context:
     conn: BaseConnection = dataclasses.field(
-        default_factory=SharedConnection,
+        default_factory=default_session,
         compare=False,
     )
     selections: collections.deque[Field] = dataclasses.field(
@@ -171,6 +194,9 @@ class Context:
         init=False,
         compare=False,
     )
+    # On the context because it is what survives chained selections and
+    # ID resolution, so it is the only thing that always reaches execute.
+    targets: frozenset[Target] = frozenset()
 
     def __post_init__(self):
         self.converter = make_converter(self)
@@ -244,9 +270,21 @@ class Context:
     async def execute(
         self, return_type: TypeForm[T] | type[T] | None = None
     ) -> T | None:
+        session = as_session(self.conn)
+        await self.load_targets(session)
         await self.resolve_ids()
-        result = await self.conn.session.execute(self.build())
+        try:
+            result = await session.execute(self.build())
+        except QueryError as e:
+            if self.targets and (stale := stale_client_error(e, self.targets)):
+                raise stale from e
+            raise
         return self.get_value(result, return_type) if return_type else None
+
+    async def load_targets(self, session: Session) -> None:
+        """Serve every module the query needs."""
+        for target in sorted(self.targets, key=lambda t: t.name):
+            await session.load(target)
 
     async def execute_object_list(
         self,

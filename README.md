@@ -18,7 +18,7 @@ It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
 | --- | --- |
 | `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `findClientRoot`, `generateScope`, `mod` (generate, config), templates |
 | `sdk/` | the `dagger-io` client library and code generator |
-| `runtime/` | the module runtime the engine calls to run a module, and the container build the static entrypoint shares |
+| `runtime/` | the container build both entrypoints share, and a module runtime for a manifest that names it |
 | `entrypoint/` | the shared Dang `ModuleEntrypoint`, served from this repository to any module that names it |
 
 Code generation happens at `dagger generate`, which calls `generateScope` for
@@ -32,86 +32,168 @@ When a managed pre-1.0 `dagger.json` scope is generated, the SDK writes
 `dagger-module.toml` and removes `dagger.json`. An unmanaged legacy module keeps
 using the Python SDK that is built into the engine.
 
-## Two runtimes, one name
+## How a module runs
 
-Python modules reach one of two implementations, and which one is decided by
-the module's config format:
+A module's manifest names what runs it, and generation follows the manifest.
+There are three answers, and a new module gets the first:
 
-- **Legacy** — an unmanaged `dagger.json` with `"sdk": {"source": "python"}`
-  resolves to the runtime built into the engine (`dagger/dagger`'s
-  `sdk/python`). It still generates bindings at module load.
-- **Modern** — a `dagger-module.toml` can point `[runtime] source` at this
-  repository's `runtime/`, which is the no-codegen path above. Either a module
-  ref or a path relative to the module works, for both `dagger generate` and
-  `dagger call`.
+| `dagger-module.toml` | What runs the module |
+| --- | --- |
+| `[entrypoint] source = "./sdk/entrypoint"` | the entrypoint generated into it, with its types baked |
+| `[entrypoint] source = <a ref>` | an entrypoint served from elsewhere, the shared one below among them |
+| `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-The engine resolves the short name `python` to exactly one target, the
-engine-baked runtime, so the modern path is reached by module ref rather than
-by name. The manifest `generateScope` writes for a new module therefore still
-names `python`; it moves to `github.com/dagger/python-sdk/runtime` in a
-follow-up, once `runtime/` exists on the default branch for that ref to
-resolve to. See
-[`future/done/self-contained-python-sdk.md`](./future/done/self-contained-python-sdk.md)
-for the full reasoning and for the engine change that would let one name serve
-both.
+An entrypoint needs an engine that runs Dang entrypoints and serves
+`serveModule`: `v1.0.0-beta.14` or later. It runs a module on the engine's own
+version, so an entrypoint manifest keeps no `engineVersion`.
 
-### Trying this repository's runtime
+Generating a module that has a manifest already keeps the kind it names:
 
-A module created today names the `python` runtime, so it runs on the
-engine's runtime. To move one onto this repository's runtime, point it there by
-hand:
+- `[runtime] source = "python"`, the runtime built into the engine, which this
+  SDK wrote before, is replaced by a generated entrypoint, and `engineVersion`
+  and `[[dependencies]]` go with it. A module that cannot run on an entrypoint
+  moves to the runtime this SDK publishes instead, on the version the generator
+  reads core in.
+- A `[runtime]` of the user's own is kept as written, with no entrypoint added:
+  the engine follows an entrypoint over a runtime, so adding one would take the
+  runtime out of the picture. `runtime/` is such a runtime, named by module ref
+  or by a path relative to the module.
+- A manifest that says which files the module is (`include`, `exclude`) or roots
+  it elsewhere (`source` other than `.`) stays on a runtime: an entrypoint takes
+  the module's own directory and all of it, and dropping the setting would
+  change which files the module is. The runtime it stays on is the one this SDK
+  publishes, `dagger.io/sdk/python/runtime@v1`, since the runtime built into the
+  engine reads the layout before this one; `--legacy-runtime` asks for it for
+  any module.
+- An entrypoint of another kind, a pin of the shared one or a fork, is kept as
+  written. `--remote-entrypoint` asks for the shared one instead.
+- `--legacy-runtime` and `--remote-entrypoint` cannot be set together: each asks
+  for a different way to run the module, and a manifest names one.
+- `[entrypoint]` and `[runtime]` together are refused, naming both: only one
+  thing can run the module.
+- `disableDefaultFunctionCaching` and `[codegen]` are refused one at a time:
+  the first is a function's own `cache=` on an entrypoint, and the second is
+  read by no entrypoint. A `[clients]` table is refused as well: a module's
+  clients are its scope's, in `dagger.toml`.
 
-```toml
-# <module>/dagger-module.toml
-[runtime]
-source = "github.com/dagger/python-sdk/runtime"
-```
+An unmanaged legacy `dagger.json` with `"sdk": {"source": "python"}` still
+resolves to the runtime built into the engine (`dagger/dagger`'s
+`sdk/python`), which generates bindings at module load.
 
-Then `dagger generate` the module and `dagger call` it as usual. The generated
-files are identical either way — generation is this SDK's regardless of which
-runtime runs the module — so switching back is just editing the line again.
+## Migrate a module
 
-Within this repository, a path relative to the module works too, which is how
-the end-to-end fixture exercises the runtime before the ref exists.
+Migrating takes two commands per module: the engine converts the module's
+config, and this SDK generates its scope. Run both from the workspace root,
+and take the modules in dependency order, each dependency before the modules
+that call it.
 
-## Shared entrypoint
+1. Install this SDK. The command creates `dagger.toml` if the workspace has
+   none:
+   ```sh
+   dagger module install github.com/dagger/python-sdk
+   ```
+2. Convert one module's `dagger.json` and record its scope:
+   ```sh
+   dagger module migrate <path> -y
+   ```
+3. Generate that scope, before migrating anything that depends on this module:
+   ```sh
+   dagger generate -y
+   ```
 
-`entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every
-Python module at once, with nothing generated into the module. `dagger
-generate` names it in the manifest of every module that does not use
-`--dang-entrypoint`, next to the builtin runtime:
+Step 2 writes `dagger-module.toml` keeping the legacy shape (`engineVersion`,
+`[runtime] source = "python"`, `[[dependencies]]`), removes `dagger.json`, and
+records `[sdks.python.scopes."<path>"]` in `dagger.toml` with the module's
+dependencies as its clients. Step 3 is what moves the module to this layout:
+the manifest keeps only `name` and `[entrypoint]`, the dependencies become
+generated clients, the SDK files are written into the module, and the version
+the pre-1.0 config declared goes, since an entrypoint runs the module on the
+engine's own version.
+
+Keep steps 2 and 3 paired, in that order. Converting a module loads its
+dependencies as modules, and a dependency that was converted but not yet
+generated has no generated files for a runtime to build: that fails with
+`generated file "sdk/pyproject.toml" is missing`, naming the dependency.
+
+`dagger workspace migrate` is not a shortcut for the whole repository. It
+migrates the workspace config and the modules the workspace installs; a module
+of your own is an optional candidate, which it lists as
+`dagger module migrate <path>` and then skips, so it can report
+"No migration needed" while every module is still pre-1.0. Select them
+explicitly, with `--module <path>` repeated, or take them one at a time as
+above.
+
+A client loads its target with `serveModule`, which asks the engine for a
+module by its manifest, so a target that still has only a `dagger.json` cannot
+be served; generation names the target and the command to convert it.
+
+Two shapes keep a module on a runtime rather than an entrypoint: `include` or
+`exclude`, which an entrypoint cannot honour because it takes the module's own
+directory and all of it, and a `source` other than `.`, which puts the module's
+code elsewhere. Generation moves such a module from the runtime built into the
+engine, which reads the layout before this one, to the runtime this SDK
+publishes, which builds this one:
 
 ```toml
 # <module>/dagger-module.toml
 name = "my-module"
-engineVersion = "v1.0.0"
+engineVersion = "v1.0.0-0"
+include = ["../shared-package"]
 
 [runtime]
-source = "python"
+  source = "dagger.io/sdk/python/runtime@v1"
+```
+
+A module reference is a legal `[runtime] source`, and so is a path relative to
+the module, which is how this repository's e2e checks point at `runtime/` in the
+working tree. A module whose `source` is not `.` needs more than the move:
+generation writes the scope beside the manifest, and the module builds from
+`source`.
+
+Code written against the layout before calls `dag` and `dagger.Container`.
+Generation keeps that code working by writing the temporary global client,
+`sdk/src/dagger_global/`, and `global-client = true` under `[tool.dagger]`,
+when the module is one the builtin runtime ran: its vendored bindings say so
+(`sdk/src/dagger/client/gen.py` or `src/dagger_gen.py` with the generator's
+header), or its manifest does (a pre-1.0 `dagger.json`, or `[runtime] source =
+"python"`). A scope file that already sets `global-client = false` keeps it
+off. The global client is temporary: move the code to
+`from dagger_clients.core import ...` and turn the flag off.
+
+## Shared entrypoint
+
+`entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every
+Python module at once, with nothing generated into the module. A module whose
+manifest names it keeps it:
+
+```toml
+# <module>/dagger-module.toml
+name = "my-module"
 
 [entrypoint]
 kind = "dang"
 source = "dagger.io/sdk/python/entrypoint@v1"
 ```
 
-One manifest then loads on both kinds of engine. An engine that predates
-entrypoints ignores the table and runs the module on the runtime. An engine
-that loads manifest version 2 drives the module through the entrypoint and
-ignores `[runtime]`; when the module has `[[dependencies]]` it reads the
-manifest the old way instead, because manifest version 2 has no dependency
-list, and the runtime runs the module.
-
 A Dang entrypoint already in the manifest is kept as written, so a module can
-pin a version of the shared entrypoint or point at a fork. A static entrypoint
-is told from the shared one by its source, a path inside the module.
+pin a version of the shared entrypoint, point at a fork, or name one of its
+own. Generation replaces only the static entrypoint it writes itself, told by
+its source, `./sdk/entrypoint`. The manifest is read with a TOML parser, so
+quoting and key order are the user's.
 
-The entrypoint finds the module it serves through the workspace it is handed,
-whose working directory is that module's directory. It reads the module's name
-from that directory's manifest, builds the module's container with the same
-build the runtime uses, and asks the module to describe itself
-(`python -m dagger.mod describe`) or to run one call
+Inside an entrypoint `currentModule` is the module it serves, so the
+entrypoint builds that module's container from `currentModule.source`, with
+the same build the runtime uses, however the module was loaded. It asks the
+module to describe itself (`python -m dagger.mod describe`) or to run one call
 (`python -m dagger.mod call`). The types it returns are rebuilt from that
 description in the engine's own session.
+
+The module's code runs in an exec the entrypoint starts, and loads a client
+with `serveModule`, as a plain program does. The engine resolves a local
+client's path in the tree the module was loaded from: its git repository at
+the pinned commit, the directory it was built from, or on the host its git
+repository, or its own directory outside one. An engine without that resolves the path in the caller's
+workspace instead, and can serve the wrong module.
 
 | File | What it is |
 | --- | --- |
@@ -134,18 +216,18 @@ fails with "no current module". The static entrypoint has the same limit.
 
 ## Static entrypoint
 
-By default a module's types are discovered by running it: the engine builds
-the module's container and starts Python once per session to register the
-types, then again for every call. With `--dang-entrypoint` the types are
-computed once, at `dagger generate`, and written into a generated entrypoint
-the engine loads without running Python:
+On the shared entrypoint a module's types are discovered by running it: the
+engine builds the module's container and starts Python once per session to
+register the types, then again for every call. A generated entrypoint computes
+them once, at `dagger generate`, and the engine loads them without running
+Python. Every new module gets one:
 
 ```sh
-dagger module init python --name my-module --dang-entrypoint
+dagger module init python --name my-module
 ```
 
-Generating the module then writes an entrypoint manifest instead of a runtime
-manifest, and `sdk/entrypoint/` next to the vendored library:
+Its manifest names that entrypoint, and `sdk/entrypoint/` sits next to the
+SDK files:
 
 | File | What it is |
 | --- | --- |
@@ -155,33 +237,25 @@ manifest, and `sdk/entrypoint/` next to the vendored library:
 
 The types come from importing the module in its own container and reading
 what its decorators registered, so they are the ones the runtime would
-register. `main.dang` bakes a content digest of every source file that can
-change them; a call after an edit is refused with a message to run
-`dagger generate`. A lock file added afterwards is refused the same way, and
-only file contents count, not permissions.
+register. They are baked, so a change that alters them — a new function, a
+changed argument or return type — is served only after `dagger generate`;
+`dagger generate` in CI, which must leave no diff, is what catches a module
+that forgot it. A change the types do not describe, such as a function body,
+runs as edited.
 
-What the static path cannot do yet, and refuses at `dagger generate`:
-module clients (an entrypoint manifest has no dependencies), any `cache=` value
-on a function (the entrypoint's exec is content-cached and receives no
-per-call signal), the `legacy` template, and a manifest with `include`,
-`disableDefaultFunctionCaching`, a runtime other than `python`, a `source`
-other than `.`, or `codegen`, `clients` or `dependencies` tables. Such
-modules keep the default path. There is no `debug` terminal on the static
-path, and a function error reaches the caller as the exec failure with the
-process's stderr.
+What a generated entrypoint cannot carry is in the list above: a module whose
+manifest says which files it is, or names a runtime, keeps that runtime
+instead. There is no `debug` terminal on this path, and a function error
+reaches the caller as the exec failure with the process's stderr.
 
-The setting is persisted on the scope. To switch an existing module either
-way, re-run `dagger module init python --path <module>` with
-`--dang-entrypoint` or `--dang-entrypoint=false`, or edit the scope's
-settings in `dagger.toml`, then `dagger generate`. Generating one module
-directly, with `dagger call python-sdk mod --path <module> generate`, keeps
-the mode that module is in; switching modes goes through
-`dagger module init python --path <module>` as above. Switching back removes
-`sdk/entrypoint/` and rewrites a runtime manifest with the generating
-engine's version. Loading a static module needs an engine that reads an
-entrypoint manifest (dagger/dagger#14038); see
+A module keeps the kind of entrypoint its manifest names: generation writes
+one into a module that has none, and leaves a Dang entrypoint of another kind
+alone, so a module on the shared entrypoint or on a fork stays there.
+`--remote-entrypoint` asks for the shared one instead, for a new module or for
+one that has an entrypoint of its own, and then `sdk/entrypoint/` goes. A
+module that names a runtime of its own keeps it, with or without the flag. See
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
-for the design and the plan to make it the default.
+for the design.
 
 ## Install
 
@@ -212,18 +286,23 @@ The SDK settings below become typed flags on `dagger module init python` and
 are persisted on the scope:
 
 ```sh
-dagger module init python --name my-module --template legacy
+dagger module init python --name my-module --template empty
+dagger module init python --name my-module --legacy-runtime
+dagger module init python --name my-module --remote-entrypoint
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
     --base-image python:3.13-slim
 ```
 
+`--legacy-runtime` and `--remote-entrypoint` pick what runs the module, as
+"How a module runs" describes; without either, a new module gets an entrypoint
+generated into it.
+
 `--template` picks a starter template: `default` (a small working module) when
-you pass nothing, `empty` for a bare object class, or `legacy` for a
-container-echo example. The three `pyproject.toml` flags are optional; by
-default the template's Python version is used, uv is enabled, and no base image
-override is written.
+you pass nothing, or `empty` for a bare object class. The three
+`pyproject.toml` flags are optional; by default the template's Python version
+is used, uv is enabled, and no base image override is written.
 
 ## Configure an existing module
 

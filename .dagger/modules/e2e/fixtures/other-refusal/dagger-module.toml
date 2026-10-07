@@ -1,0 +1,5 @@
+name = "other-refusal-target"
+
+[entrypoint]
+  kind = "dang"
+  source = "./entrypoint"

@@ -1,5 +1,4 @@
 import enum
-import hashlib
 import os
 import pathlib
 import subprocess
@@ -10,18 +9,15 @@ from typing import Annotated
 import pytest
 from typing_extensions import Doc, Self
 
-import dagger
 from dagger import DefaultPath, Ignore, Name
+from dagger.client import gen
 from dagger.mod import Module
 from dagger.mod._entrypoint import (
     _quote,
-    file_digest,
     render_main,
     render_types,
-    source_files,
     write_entrypoint,
 )
-from dagger.mod._exceptions import BadUsageError
 
 GOLDEN = pathlib.Path(__file__).parent / "golden"
 
@@ -55,7 +51,7 @@ def mod() -> Module:
     class Main:
         """The main object."""
 
-        source: dagger.Directory
+        source: gen.Directory
         greeting: str = m.field(default="hello")
         count: Annotated[int, Doc("How many")] = m.field(default=1, name="howMany")
 
@@ -73,7 +69,7 @@ def mod() -> Module:
 
         @m.function
         def helpers(
-            self, src: Annotated[dagger.Directory, DefaultPath("."), Ignore([".venv"])]
+            self, src: Annotated[gen.Directory, DefaultPath("."), Ignore([".venv"])]
         ) -> list[Helper]: ...
 
         @m.function
@@ -83,22 +79,9 @@ def mod() -> Module:
         def greeter(self, g: Greeter) -> Greeter: ...
 
         @m.function(deprecated="use container")
-        def old(self, p: dagger.Platform) -> dagger.JSON: ...
+        def old(self, p: gen.Platform) -> gen.JSON: ...
 
     return m
-
-
-@pytest.fixture
-def root(tmp_path: pathlib.Path) -> pathlib.Path:
-    (tmp_path / "dagger-module.toml").write_text('name = "main"\n')
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "main"\n')
-    (tmp_path / "src" / "main").mkdir(parents=True)
-    (tmp_path / "src" / "main" / "__init__.py").write_text("x = 1\n")
-    (tmp_path / "src" / "main" / "extra.py").write_text("y = 2\n")
-    for skipped in ("sdk/src/dagger", ".venv/lib", "src/main/__pycache__", ".hidden"):
-        (tmp_path / skipped).mkdir(parents=True)
-        (tmp_path / skipped / "ignored.py").write_text("z = 3\n")
-    return tmp_path
 
 
 def _assert_golden(name: str, rendered: str):
@@ -112,31 +95,8 @@ def test_types_golden(mod: Module):
     _assert_golden("types.dang", render_types(mod.describe()))
 
 
-def test_main_golden(root: pathlib.Path):
-    rendered = render_main("main", ".dagger/modules/main", source_files(root))
-    _assert_golden("main.dang", rendered)
-
-
-def test_source_files(root: pathlib.Path):
-    assert [f.path for f in source_files(root)] == [
-        ".python-version",
-        "pyproject.toml",
-        "requirements.lock",
-        "uv.lock",
-        "src/main/__init__.py",
-        "src/main/extra.py",
-    ]
-
-
-def test_absent_manifest_is_recorded_without_a_digest(root: pathlib.Path):
-    rendered = render_main("main", ".", source_files(root))
-    assert 'SourceFile(path: "uv.lock", digest: ""),' in rendered
-
-
-def test_file_digest():
-    data = b"x = 1\n"
-    inner = hashlib.sha256(data).digest()
-    assert file_digest(data) == "sha256:" + hashlib.sha256(inner).hexdigest()
+def test_main_golden():
+    _assert_golden("main.dang", render_main("main"))
 
 
 def test_quoting():
@@ -160,29 +120,30 @@ def test_one_constructor_no_cache_policy(mod: Module):
     assert "withCachePolicy" not in rendered
 
 
-def test_refuses_cache_policy():
+@pytest.mark.parametrize(
+    ("cache", "policy"),
+    [
+        ("never", "FunctionCachePolicy.Never"),
+        ("session", "FunctionCachePolicy.PerSession"),
+        ("30m", 'FunctionCachePolicy.Default, timeToLive: "30m"'),
+    ],
+)
+def test_renders_cache_policy(cache: str, policy: str):
     mod = Module("Foo")
 
     @mod.object_type
     class Foo:
-        @mod.function(cache="never")
+        @mod.function(cache=cache)
         def fresh(self) -> str: ...
 
-    with pytest.raises(BadUsageError, match="cache='never'"):
-        render_types(mod.describe())
+    assert f".withCachePolicy({policy})" in render_types(mod.describe())
 
 
-@pytest.mark.parametrize("path", ["/abs", "../up", "a/../../b"])
-def test_path_must_stay_inside(path: str):
-    with pytest.raises(BadUsageError, match="relative"):
-        render_main("main", path, [])
-
-
-def test_write_entrypoint(mod: Module, root: pathlib.Path):
-    out = root / "out"
-    write_entrypoint(mod.describe(), name="main", path=".", root=root, output=out)
+def test_write_entrypoint(mod: Module, tmp_path: pathlib.Path):
+    out = tmp_path / "out"
+    write_entrypoint(mod.describe(), name="main", output=out)
     assert (out / "types.dang").read_text().startswith("# Code generated")
-    assert 'SourceFile(path: "src/main/extra.py"' in (out / "main.dang").read_text()
+    assert 'let moduleName: String! = "main"' in (out / "main.dang").read_text()
 
 
 def test_command(tmp_path: pathlib.Path):
@@ -202,8 +163,6 @@ def test_command(tmp_path: pathlib.Path):
             "entrypoint",
             "--name",
             "hello",
-            "--path",
-            ".dagger/modules/hello",
             "--output",
             "out",
         ],
@@ -219,4 +178,7 @@ def test_command(tmp_path: pathlib.Path):
     types = (tmp_path / "out" / "types.dang").read_text()
     assert 'typeDef.withObject("Hello")' in types
     assert 'function("hi", typeDef.withKind(TypeDefKind.STRING_KIND))' in types
-    assert "SourceFile" in (tmp_path / "out" / "main.dang").read_text()
+    assert (
+        'let moduleName: String! = "hello"'
+        in (tmp_path / "out" / "main.dang").read_text()
+    )

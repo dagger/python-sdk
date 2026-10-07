@@ -33,8 +33,8 @@ type PythonModuleBuild {
   let modSourceDirPath: String! = "/src"
   let venvPath: String! = "/opt/venv"
   let genDir: String! = "sdk"
+  let clientsDir: String! = "clients"
   let sdkGenPath: String! = "src/dagger/client/gen.py"
-  let userGenPath: String! = "src/dagger_gen.py"
   let projectCfg: String! = "pyproject.toml"
   let pipCompileLock: String! = "requirements.lock"
   let uvLock: String! = "uv.lock"
@@ -62,8 +62,7 @@ type PythonModuleBuild {
       raise "no python files found in module source"
     } else {
       let cfg = pyConfig(source)
-      let vendorPath = vendorPathFor(source, cfg)
-      checkGeneratedFiles(source, moduleName, vendorPath)
+      checkGeneratedFiles(source, moduleName, requiredGeneratedFiles(source, cfg))
 
       let baseImage = baseImageFor(source, cfg)
       let uvImage = uvImageFor(cfg)
@@ -81,6 +80,13 @@ type PythonModuleBuild {
 
       install(built, source, cfg)
     }
+  }
+
+  """
+  The workspace members of a scope's pyproject.toml, read as the build does.
+  """
+  pub scopeMembers(pyproject: File!): [String!]! {
+    pyConfig(directory.withFile(projectCfg, pyproject)).members
   }
 
   """
@@ -155,15 +161,18 @@ type PythonModuleBuild {
   }
 
   """
-  The vendored library is installed non-editable so uv compiles its bytecode
-  once, not on every call into a throwaway mount; the module's own package
-  stays editable.
+  The SDK files and the generated clients are installed non-editable so uv
+  compiles their bytecode once, not on every call into a throwaway mount; the
+  module's own package stays editable.
   """
   let install(ctr: Container!, source: Directory!, cfg: PyConfig!): Container! {
     let compiled = ctr.withEnvVariable("UV_COMPILE_BYTECODE", "1")
+    let packages = localPackages(source, cfg)
 
     if (cfg.useUv and source.exists(uvLock)) {
       # --locked: fail loudly on a stale lockfile instead of re-resolving.
+      # In a scope, sync installs the members the project depends on, which
+      # --no-install-project leaves in.
       compiled
         .withExec(["uv", "sync", "--no-dev", "--locked", "--no-editable", "--no-install-project"])
         .withEnvVariable("VIRTUAL_ENV", "$UV_PROJECT_ENVIRONMENT", expand: true)
@@ -178,22 +187,139 @@ type PythonModuleBuild {
         ["-r", projectCfg]
       }
       compiled
-        .withExec(["uv", "pip", "install", "--no-editable", "./" + genDir] + deps)
+        .withExec(["uv", "pip", "install", "--no-editable"] + packages + deps)
         .withExec(["uv", "pip", "install", "--no-deps", "-e", "."])
     } else {
-      compiled.withExec(["pip", "install", "./" + genDir, "-e", "."])
+      # pip reads no uv sources, so every local package goes in by path, in
+      # the same command that resolves the project's dependencies on them.
+      compiled.withExec(["pip", "install"] + packages + ["-e", "."])
+    }
+  }
+
+  """
+  What the module installs from its own tree: the members of a scope's
+  workspace that the project depends on, directly or through another member,
+  the way `uv sync` picks them; or the vendored library of the layout before.
+  A member nothing depends on is not installed: it may not even install here.
+  """
+  let localPackages(source: Directory!, cfg: PyConfig!): [String!]! {
+    if (cfg.isScope) {
+      workspaceRead(source)
+        .filter { line => line.hasPrefix("local\t") }
+        .map { line => line.trimPrefix("local\t") }
+    } else {
+      ["./" + genDir]
+    }
+  }
+
+  """
+  The workspace as TOML defines it, read by tomllib in the pinned default
+  image: `member\t<path>` for each member, then `local\t./<dir>` for each
+  member directory to install. The members are globs over directories, and
+  each member's dependencies are in its own file, so one pass reads them
+  all. Only the pyproject.toml files that can be a member's go in, so the
+  read is cached until one of them changes. A file that does not read is
+  named.
+  """
+  let workspaceRead(source: Directory!): [String!]! {
+    let lines = container
+      .from(defaultBaseImage)
+      .withMountedDirectory("/scope", source.filter(
+        include: ["**/" + projectCfg],
+        # No member lives in these, and a virtualenv alone holds hundreds of
+        # pyproject.toml files that would reach the read and its cache key.
+        exclude: ["**/.venv", "**/__pycache__", "**/node_modules", "**/.git"],
+      ))
+      .withExec(["python", "-c", workspaceReader, "/scope"])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
+    let errors = lines.filter { line => line.hasPrefix("error\t") }
+    if (errors.length > 0) {
+      raise errors.map { line => line.trimPrefix("error\t") }.join("; ")
+    } else {
+      lines
+    }
+  }
+
+  let workspaceReader: String! =
+    "import glob, os, re, sys, tomllib\n" +
+    "root = sys.argv[1]\n" +
+    "def fail(message):\n" +
+    "    print('error\\t' + message)\n" +
+    "    sys.exit(0)\n" +
+    "def load(rel):\n" +
+    "    path = os.path.normpath(os.path.join(rel, 'pyproject.toml'))\n" +
+    "    try:\n" +
+    "        with open(os.path.join(root, path), 'rb') as f:\n" +
+    "            return tomllib.load(f)\n" +
+    "    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as e:\n" +
+    "        fail(f'{path} is not valid TOML: {e}')\n" +
+    "def table(doc, *keys):\n" +
+    "    for key in keys:\n" +
+    "        doc = doc.get(key) if isinstance(doc, dict) else None\n" +
+    "    return doc if isinstance(doc, dict) else {}\n" +
+    "def strings(value, key, where):\n" +
+    "    if value is None:\n" +
+    "        return []\n" +
+    "    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):\n" +
+    "        fail(f'{where}: {key} is not an array of strings; write it as one, such as {key} = [\"a\", \"b\"]')\n" +
+    "    return value\n" +
+    "def name(requirement):\n" +
+    "    m = re.match(r'\\s*([A-Za-z0-9][A-Za-z0-9._-]*)', requirement if isinstance(requirement, str) else '')\n" +
+    "    return re.sub(r'[-_.]+', '-', m.group(1).lower()) if m else ''\n" +
+    "doc = load('.')\n" +
+    "members = strings(table(doc, 'tool', 'uv', 'workspace').get('members'), 'members', 'pyproject.toml')\n" +
+    "wanted = {name(r) for r in strings(table(doc, 'project').get('dependencies'), 'dependencies', 'pyproject.toml')}\n" +
+    "dirs = []\n" +
+    "for member in members:\n" +
+    "    print('member\\t' + member)\n" +
+    "    for found in sorted(glob.glob(os.path.join(root, member, 'pyproject.toml'))):\n" +
+    "        rel = os.path.relpath(os.path.dirname(found), root)\n" +
+    "        if rel not in dirs:\n" +
+    "            dirs.append(rel)\n" +
+    "projects = {}\n" +
+    "for rel in dirs:\n" +
+    "    project = table(load(rel), 'project')\n" +
+    "    projects[rel] = (name(project.get('name')), {name(r) for r in strings(project.get('dependencies'), 'dependencies', rel + '/pyproject.toml')})\n" +
+    "needed = []\n" +
+    "while True:\n" +
+    "    found = [rel for rel in dirs if rel not in needed and projects[rel][0] in wanted]\n" +
+    "    if not found:\n" +
+    "        break\n" +
+    "    needed += found\n" +
+    "    wanted = set().union(*(projects[rel][1] for rel in found))\n" +
+    "for rel in dirs:\n" +
+    "    if rel in needed:\n" +
+    "        print('local\\t./' + rel)\n"
+
+  """
+  The generated files a module needs before it builds. A scope needs each of
+  the SDK's members it lists; a user's member is the user's to provide.
+  """
+  let requiredGeneratedFiles(source: Directory!, cfg: PyConfig!): [String!]! {
+    if (cfg.isScope) {
+      cfg.members
+        .filter { member =>
+          (member == genDir or member.hasPrefix(clientsDir + "/")) and member.contains("*") == false
+        }
+        .map { member => member + "/" + projectCfg }
+    } else {
+      # A published dagger-io brings its own files, and the SDK files no longer
+      # read bindings from src/dagger_gen.py, so nothing generated is required.
+      let vendorPath = vendorPathFor(source, cfg)
+      if (vendorPath == "") {
+        [] :: [String!]!
+      } else {
+        [vendorPath + "/" + projectCfg, vendorPath + "/" + sdkGenPath]
+      }
     }
   }
 
   """
   Fail early when the committed generated files are missing.
   """
-  let checkGeneratedFiles(source: Directory!, modName: String!, vendorPath: String!): Void {
-    let required = if (vendorPath == "") {
-      [userGenPath]
-    } else {
-      [vendorPath + "/" + projectCfg, vendorPath + "/" + sdkGenPath]
-    }
+  let checkGeneratedFiles(source: Directory!, modName: String!, required: [String!]!): Void {
     required.each { rel =>
       if (source.exists(rel, expectedType: ExistsType.REGULAR_TYPE) == false) {
         raise "module \"" + modName + "\": generated file \"" + rel + "\" is missing; run `dagger generate` and commit the generated files"
@@ -289,16 +415,18 @@ type PythonModuleBuild {
   }
 
   """
-  Not a TOML parser: regular expressions scoped to a table, for the keys the
-  templates and `mod config set` write. Single-line booleans and quoted strings
-  only; arrays, multi-line strings and dotted keys are not seen.
+  Read with a TOML parser, because the file is the user's content: quoting,
+  dotted keys and multi-line strings are theirs. A key of another type than
+  the one the templates and `mod config set` write reads as unset. The
+  workspace members, and the dependencies that pick what to install, are
+  read with the member files (workspaceRead).
   """
   let pyConfig(source: Directory!): PyConfig! {
-    let toml = source.file(projectCfg).contents
-    let project = tomlTable(toml, "project")
-    let dagger = tomlTable(toml, "tool.dagger")
-    let sources = tomlTable(toml, "tool.uv.sources")
-    let indexes = tomlTables(toml, "tool.uv.index")
+    let doc = json.withContents((JSON.encode(TOML.decode(source.file(projectCfg).contents)) :: Dagger.JSON!))
+    let project = tomlTable(doc, ["project"])
+    let dagger = tomlTable(doc, ["tool", "dagger"])
+    let sources = tomlTable(doc, ["tool", "uv", "sources"])
+    let indexes = tomlTables(doc, ["tool", "uv", "index"])
       .filter { table => tomlString(table, "name") == "" }
 
     PyConfig(
@@ -307,7 +435,10 @@ type PythonModuleBuild {
       baseImage: tomlString(dagger, "base-image"),
       useUv: tomlBool(dagger, "use-uv", true),
       uvVersion: tomlString(dagger, "uv-version"),
-      vendorPath: inlineTableString(sources, "dagger-io", "path"),
+      vendorPath: tomlString(tomlTable(sources, ["dagger-io"]), "path"),
+      members: workspaceRead(source)
+        .filter { line => line.hasPrefix("member\t") }
+        .map { line => line.trimPrefix("member\t") },
       indexURL: indexes
         .filter { table => tomlBool(table, "default", false) }
         .map { table => tomlString(table, "url") }
@@ -321,43 +452,69 @@ type PythonModuleBuild {
     )
   }
 
-  let tomlTable(toml: String!, name: String!): String! {
-    tomlTables(toml, name).takeFirst(1).join("")
+  """
+  The table at a key path, or an empty one where there is none.
+  """
+  let tomlTable(doc: JSONValue!, path: [String!]!): JSONValue! {
+    path.reduce(doc) { table, key =>
+      let value = if (table.fields.contains(key)) { table.field([key]) } else { emptyTable }
+      if (isTable(value)) { value } else { emptyTable }
+    }
   }
 
   """
-  Every `[name]` and `[[name]]` body; headers may be indented and commented.
+  Every `[[name]]` table at a key path, or the one `[name]` table there.
   """
-  let tomlTables(toml: String!, name: String!): [String!]! {
-    toml
-      .splitMatches("(?m)^\\s*\\[")
-      .filter { section =>
-        let header = section
-          .split("\n")
-          .takeFirst(1)
-          .join("")
-          .replaceMatches("#.*$", "")
-          .trimSpace
-        header == name + "]" or header == "[" + name + "]]"
+  let tomlTables(doc: JSONValue!, path: [String!]!): [JSONValue!]! {
+    let parent = tomlTable(doc, path.takeFirst(path.length - 1))
+    let key = path.takeLast(1).join("")
+    if (parent.fields.contains(key) == false) {
+      [] :: [JSONValue!]!
+    } else if (isTable(parent.field([key]))) {
+      [parent.field([key])]
+    } else if (isArray(parent.field([key]))) {
+      parent.field([key]).asArray.{{contents}}
+        .map { item => json.withContents(item.contents) }
+        .filter { table => isTable(table) }
+    } else {
+      [] :: [JSONValue!]!
+    }
+  }
+
+  let tomlString(table: JSONValue!, key: String!): String! {
+    if (table.fields.contains(key)) {
+      table.field([key]).asString rescue {
+        err: Error => ""
       }
+    } else {
+      ""
+    }
   }
 
-  let tomlString(table: String!, key: String!): String! {
-    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*[\"']([^\"']*)[\"']"))
-    if (m == null) { "" } else { m.captures[0] ?? "" }
+  let tomlBool(table: JSONValue!, key: String!, default: Boolean!): Boolean! {
+    if (table.fields.contains(key)) {
+      table.field([key]).asBoolean rescue {
+        err: Error => default
+      }
+    } else {
+      default
+    }
   }
 
-  let tomlBool(table: String!, key: String!, default: Boolean!): Boolean! {
-    let m = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*(true|false)"))
-    if (m == null) { default } else { m.captures[0] == "true" }
+  let isTable(value: JSONValue!): Boolean! {
+    (value.fields.length >= 0) rescue {
+      err: Error => false
+    }
   }
 
-  """
-  e.g. `path` in `dagger-io = { path = "sdk", editable = true }`.
-  """
-  let inlineTableString(table: String!, key: String!, field: String!): String! {
-    let inline = table.match(Regexp("(?m)^\\s*" + Regexp.escape(key) + "\\s*=\\s*\\{([^}]*)\\}"))
-    if (inline == null) { "" } else { tomlString(inline.captures[0] ?? "", field) }
+  let isArray(value: JSONValue!): Boolean! {
+    (value.asArray.{{contents}}.length >= 0) rescue {
+      err: Error => false
+    }
+  }
+
+  let emptyTable: JSONValue! {
+    json.withContents(("{}" :: Dagger.JSON!))
   }
 }
 
@@ -371,6 +528,11 @@ type PyConfig {
   pub useUv: Boolean!
   pub uvVersion: String!
   pub vendorPath: String!
+
+  """
+  The `[tool.uv.workspace] members` of a scope; empty in the layout before.
+  """
+  pub members: [String!]!
   pub indexURL: String!
   pub extraIndexURL: String!
 
@@ -381,6 +543,7 @@ type PyConfig {
     useUv: Boolean! = true,
     uvVersion: String! = "",
     vendorPath: String! = "",
+    members: [String!]! = [],
     indexURL: String! = "",
     extraIndexURL: String! = "",
   ) {
@@ -390,9 +553,18 @@ type PyConfig {
     self.useUv = useUv
     self.uvVersion = uvVersion
     self.vendorPath = vendorPath
+    self.members = members
     self.indexURL = indexURL
     self.extraIndexURL = extraIndexURL
     self
+  }
+
+  """
+  Whether the module is a scope of the unified layout, whose SDK files are
+  the workspace member sdk/ rather than a library vendored by path.
+  """
+  pub isScope: Boolean! {
+    members.filter { member => member == "sdk" }.length > 0
   }
 }
 
