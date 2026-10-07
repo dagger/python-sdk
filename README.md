@@ -35,9 +35,9 @@ using the Python SDK that is built into the engine.
 ## How a module runs
 
 A module this SDK generates runs on a Dang entrypoint and on nothing else:
-the shared one below, or with `--dang-entrypoint` one generated into the
-module. Its manifest names no `[runtime]`. That needs an engine that runs
-Dang entrypoints and serves `serveModule`: `v1.0.0-beta.14` or later.
+the one generated into it, which is what a new module gets, or the shared one
+below. Its manifest names no `[runtime]`. That needs an engine that runs Dang
+entrypoints and serves `serveModule`: `v1.0.0-beta.14` or later.
 
 Generating a module that has a manifest already:
 
@@ -59,9 +59,8 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 ## Shared entrypoint
 
 `entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every
-Python module at once, with nothing generated into the module. `dagger
-generate` names it in the manifest of every module that does not use
-`--dang-entrypoint`:
+Python module at once, with nothing generated into the module. A module whose
+manifest names it keeps it:
 
 ```toml
 # <module>/dagger-module.toml
@@ -113,18 +112,18 @@ fails with "no current module". The static entrypoint has the same limit.
 
 ## Static entrypoint
 
-By default a module's types are discovered by running it: the engine builds
-the module's container and starts Python once per session to register the
-types, then again for every call. With `--dang-entrypoint` the types are
-computed once, at `dagger generate`, and written into a generated entrypoint
-the engine loads without running Python:
+On the shared entrypoint a module's types are discovered by running it: the
+engine builds the module's container and starts Python once per session to
+register the types, then again for every call. A generated entrypoint computes
+them once, at `dagger generate`, and the engine loads them without running
+Python. Every new module gets one:
 
 ```sh
-dagger module init python --name my-module --dang-entrypoint
+dagger module init python --name my-module
 ```
 
-Generating the module then names that entrypoint in the manifest instead of
-the shared one, and writes `sdk/entrypoint/` next to the vendored library:
+Its manifest names that entrypoint, and `sdk/entrypoint/` sits next to the
+SDK files:
 
 | File | What it is |
 | --- | --- |
@@ -148,14 +147,9 @@ modules keep the default path. There is no `debug` terminal on the static
 path, and a function error reaches the caller as the exec failure with the
 process's stderr.
 
-The setting is persisted on the scope. To switch an existing module either
-way, re-run `dagger module init python --path <module>` with
-`--dang-entrypoint` or `--dang-entrypoint=false`, or edit the scope's
-settings in `dagger.toml`, then `dagger generate`. Generating one module
-directly, with `dagger call python-sdk mod --path <module> generate`, keeps
-the mode that module is in; switching modes goes through
-`dagger module init python --path <module>` as above. Switching back removes
-`sdk/entrypoint/` and names the shared entrypoint again. See
+A module keeps the kind of entrypoint its manifest names: generation writes
+one into a module that has none, and leaves a Dang entrypoint of another kind
+alone, so a module on the shared entrypoint or on a fork stays there. See
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design and the plan to make it the default.
 

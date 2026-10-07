@@ -23,13 +23,6 @@ type PythonSdk {
   pub baseImage: String! = ""
 
   """
-  Generate a static entrypoint that carries the module's types, so the engine
-  loads them without running the module. Needs an engine that loads manifest
-  version 2.
-  """
-  pub dangEntrypoint: Boolean! = false
-
-  """
   Find the Python client root containing the workspace cwd: the directory of
   the nearest pyproject.toml, relative to the workspace root. A generated
   member, marked `[tool.dagger] generated` in its pyproject.toml, belongs to
@@ -139,7 +132,8 @@ type PythonSdk {
   a module without a config file is initialized from the configured template,
   every module receives a dagger-module.toml from the manifest builder, and a
   pre-1.0 dagger.json is migrated and removed. The manifest names the shared
-  entrypoint, or with dangEntrypoint one generated into the module.
+  entrypoint generated into the module, unless the module already names an
+  entrypoint or a runtime of its own, which generation keeps.
   """
   pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
     let scope = normalizePath(ws.cwd)
@@ -154,16 +148,17 @@ type PythonSdk {
       } else {
         rooted.withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
       }
-      if (dangEntrypoint) {
+      # Read before the manifest is written: that write resets the entrypoint
+      # table, and a module keeps the kind it came with.
+      let mode = entrypointModeOf(initialized, scope)
+      if (mode == generatedMode) {
         checkStaticScope(initialized, scope, hadConfig)
       }
-      # The shared entrypoint's manifest; the static path swaps it for its own
-      # as it generates.
       let configured = generateScopeManifest(initialized, scope, name)
       Mod(
         rootPath: scope,
         ws: configured,
-        entrypointMode: entrypointModeOf(configured, scope),
+        entrypointMode: mode,
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -320,7 +315,7 @@ type PythonSdk {
     if (scopeHasFile(ws, scope, "dagger-module.toml")) {
       let objections = staticObjections(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents)
       if (objections.length > 0) {
-        raise "dagger-module.toml has settings a static entrypoint cannot carry (" + objections.join(", ") + "); remove them or set dangEntrypoint = false"
+        raise "dagger-module.toml has settings a generated entrypoint cannot carry (" + objections.join(", ") + "); remove them, or name a runtime of your own under [runtime]"
       }
     }
     null
@@ -372,13 +367,27 @@ type PythonSdk {
   SDK setting for one that has no manifest yet.
   """
   let entrypointModeOf(ws: Workspace!, scope: String!): String! {
-    if (dangEntrypoint or hasEntrypointManifest(ws, scope)) {
-      generatedMode
-    } else if (keepsOwnRuntime(ws, scope)) {
+    # A runtime of the user's own comes first: a manifest that also names an
+    # entrypoint is refused when the manifest is written, by the one error that
+    # names both, rather than by a generated entrypoint's own objections.
+    if (keepsOwnRuntime(ws, scope)) {
       runtimeMode
-    } else {
+    } else if (hasEntrypointManifest(ws, scope)) {
+      generatedMode
+    } else if (namesDangEntrypoint(ws, scope)) {
       remoteMode
+    } else {
+      generatedMode
     }
+  }
+
+  """
+  Whether a module's manifest names a Dang entrypoint that this SDK does not
+  write: the one it publishes, a pin of it, a fork, or one of the user's own.
+  """
+  let namesDangEntrypoint(ws: Workspace!, scope: String!): Boolean! {
+    scopeHasFile(ws, scope, "dagger-module.toml") and
+      ManifestToml(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents).entrypointKind == "dang"
   }
 
   """
