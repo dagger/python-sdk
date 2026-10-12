@@ -1009,6 +1009,22 @@ type E2e {
     assertMembersInstalled(members, "uv")
     assertMembersInstalled(members.withNewFile(pyprojectPath, members.file(pyprojectPath).contents + "\n[tool.dagger]\nuse-uv = false\n"), "pip")
 
+    # A path source's own path sources are installed too: uv reads them when
+    # it builds the path source, with a lock or without one.
+    let modPath = "/" + tomlGenerateModulePath
+    let nested = ws
+      .withNewFile(pyprojectPath, ws.file(pyprojectPath).contents
+        .replace("dependencies = [\"dagger-io\"]", "dependencies = [\"dagger-io\", \"nested-a\"]")
+        .replace("[tool.uv.sources]\n", "[tool.uv.sources]\nnested-a = { path = \"vendor/a\" }\n"))
+      .withNewFile(modPath + "/vendor/a/pyproject.toml",
+        userMember("nested-a", ">=3.10").replace("[project.optional", "dependencies = [\"nested-b\"]\n[project.optional") +
+        "\n[tool.uv.sources]\nnested-b = { path = \"../b\" }\n")
+      .withNewFile(modPath + "/vendor/a/src/nested_a/__init__.py", "")
+      .withNewFile(modPath + "/vendor/b/pyproject.toml", userMember("nested-b", ">=3.10"))
+      .withNewFile(modPath + "/vendor/b/src/nested_b/__init__.py", "")
+    assertNestedInstalled(nested, "uv")
+    assertNestedInstalled(nested.withNewFile(lockPath, "version = 1\nrequires-python = \">=3.14\"\n"), "uv.lock")
+
     # A member whose pyproject.toml does not read is named, not shown as a
     # traceback from the reader.
     let broken = pythonSdk
@@ -1042,6 +1058,15 @@ type E2e {
       ])
       .stdout
     assertContains(out, "members", what + ": " + out)
+    null
+  }
+
+  let assertNestedInstalled(seeded: Workspace!, what: String!): Void {
+    let out = pythonSdkRuntime
+      .moduleRuntime(modSource: runtimeSource(assertInstalled(seeded, what), tomlGenerateModulePath), introspectionJson: null)
+      .withExec(["python", "-c", "import nested_a, nested_b; print('nested')"])
+      .stdout
+    assertContains(out, "nested", what + ": " + out)
     null
   }
 

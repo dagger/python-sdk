@@ -61,7 +61,7 @@ type PythonModuleBuild {
     } else if (hasPythonFiles(source) == false) {
       raise "no python files found in module source"
     } else {
-      let cfg = pyConfig(source)
+      let cfg = pyConfig(contextDir, subPath)
       checkGeneratedFiles(source, moduleName, requiredGeneratedFiles(source, cfg))
 
       let baseImage = baseImageFor(source, cfg)
@@ -70,7 +70,8 @@ type PythonModuleBuild {
       let contextDirPath = modSourceDirPath + "/" + source.digest
       let packageName = packageNameFor(moduleName, cfg)
 
-      let built = base(baseImage, uvImage, cfg)
+      let compiled = base(baseImage, uvImage, cfg).withEnvVariable("UV_COMPILE_BYTECODE", "1")
+      let built = dependencies(compiled, source, cfg)
         .withWorkdir(join(contextDirPath, subPath))
         .withMountedDirectory(contextDirPath, withoutVenv)
         # Last, so the layers above are shared between modules.
@@ -86,7 +87,7 @@ type PythonModuleBuild {
   The workspace members of a scope's pyproject.toml, read as the build does.
   """
   pub scopeMembers(pyproject: File!): [String!]! {
-    pyConfig(directory.withFile(projectCfg, pyproject)).members
+    pyConfig(directory.withFile(projectCfg, pyproject), ".").members
   }
 
   """
@@ -161,38 +162,85 @@ type PythonModuleBuild {
   }
 
   """
-  The SDK files and the generated clients are installed non-editable so uv
-  compiles their bytecode once, not on every call into a throwaway mount; the
-  module's own package stays editable.
+  The module's dependencies, installed from dependencyInputs alone so that a
+  source edit leaves this layer cached. The SDK files and the generated
+  clients are installed non-editable so uv compiles their bytecode once, not
+  on every call into a throwaway mount.
+  """
+  let dependencies(ctr: Container!, source: Directory!, cfg: PyConfig!): Container! {
+    if (cfg.useUv == false) {
+      # pip installs a project's dependencies only with the project itself.
+      ctr
+    } else {
+      let inputs = dependencyInputs(cfg)
+      # Unique per input, for the same reason as the source's own path.
+      let inputsPath = modSourceDirPath + "/" + inputs.digest
+      let mounted = ctr
+        .withWorkdir(join(inputsPath, subPath))
+        .withMountedDirectory(inputsPath, inputs)
+
+      if (source.exists(uvLock)) {
+        # --locked: fail loudly on a stale lockfile instead of re-resolving.
+        # In a scope, sync installs the members the project depends on, which
+        # --no-install-project leaves in.
+        mounted
+          .withExec(["uv", "sync", "--no-dev", "--locked", "--no-editable", "--no-install-project"])
+          .withoutMount(inputsPath)
+          .withEnvVariable("VIRTUAL_ENV", "$UV_PROJECT_ENVIRONMENT", expand: true)
+          .withEnvVariable("PATH", "$VIRTUAL_ENV/bin:$PATH", expand: true)
+      } else {
+        let deps = if (source.exists(pipCompileLock)) {
+          # The lockfile is complete, so skip resolving.
+          ["--no-deps", "-r", pipCompileLock]
+        } else {
+          ["-r", projectCfg]
+        }
+        mounted
+          .withExec(["uv", "pip", "install", "--no-editable"] + localPackages(cfg) + deps)
+          .withoutMount(inputsPath)
+      }
+    }
+  }
+
+  """
+  The module's own package, editable, on top of its dependencies.
   """
   let install(ctr: Container!, source: Directory!, cfg: PyConfig!): Container! {
-    let compiled = ctr.withEnvVariable("UV_COMPILE_BYTECODE", "1")
-    let packages = localPackages(source, cfg)
-
     if (cfg.useUv and source.exists(uvLock)) {
-      # --locked: fail loudly on a stale lockfile instead of re-resolving.
-      # In a scope, sync installs the members the project depends on, which
-      # --no-install-project leaves in.
-      compiled
-        .withExec(["uv", "sync", "--no-dev", "--locked", "--no-editable", "--no-install-project"])
-        .withEnvVariable("VIRTUAL_ENV", "$UV_PROJECT_ENVIRONMENT", expand: true)
-        .withEnvVariable("PATH", "$VIRTUAL_ENV/bin:$PATH", expand: true)
-        # uv pip ignores VIRTUAL_ENV while UV_SYSTEM_PYTHON is set.
-        .withExec(["uv", "pip", "install", "--python", venvPath + "/bin/python", "--no-deps", "-e", "."])
+      # uv pip ignores VIRTUAL_ENV while UV_SYSTEM_PYTHON is set.
+      ctr.withExec(["uv", "pip", "install", "--python", venvPath + "/bin/python", "--no-deps", "-e", "."])
     } else if (cfg.useUv) {
-      let deps = if (source.exists(pipCompileLock)) {
-        # The lockfile is complete, so skip resolving.
-        ["--no-deps", "-r", pipCompileLock]
-      } else {
-        ["-r", projectCfg]
-      }
-      compiled
-        .withExec(["uv", "pip", "install", "--no-editable"] + packages + deps)
-        .withExec(["uv", "pip", "install", "--no-deps", "-e", "."])
+      ctr.withExec(["uv", "pip", "install", "--no-deps", "-e", "."])
     } else {
       # pip reads no uv sources, so every local package goes in by path, in
       # the same command that resolves the project's dependencies on them.
-      compiled.withExec(["pip", "install"] + packages + ["-e", "."])
+      ctr.withExec(["pip", "install"] + localPackages(cfg) + ["-e", "."])
+    }
+  }
+
+  """
+  The files the dependency install reads, as workspaceRead names them; the
+  whole context where the install may read any file.
+
+  Rebuilt from its files rather than filtered from the context: a file read
+  from a directory keeps the digest of its content, where a directory derived
+  from an entrypoint's module source has none, so the install is cached on
+  these files alone and not on every file of the source.
+  """
+  let dependencyInputs(cfg: PyConfig!): Directory! {
+    if (cfg.inputs.filter { path => path == "." }.length > 0) {
+      withoutVenv
+    } else {
+      let files = contextDir
+        .filter(include: cfg.inputs)
+        .glob("**")
+        .filter { path => path.hasSuffix("/") == false }
+      let dirs = files.map { path => parentDir(path) }.reduce([] :: [String!]!) { seen, dir =>
+        if (seen.filter { other => other == dir }.length > 0) { seen } else { seen + [dir] }
+      }
+      dirs.reduce(directory) { tree, dir =>
+        tree.withFiles(dir, files.filter { path => parentDir(path) == dir }.map { path => contextDir.file(path) })
+      }
     }
   }
 
@@ -202,11 +250,9 @@ type PythonModuleBuild {
   the way `uv sync` picks them; or the vendored library of the layout before.
   A member nothing depends on is not installed: it may not even install here.
   """
-  let localPackages(source: Directory!, cfg: PyConfig!): [String!]! {
+  let localPackages(cfg: PyConfig!): [String!]! {
     if (cfg.isScope) {
-      workspaceRead(source)
-        .filter { line => line.hasPrefix("local\t") }
-        .map { line => line.trimPrefix("local\t") }
+      cfg.locals
     } else {
       ["./" + genDir]
     }
@@ -214,23 +260,25 @@ type PythonModuleBuild {
 
   """
   The workspace as TOML defines it, read by tomllib in the pinned default
-  image: `member\t<path>` for each member, then `local\t./<dir>` for each
-  member directory to install. The members are globs over directories, and
-  each member's dependencies are in its own file, so one pass reads them
-  all. Only the pyproject.toml files that can be a member's go in, so the
-  read is cached until one of them changes. A file that does not read is
-  named.
+  image from the module at `sub` in `dir`: `member\t<path>` for each member,
+  then `local\t./<dir>` for each member directory to install, then
+  `input\t<path>` for each file and directory of `dir` that the dependency
+  install reads, or `input\t.` where it may read any file. The members are
+  globs over directories, and each member's dependencies are in its own
+  file, so one pass reads them all. Only the files that can name a member,
+  a path or a setting go in, so the read is cached until one of them
+  changes. A file that does not read is named.
   """
-  let workspaceRead(source: Directory!): [String!]! {
+  let workspaceRead(dir: Directory!, sub: String!): [String!]! {
     let lines = container
       .from(defaultBaseImage)
-      .withMountedDirectory("/scope", source.filter(
-        include: ["**/" + projectCfg],
+      .withMountedDirectory("/scope", dir.filter(
+        include: ["**/" + projectCfg, "**/uv.toml", "**/.python-version", "**/" + pipCompileLock],
         # No member lives in these, and a virtualenv alone holds hundreds of
         # pyproject.toml files that would reach the read and its cache key.
         exclude: ["**/.venv", "**/__pycache__", "**/node_modules", "**/.git"],
       ))
-      .withExec(["python", "-c", workspaceReader, "/scope"])
+      .withExec(["python", "-c", workspaceReader, "/scope", sub, genDir])
       .stdout
       .split("\n")
       .filter { line => line != "" }
@@ -245,13 +293,16 @@ type PythonModuleBuild {
   let workspaceReader: String! =
     "import glob, os, re, sys, tomllib\n" +
     "root = sys.argv[1]\n" +
+    "sub = os.path.normpath(sys.argv[2])\n" +
+    "vendored = sys.argv[3]\n" +
+    "module = os.path.join(root, sub)\n" +
     "def fail(message):\n" +
     "    print('error\\t' + message)\n" +
     "    sys.exit(0)\n" +
-    "def load(rel):\n" +
-    "    path = os.path.normpath(os.path.join(rel, 'pyproject.toml'))\n" +
+    "def load(rel, file='pyproject.toml'):\n" +
+    "    path = os.path.normpath(os.path.join(rel, file))\n" +
     "    try:\n" +
-    "        with open(os.path.join(root, path), 'rb') as f:\n" +
+    "        with open(os.path.join(module, path), 'rb') as f:\n" +
     "            return tomllib.load(f)\n" +
     "    except (tomllib.TOMLDecodeError, UnicodeDecodeError, OSError) as e:\n" +
     "        fail(f'{path} is not valid TOML: {e}')\n" +
@@ -274,13 +325,15 @@ type PythonModuleBuild {
     "dirs = []\n" +
     "for member in members:\n" +
     "    print('member\\t' + member)\n" +
-    "    for found in sorted(glob.glob(os.path.join(root, member, 'pyproject.toml'))):\n" +
-    "        rel = os.path.relpath(os.path.dirname(found), root)\n" +
+    "    for found in sorted(glob.glob(os.path.join(module, member, 'pyproject.toml'))):\n" +
+    "        rel = os.path.relpath(os.path.dirname(found), module)\n" +
     "        if rel not in dirs:\n" +
     "            dirs.append(rel)\n" +
+    "docs = {'.': doc}\n" +
     "projects = {}\n" +
     "for rel in dirs:\n" +
-    "    project = table(load(rel), 'project')\n" +
+    "    docs[rel] = load(rel)\n" +
+    "    project = table(docs[rel], 'project')\n" +
     "    projects[rel] = (name(project.get('name')), {name(r) for r in strings(project.get('dependencies'), 'dependencies', rel + '/pyproject.toml')})\n" +
     "needed = []\n" +
     "while True:\n" +
@@ -291,7 +344,41 @@ type PythonModuleBuild {
     "    wanted = set().union(*(projects[rel][1] for rel in found))\n" +
     "for rel in dirs:\n" +
     "    if rel in needed:\n" +
-    "        print('local\\t./' + rel)\n"
+    "        print('local\\t./' + rel)\n" +
+    "inputs = ['pyproject.toml', 'uv.lock', 'uv.toml', '.python-version'] + dirs + ([] if vendored in members else [vendored])\n" +
+    "paths = []\n" +
+    "for rel, member in docs.items():\n" +
+    "    for value in table(member, 'tool', 'uv', 'sources').values():\n" +
+    "        for source in value if isinstance(value, list) else [value]:\n" +
+    "            path = source.get('path') if isinstance(source, dict) else None\n" +
+    "            if isinstance(path, str):\n" +
+    "                paths.append(os.path.normpath(os.path.join(rel, path)))\n" +
+    "settings = [table(member, 'tool', 'uv') for member in docs.values()]\n" +
+    "if os.path.exists(os.path.join(module, 'uv.toml')):\n" +
+    "    settings.append(load('.', 'uv.toml'))\n" +
+    "urls = []\n" +
+    "for uv in settings + [table(uv, 'pip') for uv in settings]:\n" +
+    "    indexes = uv.get('index') if isinstance(uv.get('index'), list) else [uv.get('index')]\n" +
+    "    urls += [uv.get('index-url')] + [table(index).get('url') for index in indexes]\n" +
+    "    for key in ('extra-index-url', 'find-links'):\n" +
+    "        urls += uv.get(key) if isinstance(uv.get(key), list) else []\n" +
+    "whole = any(isinstance(url, str) and '://' not in url for url in urls)\n" +
+    "whole = whole or any('project' not in member or bool(set(table(member, 'project').get('dynamic') or []) - {'version'}) for member in docs.values())\n" +
+    "whole = whole or os.path.exists(os.path.join(module, 'requirements.lock'))\n" +
+    "whole = whole or any(path == '..' or path.startswith('../') for path in inputs)\n" +
+    "whole = whole or any(path not in dirs + [vendored] for path in paths)\n" +
+    "# The module itself installs after the source mount, so only members and the SDK-written\n" +
+    "# vendored package are built in the dependency step; other path sources already fell back.\n" +
+    "whole = whole or any('backend-path' in table(docs[rel], 'build-system') for rel in dirs)\n" +
+    "above = []\n" +
+    "parts = [] if sub == '.' else sub.split('/')\n" +
+    "for i in range(len(parts)):\n" +
+    "    rel = os.path.join(*parts[:i]) if i else '.'\n" +
+    "    whole = whole or any(os.path.exists(os.path.join(root, rel, f)) for f in ('pyproject.toml', 'uv.toml'))\n" +
+    "    if os.path.exists(os.path.join(root, rel, '.python-version')):\n" +
+    "        above.append(os.path.normpath(os.path.join(rel, '.python-version')))\n" +
+    "for path in ['.'] if whole else above + [os.path.normpath(os.path.join(sub, p)) for p in inputs]:\n" +
+    "    print('input\\t' + path)\n"
 
   """
   The generated files a module needs before it builds. A scope needs each of
@@ -408,6 +495,11 @@ type PythonModuleBuild {
     if (rel == "" or rel == ".") { base } else { base + "/" + rel }
   }
 
+  let parentDir(path: String!): String! {
+    let parts = path.split("/")
+    if (parts.length == 1) { "." } else { parts.takeFirst(parts.length - 1).join("/") }
+  }
+
   let imageTag(ref: String!): String! {
     let named = ref.split("@").takeFirst(1).join("")
     let parts = named.split(":")
@@ -421,13 +513,14 @@ type PythonModuleBuild {
   workspace members, and the dependencies that pick what to install, are
   read with the member files (workspaceRead).
   """
-  let pyConfig(source: Directory!): PyConfig! {
-    let doc = json.withContents((JSON.encode(TOML.decode(source.file(projectCfg).contents)) :: Dagger.JSON!))
+  let pyConfig(dir: Directory!, sub: String!): PyConfig! {
+    let doc = json.withContents((JSON.encode(TOML.decode(subdir(dir, sub).file(projectCfg).contents)) :: Dagger.JSON!))
     let project = tomlTable(doc, ["project"])
     let dagger = tomlTable(doc, ["tool", "dagger"])
     let sources = tomlTable(doc, ["tool", "uv", "sources"])
     let indexes = tomlTables(doc, ["tool", "uv", "index"])
       .filter { table => tomlString(table, "name") == "" }
+    let workspace = workspaceRead(dir, sub)
 
     PyConfig(
       projectName: tomlString(project, "name"),
@@ -436,9 +529,15 @@ type PythonModuleBuild {
       useUv: tomlBool(dagger, "use-uv", true),
       uvVersion: tomlString(dagger, "uv-version"),
       vendorPath: tomlString(tomlTable(sources, ["dagger-io"]), "path"),
-      members: workspaceRead(source)
+      members: workspace
         .filter { line => line.hasPrefix("member\t") }
         .map { line => line.trimPrefix("member\t") },
+      locals: workspace
+        .filter { line => line.hasPrefix("local\t") }
+        .map { line => line.trimPrefix("local\t") },
+      inputs: workspace
+        .filter { line => line.hasPrefix("input\t") }
+        .map { line => line.trimPrefix("input\t") },
       indexURL: indexes
         .filter { table => tomlBool(table, "default", false) }
         .map { table => tomlString(table, "url") }
@@ -533,6 +632,17 @@ type PyConfig {
   The `[tool.uv.workspace] members` of a scope; empty in the layout before.
   """
   pub members: [String!]!
+
+  """
+  The member directories the project depends on, as localPackages names them.
+  """
+  pub locals: [String!]!
+
+  """
+  The paths in the context that the dependency install reads, or "." where
+  it may read any file (dependencyInputs).
+  """
+  pub inputs: [String!]!
   pub indexURL: String!
   pub extraIndexURL: String!
 
@@ -544,6 +654,8 @@ type PyConfig {
     uvVersion: String! = "",
     vendorPath: String! = "",
     members: [String!]! = [],
+    locals: [String!]! = [],
+    inputs: [String!]! = [],
     indexURL: String! = "",
     extraIndexURL: String! = "",
   ) {
@@ -554,6 +666,8 @@ type PyConfig {
     self.uvVersion = uvVersion
     self.vendorPath = vendorPath
     self.members = members
+    self.locals = locals
+    self.inputs = inputs
     self.indexURL = indexURL
     self.extraIndexURL = extraIndexURL
     self
