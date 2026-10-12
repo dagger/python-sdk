@@ -42,7 +42,7 @@ type PythonModuleBuild {
   let pipCacheVolume: String! = "modpython-pip"
 
   let defaultBaseImage: String! = "python:3.14-slim@sha256:486b8092bfb12997e10d4920897213a06563449c951c5506c2a2cfaf591c599f"
-  let defaultUvImage: String! = "ghcr.io/astral-sh/uv:0.11.16@sha256:440fd6477af86a2f1b38080c539f1672cd22acb1b1a47e321dba5158ab08864d"
+  let defaultUvImage: String! = "ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a"
 
   """
   The module directory.
