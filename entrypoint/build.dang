@@ -70,7 +70,11 @@ type PythonModuleBuild {
       let contextDirPath = modSourceDirPath + "/" + source.digest
       let packageName = packageNameFor(moduleName, cfg)
 
-      let compiled = base(baseImage, uvImage, cfg).withEnvVariable("UV_COMPILE_BYTECODE", "1")
+      let compiled = base(baseImage, uvImage, cfg)
+        .withEnvVariable("UV_COMPILE_BYTECODE", "1")
+        # Bytecode keyed on its source's hash rather than the time uv copied
+        # the source, so the same inputs build the same layer, byte for byte.
+        .withEnvVariable("PYC_INVALIDATION_MODE", "CHECKED_HASH")
       let built = dependencies(compiled, source, cfg)
         .withWorkdir(join(contextDirPath, subPath))
         .withMountedDirectory(contextDirPath, withoutVenv)
