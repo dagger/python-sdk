@@ -238,7 +238,12 @@ type PythonModuleBuild {
       withoutVenv
     } else {
       let files = contextDir
-        .filter(include: cfg.inputs)
+        .filter(
+          include: cfg.inputs,
+          # In the SDK's member but no part of its package, and `dagger
+          # generate` rewrites it whenever a function's signature changes.
+          exclude: [join(subPath, genDir + "/entrypoint").trimPrefix("./")],
+        )
         .glob("**")
         .filter { path => path.hasSuffix("/") == false }
       let dirs = files.map { path => parentDir(path) }.reduce([] :: [String!]!) { seen, dir =>
