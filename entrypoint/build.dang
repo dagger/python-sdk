@@ -221,31 +221,38 @@ type PythonModuleBuild {
   """
   The files the dependency install reads, as workspaceRead names them; the
   whole context where the install may read any file.
-
-  Rebuilt from its files rather than filtered from the context: a file read
-  from a directory keeps the digest of its content, where a directory derived
-  from an entrypoint's module source has none, so the install is cached on
-  these files alone and not on every file of the source.
   """
   let dependencyInputs(cfg: PyConfig!): Directory! {
     if (cfg.inputs.filter { path => path == "." }.length > 0) {
       withoutVenv
     } else {
-      let files = contextDir
-        .filter(
-          include: cfg.inputs,
-          # In the SDK's member but no part of its package, and `dagger
-          # generate` rewrites it whenever a function's signature changes.
-          exclude: [join(subPath, genDir + "/entrypoint").trimPrefix("./")],
-        )
-        .glob("**")
-        .filter { path => path.hasSuffix("/") == false }
-      let dirs = files.map { path => parentDir(path) }.reduce([] :: [String!]!) { seen, dir =>
-        if (seen.filter { other => other == dir }.length > 0) { seen } else { seen + [dir] }
-      }
-      dirs.reduce(directory) { tree, dir =>
-        tree.withFiles(dir, files.filter { path => parentDir(path) == dir }.map { path => contextDir.file(path) })
-      }
+      filesOf(
+        contextDir,
+        include: cfg.inputs,
+        # In the SDK's member but no part of its package, and `dagger
+        # generate` rewrites it whenever a function's signature changes.
+        exclude: [join(subPath, genDir + "/entrypoint").trimPrefix("./")],
+      )
+    }
+  }
+
+  """
+  The files of a directory that the patterns select, copied one by one: a
+  file read from a directory keeps the digest of its content, where a
+  directory derived from an entrypoint's module source has none, so what
+  reads them is cached on these files alone and not on every file of the
+  source.
+  """
+  let filesOf(dir: Directory!, include: [String!]!, exclude: [String!]!): Directory! {
+    let files = dir
+      .filter(include: include, exclude: exclude)
+      .glob("**")
+      .filter { path => path.hasSuffix("/") == false }
+    let parents = files.map { path => parentDir(path) }.reduce([] :: [String!]!) { seen, parent =>
+      if (seen.filter { other => other == parent }.length > 0) { seen } else { seen + [parent] }
+    }
+    parents.reduce(directory) { tree, parent =>
+      tree.withFiles(parent, files.filter { path => parentDir(path) == parent }.map { path => dir.file(path) })
     }
   }
 
@@ -277,7 +284,8 @@ type PythonModuleBuild {
   let workspaceRead(dir: Directory!, sub: String!): [String!]! {
     let lines = container
       .from(defaultBaseImage)
-      .withMountedDirectory("/scope", dir.filter(
+      .withMountedDirectory("/scope", filesOf(
+        dir,
         include: ["**/" + projectCfg, "**/uv.toml", "**/.python-version", "**/" + pipCompileLock],
         # No member lives in these, and a virtualenv alone holds hundreds of
         # pyproject.toml files that would reach the read and its cache key.
