@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -21,6 +22,11 @@ func main() {
 //
 // get-member-kinds takes a scope directory instead of a file.
 //
+// derive-resources takes a directory of pyproject.toml files at their
+// workspace paths and a module directory in it, and prints as JSON the paths
+// the module's build reads outside the module directory, each relative to the
+// module directory ("pattern") and to the workspace root ("rooted").
+//
 // get-generated prints nothing for a file that does not parse: such a file is
 // no member of the SDK's, which is all its callers ask.
 //
@@ -36,6 +42,22 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Print(out)
+		return nil
+	}
+	if cmd == "derive-resources" {
+		module, err := value(args)
+		if err != nil {
+			return err
+		}
+		resources, err := deriveResources(path, module)
+		if err != nil {
+			return err
+		}
+		out, err := json.Marshal(resources)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(out))
 		return nil
 	}
 
