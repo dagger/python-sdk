@@ -401,7 +401,27 @@ type PythonModuleBuild {
     "    if os.path.exists(os.path.join(root, rel, '.python-version')):\n" +
     "        above.append(os.path.normpath(os.path.join(rel, '.python-version')))\n" +
     "for path in ['.'] if whole else above + [os.path.normpath(os.path.join(sub, p)) for p in inputs]:\n" +
-    "    print('input\\t' + path)\n"
+    "    print('input\\t' + path)\n" +
+    "def text(value):\n" +
+    "    return value if isinstance(value, str) and '\\t' not in value and '\\n' not in value else ''\n" +
+    "def flag(value, default):\n" +
+    "    return value if isinstance(value, bool) else default\n" +
+    "project = table(doc, 'project')\n" +
+    "dagger = table(doc, 'tool', 'dagger')\n" +
+    "indexes = table(doc, 'tool', 'uv').get('index')\n" +
+    "indexes = [index for index in (indexes if isinstance(indexes, list) else [indexes]) if isinstance(index, dict) and text(index.get('name')) == '']\n" +
+    "settings = {\n" +
+    "    'projectName': text(project.get('name')),\n" +
+    "    'requiresPython': text(project.get('requires-python')),\n" +
+    "    'baseImage': text(dagger.get('base-image')),\n" +
+    "    'useUv': 'true' if flag(dagger.get('use-uv'), True) else 'false',\n" +
+    "    'uvVersion': text(dagger.get('uv-version')),\n" +
+    "    'vendorPath': text(table(doc, 'tool', 'uv', 'sources', 'dagger-io').get('path')),\n" +
+    "    'indexURL': next((text(index.get('url')) for index in indexes if flag(index.get('default'), False)), ''),\n" +
+    "    'extraIndexURL': next((text(index.get('url')) for index in indexes if not flag(index.get('default'), False)), ''),\n" +
+    "}\n" +
+    "for key, value in settings.items():\n" +
+    "    print('setting\\t' + key + '\\t' + value)\n"
 
   """
   The generated files a module needs before it builds. A scope needs each of
@@ -530,113 +550,36 @@ type PythonModuleBuild {
   }
 
   """
-  Read with a TOML parser, because the file is the user's content: quoting,
-  dotted keys and multi-line strings are theirs. A key of another type than
-  the one the templates and `mod config set` write reads as unset. The
-  workspace members, and the dependencies that pick what to install, are
-  read with the member files (workspaceRead).
+  Read with a TOML parser in workspaceRead, because the file is the user's
+  content: quoting, dotted keys and multi-line strings are theirs. A key of
+  another type than the one the templates and `mod config set` write reads
+  as unset.
   """
   let pyConfig(dir: Directory!, sub: String!): PyConfig! {
-    let doc = json.withContents((JSON.encode(TOML.decode(subdir(dir, sub).file(projectCfg).contents)) :: Dagger.JSON!))
-    let project = tomlTable(doc, ["project"])
-    let dagger = tomlTable(doc, ["tool", "dagger"])
-    let sources = tomlTable(doc, ["tool", "uv", "sources"])
-    let indexes = tomlTables(doc, ["tool", "uv", "index"])
-      .filter { table => tomlString(table, "name") == "" }
     let workspace = workspaceRead(dir, sub)
-
     PyConfig(
-      projectName: tomlString(project, "name"),
-      requiresPython: tomlString(project, "requires-python"),
-      baseImage: tomlString(dagger, "base-image"),
-      useUv: tomlBool(dagger, "use-uv", true),
-      uvVersion: tomlString(dagger, "uv-version"),
-      vendorPath: tomlString(tomlTable(sources, ["dagger-io"]), "path"),
-      members: workspace
-        .filter { line => line.hasPrefix("member\t") }
-        .map { line => line.trimPrefix("member\t") },
-      locals: workspace
-        .filter { line => line.hasPrefix("local\t") }
-        .map { line => line.trimPrefix("local\t") },
-      inputs: workspace
-        .filter { line => line.hasPrefix("input\t") }
-        .map { line => line.trimPrefix("input\t") },
-      indexURL: indexes
-        .filter { table => tomlBool(table, "default", false) }
-        .map { table => tomlString(table, "url") }
-        .takeFirst(1)
-        .join(""),
-      extraIndexURL: indexes
-        .filter { table => tomlBool(table, "default", false) == false }
-        .map { table => tomlString(table, "url") }
-        .takeFirst(1)
-        .join(""),
+      projectName: setting(workspace, "projectName"),
+      requiresPython: setting(workspace, "requiresPython"),
+      baseImage: setting(workspace, "baseImage"),
+      useUv: setting(workspace, "useUv") == "true",
+      uvVersion: setting(workspace, "uvVersion"),
+      vendorPath: setting(workspace, "vendorPath"),
+      members: readLines(workspace, "member"),
+      locals: readLines(workspace, "local"),
+      inputs: readLines(workspace, "input"),
+      indexURL: setting(workspace, "indexURL"),
+      extraIndexURL: setting(workspace, "extraIndexURL"),
     )
   }
 
-  """
-  The table at a key path, or an empty one where there is none.
-  """
-  let tomlTable(doc: JSONValue!, path: [String!]!): JSONValue! {
-    path.reduce(doc) { table, key =>
-      let value = if (table.fields.contains(key)) { table.field([key]) } else { emptyTable }
-      if (isTable(value)) { value } else { emptyTable }
-    }
+  let readLines(workspace: [String!]!, kind: String!): [String!]! {
+    workspace
+      .filter { line => line.hasPrefix(kind + "\t") }
+      .map { line => line.trimPrefix(kind + "\t") }
   }
 
-  """
-  Every `[[name]]` table at a key path, or the one `[name]` table there.
-  """
-  let tomlTables(doc: JSONValue!, path: [String!]!): [JSONValue!]! {
-    let parent = tomlTable(doc, path.takeFirst(path.length - 1))
-    let key = path.takeLast(1).join("")
-    if (parent.fields.contains(key) == false) {
-      [] :: [JSONValue!]!
-    } else if (isTable(parent.field([key]))) {
-      [parent.field([key])]
-    } else if (isArray(parent.field([key]))) {
-      parent.field([key]).asArray.{{contents}}
-        .map { item => json.withContents(item.contents) }
-        .filter { table => isTable(table) }
-    } else {
-      [] :: [JSONValue!]!
-    }
-  }
-
-  let tomlString(table: JSONValue!, key: String!): String! {
-    if (table.fields.contains(key)) {
-      table.field([key]).asString rescue {
-        err: Error => ""
-      }
-    } else {
-      ""
-    }
-  }
-
-  let tomlBool(table: JSONValue!, key: String!, default: Boolean!): Boolean! {
-    if (table.fields.contains(key)) {
-      table.field([key]).asBoolean rescue {
-        err: Error => default
-      }
-    } else {
-      default
-    }
-  }
-
-  let isTable(value: JSONValue!): Boolean! {
-    (value.fields.length >= 0) rescue {
-      err: Error => false
-    }
-  }
-
-  let isArray(value: JSONValue!): Boolean! {
-    (value.asArray.{{contents}}.length >= 0) rescue {
-      err: Error => false
-    }
-  }
-
-  let emptyTable: JSONValue! {
-    json.withContents(("{}" :: Dagger.JSON!))
+  let setting(workspace: [String!]!, key: String!): String! {
+    readLines(workspace, "setting\t" + key).join("")
   }
 }
 
