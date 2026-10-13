@@ -52,7 +52,9 @@ On an older engine, `dagger module init` and `dagger generate` stop before
 they write anything, with a message that names the engine's version. The
 shared entrypoint cannot say why: Dang rejects its file before any code runs,
 so a module on it fails to load on v1.0.0-beta.14 with `field
-"withCollection" not found in Dagger.TypeDef`. To stay on an engine from
+"withCollection" not found in Dagger.TypeDef`. A generated entrypoint fails to
+load on an older engine with `field "types": missing argument "workspace"
+required by interface`. To stay on an engine from
 v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
 there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
 `dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint. An engine
@@ -75,7 +77,9 @@ Generating a module that has a manifest already keeps the kind it names:
   change which files the module is. The runtime it stays on is the one this SDK
   publishes, `dagger.io/sdk/python/runtime@v1`, since the runtime built into the
   engine reads the layout before this one; `--legacy-runtime` asks for it for
-  any module.
+  any module. A module on the generated entrypoint gets the libraries outside
+  its directory that its `pyproject.toml` names as path sources (see "Files
+  outside the module").
 - An entrypoint of another kind, a pin of the shared one or a fork, is kept as
   written. `--remote-entrypoint` asks for the shared one instead.
 - `--legacy-runtime` and `--remote-entrypoint` cannot be set together: each asks
@@ -267,6 +271,47 @@ one that has an entrypoint of its own, and then `sdk/entrypoint/` goes. A
 module that names a runtime of its own keeps it, with or without the flag. See
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design.
+
+## Files outside the module
+
+A generated entrypoint builds the module from its own directory and from the
+libraries outside it that the build reads. Generation finds them where uv
+needs them, in `pyproject.toml`:
+
+```toml
+[tool.uv.sources]
+greet = { path = "../../libs/greet", editable = true }
+```
+
+`dagger generate` follows each path source outside the module directory, the
+path sources of those in turn, and the workspace members outside the module,
+and checks them against `uv.lock`. The `sources` function that it writes into
+`sdk/entrypoint/main.dang` returns the module directory and the directories it
+finds, and the engine loads them with the module: the build installs them, and
+a change to a file in them gives a new cache key instead of a stale result. The
+module also runs from a Git repository, where the engine reads the files at the
+commit.
+
+Generation refuses a path source that is absolute or leaves the workspace, and
+a library directory that holds no file or only files that `.gitignore`
+ignores. It also refuses an outside library on any entrypoint but the one
+generated into the module; a module on a runtime lists such files under
+`include` in `dagger-module.toml` instead.
+
+Not loaded in this version:
+
+- a file outside the module that the code opens at call time: the call fails
+  with `FileNotFoundError`;
+- a hatch `force-include` source outside a library: its build fails with
+  "Forced include not found";
+- a wheel, a source archive or a symlink outside the module as a path
+  source: generation refuses it, so point the path source at a directory
+  instead;
+- a pip-mode module (`use-uv = false`), and a `-e ../x` line in
+  `requirements.lock`.
+
+A local module needs a Git repository above it to load a library outside it.
+Run `dagger generate` again after a change to the path sources.
 
 ## Install
 
