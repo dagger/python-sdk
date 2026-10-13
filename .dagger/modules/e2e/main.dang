@@ -1964,7 +1964,9 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
-      "contextDir: directory.withDirectory(\".\", currentModule.source",
+      "pub sources(workspace: Workspace!): Directory! {",
+      "pub types: [TypeDef!]! {",
+      "contextDir: directory.withDirectory(\".\", currentModule.contextDirectory",
     ])
     assertNotContains(main, "workspace.id", "the static entrypoint hands the module the caller's workspace")
     assertNotContains(main, "clients:", "the static entrypoint still hands the module its clients")
