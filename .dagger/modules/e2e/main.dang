@@ -2402,4 +2402,275 @@ type E2e {
     null
   }
 
+  let resourcesRoot: String! = fixtureRoot + "/resources"
+  let resourcesAppPath: String! = resourcesRoot + "/services/app"
+  let resourcesProject: String! = "/" + resourcesAppPath + "/pyproject.toml"
+  let greetSource: String! = "greet = { path = \"../../libs/greet\", editable = true }"
+  let derivedSources: [String!]! = ["workspace.directory(\"../../libs/greet\", ", "workspace.directory(\"../../libs/text\", "]
+
+  """
+  The resources fixture with a uv.lock to lock again, so its build syncs the
+  path sources from a lock as a pinned module does.
+  """
+  let resourcesSeeded(ws: Workspace!): Workspace! {
+    ws.withNewFile("/" + resourcesAppPath + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
+  }
+
+  let resourcesGenerated(sdk: PythonSdk!, ws: Workspace!): Workspace! {
+    sdk.generateScope(ws.withWorkdir(resourcesAppPath), isModule: true, name: "resources-app", clients: []).withWorkdir(".")
+  }
+
+  let resourcesAttempt(sdk: PythonSdk!, ws: Workspace!): String! {
+    resourcesGenerated(sdk, ws).file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents rescue {
+      err: Error => err.message
+    }
+  }
+
+  """
+  The cases report together, so one run names every case that lost a path:
+  empty when the generated entrypoint returns each directory from sources.
+  """
+  let derivedLost(what: String!, main: String!, dirs: [String!]!): String! {
+    if (dirs.filter { dir => main.contains("workspace.directory(\"" + dir + "\", ") == false }.length == 0) {
+      ""
+    } else {
+      what + ": " + main
+    }
+  }
+
+  let withVendored(ws: Workspace!, dir: String!): Workspace! {
+    let vendored = "/" + resourcesAppPath + "/" + dir
+    ws
+      .withNewFile(resourcesProject, ws.file(resourcesProject).contents
+        .replace("\"greet\"]", "\"vendored-a\"]")
+        .replace(greetSource, "vendored-a = { path = \"" + dir + "\" }"))
+      .withNewFile(vendored + "/pyproject.toml",
+        "[project]\nname = \"vendored-a\"\nversion = \"0.1.0\"\nrequires-python = \">=3.14\"\ndependencies = [\"greet\"]\n\n" +
+        "[build-system]\nrequires = [\"uv_build>=0.8.4,<0.12.0\"]\nbuild-backend = \"uv_build\"\n\n" +
+        "[tool.uv.sources]\ngreet = { path = \"../../../../libs/greet\" }\n")
+      .withNewFile(vendored + "/src/vendored_a/__init__.py", "")
+  }
+
+  let assertDerived(main: String!, message: String!): Void {
+    derivedSources.each { want => assertContains(main, want, message + ": " + main) }
+    null
+  }
+
+  let withGreetSource(ws: Workspace!, source: String!): Workspace! {
+    ws.withNewFile(resourcesProject, ws.file(resourcesProject).contents.replace(greetSource, source))
+  }
+
+  """
+  A module whose path source sits outside its directory gets that path, and
+  the path source's own, in its generated entrypoint, which builds from the
+  module context. Generation writes nothing outside the module, and a second
+  generation changes nothing. A library that is a workspace member is
+  derived the same way, and a committed lock is locked again with the
+  outside paths.
+  """
+  pub resourcesGenerateCheck(ws: Workspace!): Void @check {
+    let seeded = resourcesSeeded(ws)
+    let main = resourcesAttempt(pythonSdk, seeded)
+    assertDerived(main, "the entrypoint does not return the outside library from sources")
+    let generated = resourcesGenerated(pythonSdk, seeded)
+    let manifest = generated.file("/" + resourcesAppPath + "/dagger-module.toml").contents
+    assert(
+      manifest == "name = \"resources-app\"\n\n[entrypoint]\n  kind = \"dang\"\n  source = \"./sdk/entrypoint\"\n",
+      "unexpected manifest: " + manifest,
+    )
+    let changes = generated.changes(seeded)
+    let outside = (changes.addedPaths + changes.modifiedPaths + changes.removedPaths)
+      .filter { path => path.hasPrefix(resourcesAppPath + "/") == false }
+    assert(outside.length == 0, "generation wrote outside the module: " + outside.join(", "))
+    assertContainsAll(generated.file("/" + resourcesAppPath + "/uv.lock").contents, ["name = \"greet\"", "name = \"text\""])
+    let again = pythonSdk
+      .generateScope(generated.withWorkdir(resourcesAppPath), isModule: true, name: "resources-app", clients: [])
+      .withWorkdir(".")
+    assert(again.changes(generated).isEmpty, "a second generation changed a module with an outside library")
+
+    let member = ws.withNewFile(resourcesProject, ws.file(resourcesProject).contents
+      .replace("members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"../../libs/greet\"]")
+      .replace(greetSource, "greet = { workspace = true }"))
+    assertDerived(resourcesAttempt(pythonSdk, member), "a library that is a workspace member was not derived")
+
+    let venvLibrary = "/" + resourcesRoot + "/libs/venv"
+    let libraryInVenv = withGreetSource(ws, "greet = { path = \"../../libs/venv\", editable = true }")
+      .withDirectory(venvLibrary, ws.directory("/" + resourcesRoot + "/libs/greet"))
+    let memberInVenv = ws
+      .withNewFile(resourcesProject, ws.file(resourcesProject).contents
+        .replace("members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"../../libs/venv\"]")
+        .replace(greetSource, "greet = { workspace = true }"))
+      .withDirectory(venvLibrary, ws.directory("/" + resourcesRoot + "/libs/greet"))
+    let venvModule = resourcesRoot + "/venv/app"
+    let moduleInVenv = pythonSdk
+      .generateScope(ws.withDirectory("/" + venvModule, ws.directory("/" + resourcesAppPath)).withWorkdir(venvModule), isModule: true, name: "resources-app", clients: [])
+      .file("/" + venvModule + "/sdk/entrypoint/main.dang").contents rescue {
+        err: Error => err.message
+      }
+    let besideJunk = ws
+      .withNewFile("/" + resourcesAppPath + "/.venv/lib/junk/pyproject.toml", "[project\n")
+      .withNewFile("/" + resourcesAppPath + "/node_modules/junk/pyproject.toml", "[project\n")
+    let lost = [
+      derivedLost("an outside library in libs/venv", resourcesAttempt(pythonSdk, libraryInVenv), ["../../libs/venv", "../../libs/text"]),
+      derivedLost("a path source inside the module in vendor/venv", resourcesAttempt(pythonSdk, withVendored(ws, "vendor/venv")), ["../../libs/greet", "../../libs/text"]),
+      derivedLost("a workspace member in libs/venv", resourcesAttempt(pythonSdk, memberInVenv), ["../../libs/venv", "../../libs/text"]),
+      derivedLost("the module in venv/app", moduleInVenv, ["../../libs/greet", "../../libs/text"]),
+      derivedLost("a module whose .venv and node_modules hold a pyproject.toml that does not parse", resourcesAttempt(pythonSdk, besideJunk), ["../../libs/greet", "../../libs/text"]),
+    ].filter { said => said != "" }
+    assert(lost.length == 0, "generation lost a path it derives:\n" + lost.join("\n"))
+
+    assertDerived(resourcesAttempt(pythonSdk, resourcesSeeded(withVendored(ws, "vendor/a"))), "a locked module whose path source reads one outside was not generated")
+    let byMarker = resourcesSeeded(withGreetSource(ws,
+      "greet = [\n  { path = \"../../libs/greet\", marker = \"sys_platform == 'linux'\" },\n" +
+      "  { path = \"../../libs/greet\", marker = \"sys_platform != 'linux'\" },\n]"))
+    assertDerived(resourcesAttempt(pythonSdk, byMarker), "a locked module whose path source is written per marker was not generated")
+    null
+  }
+
+  """
+  A module with nothing outside its directory returns only that directory
+  from its entrypoint's sources.
+  """
+  pub resourcesNoneCheck(ws: Workspace!): Void @check {
+    let generated = pythonSdk
+      .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    let entrypoint = generated.directory("/" + tomlGenerateModulePath + "/sdk/entrypoint")
+    let main = entrypoint.file("main.dang").contents
+    assertContains(main, ".withDirectory(workspace.cwd, workspace.directory(\".\", ", "sources does not return the module directory: " + main)
+    assert(main.split("workspace.directory(").length == 2, "sources of a module with nothing outside returns more than its directory: " + main)
+    ["main.dang", "types.dang", "build.dang"].each { file =>
+      assertNotContains(entrypoint.file(file).contents, "resources", file + " still names resources")
+    }
+    null
+  }
+
+  """
+  Generation refuses an outside path it cannot load, before it writes
+  anything, and names the file and the entry. Only the entrypoint generated
+  into a module returns outside paths from its sources; a module on a runtime
+  keeps the include of its manifest, so nothing is derived for it.
+  """
+  pub resourcesRefusalsCheck(ws: Workspace!): Void @check {
+    assertResourcesRefused(ws, "greet = { path = \"/opt/greet\" }",
+      "pyproject.toml: [tool.uv.sources] greet path \"/opt/greet\" is absolute; a module loads only files inside its workspace")
+    assertResourcesRefused(ws, "greet = { path = \"../../../../../../../../../../greet\" }",
+      "[tool.uv.sources] greet path \"../../../../../../../../../../greet\" leaves the workspace root")
+
+    let remote = resourcesAttempt(pythonSdk(remoteEntrypoint: true), ws)
+    assertContainsAll(remote, [
+      "builds with files outside its directory (../../libs/greet, ../../libs/text)",
+      "only the entrypoint this SDK generates into a module loads",
+    ])
+    let runtime = resourcesGenerated(pythonSdk(legacyRuntime: true), ws)
+    assertContains(runtime.file("/" + resourcesAppPath + "/dagger-module.toml").contents, "[runtime]", "a module on a runtime was refused")
+    assert(runtime.directory("/" + resourcesAppPath).exists("sdk/entrypoint") == false, "a module on a runtime got an entrypoint")
+
+    assertResourcesRefused(ws, "greet = { path = \"../../libs/gone\" }",
+      "builds with ../../libs/gone, which holds no file in the workspace")
+    let wheel = "dist/greet-0.1.0-py3-none-any.whl"
+    assertResourcesRefused(ws.withNewFile("/" + resourcesRoot + "/" + wheel, "wheel\n"), "greet = { path = \"../../" + wheel + "\" }",
+      "builds with ../../" + wheel + ", which is a file; outside file sources, such as a wheel, are not supported")
+    # The engine applies .gitignore files from the host only, so the ignored
+    # fixture directory is committed rather than written as a workspace edit.
+    assertResourcesRefused(ws, "greet = { path = \"../../ignored\" }",
+      "builds with ../../ignored, which holds only files that .gitignore ignores")
+    # A workspace edit cannot write a symlink, so libs/alias is committed too.
+    let throughLink = "goes through the symlink " + resourcesRoot + "/libs/alias in the workspace; outside path sources through a symlink are not supported"
+    assertResourcesRefused(ws, "greet = { path = \"../../libs/alias/src\" }", "builds with ../../libs/alias/src, which " + throughLink)
+    assertResourcesRefused(ws, "greet = { path = \"../../libs/alias\" }", "builds with ../../libs/alias, which " + throughLink)
+    null
+  }
+
+  """
+  No lock is seeded: uv would lock the fixture first and refuse it in its own
+  words.
+  """
+  let assertResourcesRefused(ws: Workspace!, source: String!, want: String!): Void {
+    let said = resourcesAttempt(pythonSdk, withGreetSource(ws, source))
+    assertContains(said, want, "generation did not refuse " + source + " with " + want + ": " + said)
+    null
+  }
+
+  """
+  A failed generation does not fail the exec, so a check can say what it
+  printed.
+  """
+  let resourcesPlayground(ws: Workspace!): Container! {
+    playgroundOf(playgroundTree(resourcesSeeded(ws))).withExec(
+      ["dagger", "-y", "call", "python-sdk", "mod", "--path", resourcesAppPath, "--find-up=false", "generate"],
+      experimentalPrivilegedNesting: true,
+      expect: ReturnType.ANY,
+    )
+  }
+
+  """
+  A module with an outside library builds with it and with the library's own
+  path source, and its API has no sources function. The call key follows
+  the derived files: an edit of the transitive library gives a new key and a
+  fresh result, an edit of a file nothing derives does not.
+  """
+  pub resourcesCallCheck(ws: Workspace!): Void @check {
+    let generated = resourcesPlayground(ws)
+    let said = generated.stdout + generated.stderr
+    assert(generated.exitCode == 0, "generation through the CLI failed: " + said)
+    assert(callResources(generated, "greeting") == "hello from greet and text", "the module did not build with its outside library")
+    let functions = cli(generated, ["-m", resourcesAppPath, "functions"]).stdout
+    assertContainsAll(functions, ["greeting", "call-digest"])
+    assert(
+      functions.split("\n").filter { line => (line.trimSpace.split(" ")[0] ?? "") == "sources" }.length == 0,
+      "the module API has a sources function: " + functions,
+    )
+
+    let first = callResources(generated, "call-digest")
+    let derived = generated.withNewFile(
+      playgroundRoot + "/" + resourcesRoot + "/libs/text/src/text/__init__.py",
+      "def word() -> str:\n    return \"edited text\"\n",
+    )
+    let afterDerived = callResources(derived, "call-digest")
+    assert(afterDerived != first, "an edit of a derived library kept the call key: " + first)
+    assert(callResources(derived, "greeting") == "hello from greet and edited text", "an edit of a derived library returned a stale result")
+    let unrelated = derived.withNewFile(playgroundRoot + "/" + resourcesRoot + "/other/unrelated.txt", "edited\n")
+    assert(callResources(unrelated, "call-digest") == afterDerived, "an edit of a file nothing derives changed the call key")
+    null
+  }
+
+  let callResources(ctr: Container!, fn: String!): String! {
+    cli(ctr, ["-m", resourcesAppPath, "call", fn]).stdout.trimSpace
+  }
+
+  """
+  A module with an outside library runs from a Git repository: the engine
+  reads the derived files at the commit, so the call finds the library there.
+  """
+  pub resourcesGitCallCheck(ws: Workspace!): Void @check {
+    let generated = resourcesPlayground(ws)
+    let said = generated.stdout + generated.stderr
+    assert(generated.exitCode == 0, "generation through the CLI failed: " + said)
+    let server = container
+      .from("alpine:3.22")
+      .withoutEntrypoint
+      .withExec(["apk", "add", "--no-cache", "git", "git-daemon"])
+      .withDirectory("/srv/repo", generated.directory(playgroundRoot + "/" + resourcesRoot))
+      .withWorkdir("/srv/repo")
+      .withExec(["git", "init", "-q", "-b", "main"])
+      .withExec(["git", "add", "-A"])
+      .withExec(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-q", "-m", "resources fixture"])
+      .withExec(["git", "clone", "-q", "--bare", ".", "/srv/repo.git"])
+      .withExposedPort(9418)
+      .withDefaultArgs(["git", "daemon", "--export-all", "--base-path=/srv", "/srv"])
+      .asService
+    let ref = "git://" + server.hostname + "/repo.git#main:services/app"
+    let called = container
+      .from(playgroundImage)
+      .withoutEntrypoint
+      .withServiceBinding(server.hostname, server)
+      .withExec(["dagger", "-m", ref, "call", "greeting"], experimentalPrivilegedNesting: true, expect: ReturnType.ANY)
+    assert(
+      called.exitCode == 0 and called.stdout.trimSpace == "hello from greet and text",
+      "a module with an outside library did not run from Git:\n" + called.stdout + called.stderr,
+    )
+    null
+  }
+
 }
