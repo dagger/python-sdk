@@ -1873,6 +1873,103 @@ type E2e {
   }
 
   """
+  A module declares a collection, on this checkout's shared entrypoint and on
+  the one generated into it. The engine serves keys, list, get, subset and
+  batch on it, and the CLI names an item with a selector, after the
+  collection or in place of the path to it.
+
+  A copy the module returns keeps the collection's base, so its delta compares
+  it with the keys the module first returned; a new collection starts a base
+  of its own. Without that state a changed copy reads as unchanged.
+  """
+  pub collectionsCheck(ws: Workspace!): Void @check {
+    collections(ws, "shared")
+    collections(ws, "static")
+    null
+  }
+
+  """
+  A module calls the collection through the client generated from it. keys,
+  get, list, subset and batch exist only in the engine's projection of the
+  collection, so the client has them only if it was generated from that.
+  """
+  pub collectionsClientCheck(ws: Workspace!): Void @check {
+    let target = ".dagger/modules/shelf"
+    let caller = ".dagger/modules/shelf-caller"
+    let targetReady = cli(
+      cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "shelf", "--path", target])
+        .withFile(target + "/src/shelf/__init__.py", ws.file("/" + fixtureRoot + "/collections/shelf.py")),
+      ["generate", "-y"],
+    )
+    let withCaller = cli(targetReady, ["module", "init", "python", "--auto-apply", "--name", "shelf-caller", "--path", caller])
+      .withFile(caller + "/src/shelf_caller/__init__.py", ws.file("/" + fixtureRoot + "/collections/caller.py"))
+      .withWorkdir(caller)
+    let callerReady = cli(withCaller, ["module", "client", "add", "../shelf", "--sdk", "python", "--auto-apply"])
+      .withWorkdir(playgroundRoot)
+    let attempt = callerReady
+      .withExec(["dagger", "-m", caller, "call", "report"], experimentalPrivilegedNesting: true, expect: ReturnType.ANY)
+    let called = attempt.stdout + attempt.stderr
+    if (called.contains(ownTreeRefusal)) {
+      note(callerReady, "skipped, this engine resolves a local client in the caller's workspace " +
+        "instead of the module's own tree (dagger/dagger#14490)")
+    } else {
+      assert(attempt.exitCode == 0, "the caller's call failed: " + called)
+      let want = "keys=['b', 'a', 'c'] list=['item:b', 'item:a', 'item:c'] get=item:a removed=['b', 'a']"
+      assertContains(attempt.stdout, want, "the client did not reach the projected collection: " + called)
+    }
+    null
+  }
+
+  let collections(ws: Workspace!, form: String!): Void {
+    let path = ".dagger/modules/shelf"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "shelf", "--path", path])
+      .withFile(path + "/src/shelf/__init__.py", ws.file("/" + fixtureRoot + "/collections/shelf.py"))
+    # A static entrypoint bakes the module's types, so the source is in place
+    # before generation.
+    let ready = if (form == "static") {
+      cli(initialized, ["generate", "-y"])
+    } else {
+      onCheckoutEntrypoint(initialized, ws, path, "shelf")
+    }
+
+    let queried = ready
+      .withExec(["dagger", "-m", path, "query"], stdin: collectionQuery, experimentalPrivilegedNesting: true)
+      .stdout
+    let compact = queried.replace(" ", "").replace("\n", "")
+    assert(compact == collectionAnswer, form + ": the collection API answered " + compact + ", not " + collectionAnswer)
+
+    let item = cli(ready, ["-m", path, "call", "items", "name", "--shelf-item=a"]).stdout
+    assert(item.trimSpace == "item:a", form + ": the selector after the collection did not name item a: " + item)
+    let rooted = cli(ready, ["-m", path, "call", "--shelf-item=c", "name"]).stdout
+    assert(rooted.trimSpace == "item:c", form + ": the selector in place of the path did not name item c: " + rooted)
+    let batch = cli(ready, ["-m", path, "call", "items", "selected", "--shelf-item=c", "--shelf-item=b"]).stdout
+    assert(batch.trimSpace == "b\nc", form + ": repeated selectors did not reach the batch with b and c: " + batch)
+    null
+  }
+
+  let collectionQuery: String! = "{ items {\n" +
+    "  keys\n" +
+    "  list { name }\n" +
+    "  get(key: \"a\") { name }\n" +
+    "  batch { selected removed }\n" +
+    "  subset(keys: [\"c\", \"b\"]) { keys batch { selected removed } }\n" +
+    "  changed: batch { change(names: [\"c\", \"d\"]) { keys batch { added removed } } }\n" +
+    "  fresh: subset(keys: [\"c\"]) { batch { fresh { keys batch { added removed } } } }\n" +
+    "} }"
+
+  """The answer to collectionQuery, with its keys sorted the way the CLI prints them."""
+  let collectionAnswer: String! = "{\"items\":{" +
+    "\"batch\":{\"removed\":[],\"selected\":[\"b\",\"a\",\"c\"]}," +
+    "\"changed\":{\"change\":{\"batch\":{\"added\":[\"d\"],\"removed\":[\"b\",\"a\"]},\"keys\":[\"c\",\"d\"]}}," +
+    "\"fresh\":{\"batch\":{\"fresh\":{\"batch\":{\"added\":[],\"removed\":[]},\"keys\":[\"z\"]}}}," +
+    "\"get\":{\"name\":\"item:a\"}," +
+    "\"keys\":[\"b\",\"a\",\"c\"]," +
+    "\"list\":[{\"name\":\"item:b\"},{\"name\":\"item:a\"},{\"name\":\"item:c\"}]," +
+    "\"subset\":{\"batch\":{\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]},\"keys\":[\"b\",\"c\"]}" +
+    "}}"
+
+
+  """
   A module keeps the kind of entrypoint its manifest names when it is
   generated again: one written into it stays written into it, and a Dang
   entrypoint of another kind, a fork say, is left as it is. A second
