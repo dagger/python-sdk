@@ -1072,10 +1072,23 @@ def _describe_object(name: str, obj_type: ObjectType) -> ObjectDescription:
         else:
             functions.append(described)
 
+    collection = getattr(obj_type.cls, COLLECTION_DEF_KEY, False)
+    # A collection without a get function fails to load, and the engine's
+    # error names neither the method marked @get nor the missing @function.
+    if collection and not any(f.collection_get or f.name == "get" for f in functions):
+        for member, value in inspect.getmembers(obj_type.cls):
+            if hasattr(value, COLLECTION_GET_DEF_KEY):
+                msg = (
+                    f"Method '{member}' of '{name}' is marked @get but not "
+                    "@function. Add @function: a collection's get function must "
+                    "be exposed."
+                )
+                raise BadUsageError(msg)
+
     return ObjectDescription(
         name=name,
         interface=obj_type.interface,
-        collection=getattr(obj_type.cls, COLLECTION_DEF_KEY, False),
+        collection=collection,
         description=get_doc(obj_type.cls),
         deprecated=obj_type.deprecated,
         fields=fields,
