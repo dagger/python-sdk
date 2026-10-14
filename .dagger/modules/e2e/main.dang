@@ -1947,6 +1947,37 @@ type E2e {
     null
   }
 
+  """
+  A module still loads on this checkout's shared entrypoint when its SDK
+  predates collections. The module keeps the SDK it was generated with while
+  the shared entrypoint moves with its tag, so the description it reads can
+  lack every collection key: the check strips them from the module's own
+  description, as that older SDK writes it.
+  """
+  pub collectionsOlderSdkCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/older-sdk"
+    let describe = path + "/sdk/src/dagger/mod/_describe.py"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "older-sdk", "--path", path])
+    let source = initialized.file(playgroundRoot + "/" + describe).contents
+    let older = source.replace(describeJSONReturn, olderDescribeJSONReturn)
+    assert(older != source, "the SDK has no describe_json return to rewrite")
+    let ready = onCheckoutEntrypoint(initialized.withNewFile(describe, older), ws, path, "older-sdk")
+    let ran = cli(ready, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
+    assert(ran.trimSpace != "", "a module on an SDK older than collections did not run on the shared entrypoint")
+    null
+  }
+
+  let describeJSONReturn: String! = "    return json.dumps(dataclasses.asdict(desc))\n"
+
+  let olderDescribeJSONReturn: String! = "    def older(value):\n" +
+    "        if isinstance(value, dict):\n" +
+    "            return {k: older(v) for k, v in value.items() if not k.startswith(\"collection\")}\n" +
+    "        if isinstance(value, (list, tuple)):\n" +
+    "            return [older(v) for v in value]\n" +
+    "        return value\n" +
+    "\n" +
+    "    return json.dumps(older(dataclasses.asdict(desc)))\n"
+
   let collectionQuery: String! = "{ items {\n" +
     "  keys\n" +
     "  list { name }\n" +

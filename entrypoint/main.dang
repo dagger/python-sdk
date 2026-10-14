@@ -111,7 +111,10 @@ type Entrypoint implements ModuleEntrypoint {
         deprecated: optString(raw, "deprecated"),
       )
     }
-    let collection = if (raw.field(["collection"]).asBoolean) { base.withCollection } else { base }
+    # The module's own SDK writes the description, and one older than this
+    # entrypoint leaves out every collection key, which JSONValue.field refuses.
+    let collections = raw.fields.contains("collection")
+    let collection = if (collections and raw.field(["collection"]).asBoolean) { base.withCollection } else { base }
     let withFields = raw.field(["fields"]).asArray.{{contents}}.reduce(collection) { acc, rawField =>
       let f = json.withContents(rawField.contents)
       let field = acc.withField(
@@ -120,7 +123,7 @@ type Entrypoint implements ModuleEntrypoint {
         description: optString(f, "description"),
         deprecated: optString(f, "deprecated"),
       )
-      let role = optString(f, "collection_role")
+      let role = if (collections) { optString(f, "collection_role") } else { null }
       if (role == "keys") { field.withCollectionKeys(f.field(["name"]).asString) }
       else if (role == "delta") { field.withCollectionDelta(f.field(["name"]).asString) }
       else { field }
@@ -128,7 +131,7 @@ type Entrypoint implements ModuleEntrypoint {
     let withFunctions = raw.field(["functions"]).asArray.{{contents}}.reduce(withFields) { acc, rawFn =>
       let f = json.withContents(rawFn.contents)
       let withFunction = acc.withFunction(functionOf(f))
-      if (f.field(["collection_get"]).asBoolean) { withFunction.withCollectionGet(f.field(["name"]).asString) }
+      if (collections and f.field(["collection_get"]).asBoolean) { withFunction.withCollectionGet(f.field(["name"]).asString) }
       else { withFunction }
     }
     let ctor = raw.field(["constructor"])
