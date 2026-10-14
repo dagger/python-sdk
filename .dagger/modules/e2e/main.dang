@@ -2046,6 +2046,52 @@ type E2e {
 
 
   """
+  Collections of every key type the engine takes, in one module: Int, Float,
+  Boolean, an enum and a core scalar. The delta names a removed key as text,
+  whatever the key type. An item can be a collection itself. A batch
+  generator replaces its item's generator of the same name and sees only the
+  selected keys; the item's generator raises if it runs.
+  """
+  pub collectionKindsCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/kinds"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "kinds", "--path", path])
+      .withFile(path + "/src/kinds/__init__.py", ws.file("/" + fixtureRoot + "/collections/kinds.py"))
+    let ready = onCheckoutEntrypoint(initialized, ws, path, "kinds")
+
+    let queried = ready
+      .withExec(["dagger", "-m", path, "query"], stdin: kindsQuery, experimentalPrivilegedNesting: true)
+      .stdout
+    let compact = queried.replace(" ", "").replace("\n", "")
+    assert(compact == kindsAnswer, "the collections answered " + compact + ", not " + kindsAnswer)
+
+    let generated = cli(ready, ["-m", path, "generate", "-y", "items/write?kinds-items-item=a&kinds-items-item=b"])
+    let selected = generated.withExec(["cat", playgroundRoot + "/selected"]).stdout
+    assert(selected == "a,b", "the batch generator wrote " + selected + ", not the selected keys a,b")
+    null
+  }
+
+  let kindsQuery: String! = "{\n" +
+    "  numbers { keys get(key: 2) { name } subset(keys: [3, 1]) { keys batch { removed } } }\n" +
+    "  ratios { keys get(key: 1.5) { name } subset(keys: [1.5]) { batch { removed } } }\n" +
+    "  flags { keys get(key: false) { name } subset(keys: [false]) { batch { removed } } }\n" +
+    "  colors { keys get(key: BLUE) { name } subset(keys: [BLUE]) { batch { removed } } }\n" +
+    "  platforms { keys get(key: \"linux/arm64\") { name } subset(keys: [\"linux/arm64\"]) { batch { removed } } }\n" +
+    "  items { keys batch { selected } }\n" +
+    "  shelves { keys get(key: \"s2\") { keys get(key: \"s2-1\") { name } subset(keys: [\"s2-2\"]) { batch { selected } } } subset(keys: [\"s1\"]) { batch { count } } }\n" +
+    "}"
+
+  """The answer to kindsQuery, with its keys sorted the way the CLI prints them."""
+  let kindsAnswer: String! = "{" +
+    "\"colors\":{\"get\":{\"name\":\"blue\"},\"keys\":[\"RED\",\"BLUE\"],\"subset\":{\"batch\":{\"removed\":[\"RED\"]}}}," +
+    "\"flags\":{\"get\":{\"name\":\"fFalse\"},\"keys\":[true,false],\"subset\":{\"batch\":{\"removed\":[\"true\"]}}}," +
+    "\"items\":{\"batch\":{\"selected\":[\"a\",\"b\",\"c\"]},\"keys\":[\"a\",\"b\",\"c\"]}," +
+    "\"numbers\":{\"get\":{\"name\":\"n2\"},\"keys\":[2,1,3],\"subset\":{\"batch\":{\"removed\":[\"2\"]},\"keys\":[1,3]}}," +
+    "\"platforms\":{\"get\":{\"name\":\"linux/arm64\"},\"keys\":[\"linux/amd64\",\"linux/arm64\"],\"subset\":{\"batch\":{\"removed\":[\"linux/amd64\"]}}}," +
+    "\"ratios\":{\"get\":{\"name\":\"r1.5\"},\"keys\":[0.5,1.5],\"subset\":{\"batch\":{\"removed\":[\"0.5\"]}}}," +
+    "\"shelves\":{\"get\":{\"get\":{\"name\":\"s2-1\"},\"keys\":[\"s2-1\",\"s2-2\"],\"subset\":{\"batch\":{\"selected\":[\"s2-2\"]}}},\"keys\":[\"s1\",\"s2\"],\"subset\":{\"batch\":{\"count\":1}}}" +
+    "}"
+
+  """
   A module keeps the kind of entrypoint its manifest names when it is
   generated again: one written into it stays written into it, and a Dang
   entrypoint of another kind, a fork say, is left as it is. A second
