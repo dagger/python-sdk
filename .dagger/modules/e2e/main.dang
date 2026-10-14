@@ -1720,20 +1720,65 @@ type E2e {
       .directory("sdk")
   }
 
-  """
-  The client library and code generator pass their own suites: the query
-  builder, generator output and module registration.
-  """
-  pub sdkTestCheck(ws: Workspace!): Void @check {
+  let sdkContainer(ws: Workspace!): Container! {
     container
       .from("ghcr.io/astral-sh/uv:python3.14-alpine")
       .withoutEntrypoint
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
       .withDirectory("/sdk", sdkSource(ws))
       .withWorkdir("/sdk")
+  }
+
+  """
+  The client library and code generator pass their own suites: the query
+  builder, generator output and module registration.
+  """
+  pub sdkTestCheck(ws: Workspace!): Void @check {
+    sdkContainer(ws)
       .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/client", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
       .sync
 
+    null
+  }
+
+  """
+  The client bindings this repository's tests import, as the code generator
+  writes them from core and sdk/ruff.toml tidies them. Core is read the way a
+  scope reads it, from the engine running this. The committed file is the
+  floor release's core; refresh it on that engine:
+
+    dagger call -m .dagger/modules/e2e sdk-bindings export --path sdk/src/dagger/client/gen.py
+  """
+  pub sdkBindings(ws: Workspace!): File! {
+    let core = ws.directory("/helpers/core-schema").asModuleSource
+    sdkContainer(ws)
+      .withFile("/core-only.py", ws.file("/helpers/core-schema/core_only.py"))
+      .withFile("/schema.json", core.withEngineVersion(core.engineVersion).clientSchemaIntrospectionJSON)
+      .withExec(["python", "/core-only.py", "/schema.json", "/core.json"])
+      .withExec(["uv", "run", "--frozen", "python", "-m", "codegen", "generate", "-i", "/core.json", "-o", sdkBindingsPath])
+      .withExec(["uv", "run", "--frozen", "ruff", "check", "--fix-only", sdkBindingsPath])
+      .withExec(["uv", "run", "--frozen", "ruff", "format", sdkBindingsPath])
+      .file(sdkBindingsPath)
+  }
+
+  let sdkBindingsPath: String! = "src/dagger/client/gen.py"
+
+  """
+  The committed client bindings are what sdkBindings writes, so neither a
+  hand edit nor a new core leaves them behind. Each release serves a core of
+  its own, so only the floor release's engine can tell.
+  """
+  pub sdkBindingsCheck(ws: Workspace!): Void @check {
+    let path = "sdk/" + sdkBindingsPath
+    if ((version.split("+")[0] ?? version) != "v" + floorVersion) {
+      note(sdkContainer(ws), "skipped, " + path + " is the core of v" + floorVersion + " and this engine is " + version)
+    } else {
+      assert(
+        ws.file("/" + path).contents == sdkBindings(ws).contents,
+        path + " is not what the code generator writes; refresh it on the v" + floorVersion +
+          " engine with `dagger call -m .dagger/modules/e2e sdk-bindings export --path " + path + "`",
+      )
+    }
     null
   }
 
