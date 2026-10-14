@@ -1070,6 +1070,71 @@ type E2e {
     null
   }
 
+  """
+  A path source outside the module directory, which the module loads with
+  include, is one input of the dependency install rather than a reason to
+  read the whole context: an edit of the module's own code keeps the install,
+  and an edit of the path source installs it again.
+  """
+  pub runtimePathSourceInstallCheck(ws: Workspace!): Void @check {
+    let generated = pathSourceGenerated(ws, "[\"../../shared-pkg\"]")
+    let installed = sharedInstalledAt(generated)
+    let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
+    let edited = generated.withNewFile(sourcePath, generated.file(sourcePath).contents + "\n# edited\n")
+    assert(sharedInstalledAt(edited) == installed, "an edit of the module's own code installed its path source again")
+    let sharedPath = "/" + fixtureRoot + "/shared-pkg/src/shared_pkg/__init__.py"
+    let shared = edited.withNewFile(sharedPath, generated.file(sharedPath).contents + "\n# edited\n")
+    assert(sharedInstalledAt(shared) != installed, "an edit of the path source kept the install before it")
+    null
+  }
+
+  """
+  A path source whose own uv settings name a directory beside it reads the
+  whole context, so an edit of that directory installs the path source again.
+  """
+  pub runtimePathSourceSettingsCheck(ws: Workspace!): Void @check {
+    let sharedPyproject = "/" + fixtureRoot + "/shared-pkg/pyproject.toml"
+    let wheelhouse = "/" + fixtureRoot + "/wheelhouse/README"
+    let generated = pathSourceGenerated(ws
+      .withNewFile(sharedPyproject, ws.file(sharedPyproject).contents + "\n[tool.uv]\nfind-links = [\"../wheelhouse\"]\n")
+      .withNewFile(wheelhouse, "wheels\n"), "[\"../../shared-pkg\", \"../../wheelhouse\"]")
+    let installed = sharedInstalledAt(generated)
+    let edited = generated.withNewFile(wheelhouse, "wheels, edited\n")
+    assert(sharedInstalledAt(edited) != installed, "an edit of the directory its path source's settings name kept the install before it")
+    null
+  }
+
+  """
+  The fixture module, generated with a dependency on the shared package as a
+  path source that the manifest's include array loads.
+  """
+  let pathSourceGenerated(ws: Workspace!, include: String!): Workspace! {
+    let scope = "/" + tomlGenerateModulePath
+    let pyprojectPath = scope + "/pyproject.toml"
+    let seeded = ws
+      .withNewFile(scope + "/dagger-module.toml",
+        "name = \"toml-generate-app\"\nengineVersion = \"v1.0.0-0\"\ninclude = " + include + "\n\n[runtime]\nsource = \"python\"\n")
+      .withNewFile(pyprojectPath, ws.file(pyprojectPath).contents
+        .replace("dependencies = [\"dagger-io\"]", "dependencies = [\"dagger-io\", \"shared-pkg\"]") +
+        "shared-pkg = { path = \"../../shared-pkg\", editable = true }\n")
+      .withNewFile(scope + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
+    pythonSdk
+      .generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+  }
+
+  """
+  When the build installed the shared package: a dependency install that is
+  cached gives back the same files, and one that runs again writes new ones.
+  """
+  let sharedInstalledAt(generated: Workspace!): String! {
+    pythonSdkRuntime
+      .moduleRuntime(modSource: runtimeSource(generated, tomlGenerateModulePath), introspectionJson: null)
+      .withExec(["python", "-c", "import os, shared_pkg; print(os.stat(shared_pkg.__file__).st_mtime_ns)"])
+      .stdout
+      .trimSpace
+  }
+
   """The generated module, after its build found each member installed."""
   let assertInstalled(seeded: Workspace!, what: String!): Workspace! {
     let generated = pythonSdk

@@ -339,6 +339,19 @@ type PythonModuleBuild {
     "    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):\n" +
     "        fail(f'{where}: {key} is not an array of strings; write it as one, such as {key} = [\"a\", \"b\"]')\n" +
     "    return value\n" +
+    "def outside(path):\n" +
+    "    joined = os.path.normpath(os.path.join(sub, path))\n" +
+    "    return joined == '..' or joined.startswith('../')\n" +
+    "def names_parent(value):\n" +
+    "    if isinstance(value, str):\n" +
+    "        return value == '..' or value.startswith('../') or '/../' in value\n" +
+    "    if isinstance(value, dict):\n" +
+    "        return any(names_parent(key) or names_parent(item) for key, item in value.items())\n" +
+    "    return isinstance(value, list) and any(names_parent(item) for item in value)\n" +
+    "def reads_beside(rel, project):\n" +
+    "    uv = {key: value for key, value in table(project, 'tool', 'uv').items() if key != 'sources'}\n" +
+    "    tool = dict(table(project, 'tool'), uv=uv)\n" +
+    "    return names_parent(dict(project, tool=tool)) or os.path.exists(os.path.join(module, rel, 'uv.toml'))\n" +
     "def name(requirement):\n" +
     "    m = re.match(r'\\s*([A-Za-z0-9][A-Za-z0-9._-]*)', requirement if isinstance(requirement, str) else '')\n" +
     "    return re.sub(r'[-_.]+', '-', m.group(1).lower()) if m else ''\n" +
@@ -370,13 +383,24 @@ type PythonModuleBuild {
     "        print('local\\t./' + rel)\n" +
     "inputs = ['pyproject.toml', 'uv.lock', 'uv.toml', '.python-version'] + dirs + ([] if vendored in members else [vendored])\n" +
     "paths = []\n" +
-    "for rel, member in docs.items():\n" +
+    "sourced = {}\n" +
+    "pending = list(docs.items())\n" +
+    "while pending:\n" +
+    "    rel, member = pending.pop(0)\n" +
     "    for value in table(member, 'tool', 'uv', 'sources').values():\n" +
     "        for source in value if isinstance(value, list) else [value]:\n" +
     "            path = source.get('path') if isinstance(source, dict) else None\n" +
-    "            if isinstance(path, str):\n" +
-    "                paths.append(os.path.normpath(os.path.join(rel, path)))\n" +
-    "settings = [table(member, 'tool', 'uv') for member in docs.values()]\n" +
+    "            if not isinstance(path, str):\n" +
+    "                continue\n" +
+    "            path = os.path.normpath(os.path.join(rel, path))\n" +
+    "            if path in paths:\n" +
+    "                continue\n" +
+    "            paths.append(path)\n" +
+    "            if path not in dirs and not os.path.isabs(path) and not outside(path) and os.path.exists(os.path.join(module, path, 'pyproject.toml')):\n" +
+    "                sourced[path] = load(path)\n" +
+    "                pending.append((path, sourced[path]))\n" +
+    "inputs += [path for path in paths if path not in dirs + [vendored]]\n" +
+    "settings = [table(member, 'tool', 'uv') for member in list(docs.values()) + list(sourced.values())]\n" +
     "if os.path.exists(os.path.join(module, 'uv.toml')):\n" +
     "    settings.append(load('.', 'uv.toml'))\n" +
     "urls = []\n" +
@@ -386,13 +410,15 @@ type PythonModuleBuild {
     "    for key in ('extra-index-url', 'find-links'):\n" +
     "        urls += uv.get(key) if isinstance(uv.get(key), list) else []\n" +
     "whole = any(isinstance(url, str) and '://' not in url for url in urls)\n" +
-    "whole = whole or any('project' not in member or bool(set(table(member, 'project').get('dynamic') or []) - {'version'}) for member in docs.values())\n" +
+    "whole = whole or any('project' not in member or bool(set(table(member, 'project').get('dynamic') or []) - {'version'}) for member in list(docs.values()) + list(sourced.values()))\n" +
     "whole = whole or os.path.exists(os.path.join(module, 'requirements.lock'))\n" +
-    "whole = whole or any(path == '..' or path.startswith('../') for path in inputs)\n" +
-    "whole = whole or any(path not in dirs + [vendored] for path in paths)\n" +
-    "# The module itself installs after the source mount, so only members and the SDK-written\n" +
-    "# vendored package are built in the dependency step; other path sources already fell back.\n" +
-    "whole = whole or any('backend-path' in table(docs[rel], 'build-system') for rel in dirs)\n" +
+    "whole = whole or any(os.path.isabs(path) or outside(path) for path in inputs)\n" +
+    "# The module itself installs after the source mount, so members, path sources and the\n" +
+    "# SDK-written vendored package are what the dependency step builds.\n" +
+    "whole = whole or any('backend-path' in table(member, 'build-system') for member in [docs[rel] for rel in dirs] + list(sourced.values()))\n" +
+    "# A path source the walk follows reads only its own directory unless its project names\n" +
+    "# a parent directory outside its [tool.uv.sources] or keeps a uv.toml beside it.\n" +
+    "whole = whole or any(reads_beside(rel, project) for rel, project in sourced.items())\n" +
     "above = []\n" +
     "parts = [] if sub == '.' else sub.split('/')\n" +
     "for i in range(len(parts)):\n" +
