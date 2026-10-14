@@ -1535,10 +1535,12 @@ type E2e {
   let callerSecretPath: String! = "review-secret.txt"
 
   """
-  The first release that runs Dang entrypoints and serves serveModule, which
-  is this SDK's floor. Its engine image carries its CLI, and git.
+  The first release with what this SDK's collections use: the projected
+  types every `dagger call` into a collection resolves, and item selectors on
+  `dagger call`. It is this SDK's floor. Its engine image carries its CLI,
+  and git.
   """
-  let floorVersion: String! = "1.0.0-beta.14"
+  let floorVersion: String! = "1.0.0-beta.17"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """

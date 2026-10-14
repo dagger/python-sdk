@@ -43,9 +43,10 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a ref>` | an entrypoint served from elsewhere, the shared one below among them |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-An entrypoint needs an engine that runs Dang entrypoints and serves
-`serveModule`: `v1.0.0-beta.14` or later. It runs a module on the engine's own
-version, so an entrypoint manifest keeps no `engineVersion`.
+This SDK needs an engine `v1.0.0-beta.17` or later, the first release with
+what its collections use (see `docs/collections.md`). An entrypoint runs a
+module on the engine's own version, so an entrypoint manifest keeps no
+`engineVersion`.
 
 Generating a module that has a manifest already keeps the kind it names:
 

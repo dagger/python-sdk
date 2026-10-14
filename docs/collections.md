@@ -1,12 +1,14 @@
 # Collections
 
 A collection is a set of objects that a module discovers at run time, each
-with a unique key. The engine serves collections from v1.0.0-beta.15
-([dagger/dagger#14221](https://github.com/dagger/dagger/pull/14221)). Item
-selectors on `dagger call` arrive in v1.0.0-beta.17
+with a unique key. This SDK needs an engine v1.0.0-beta.17 or later. The
+engine serves collections from v1.0.0-beta.15
+([dagger/dagger#14221](https://github.com/dagger/dagger/pull/14221)), and
+v1.0.0-beta.17 adds the projected types every `dagger call` into a collection
+resolves ([dagger/dagger#14447](https://github.com/dagger/dagger/pull/14447))
+and item selectors on `dagger call`
 ([dagger/dagger#14590](https://github.com/dagger/dagger/pull/14590),
-[dagger/dagger#14602](https://github.com/dagger/dagger/pull/14602)). This
-repository's e2e checks run collections on v1.0.0-beta.17.
+[dagger/dagger#14602](https://github.com/dagger/dagger/pull/14602)).
 
 ## Declare a collection
 
