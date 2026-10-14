@@ -108,6 +108,18 @@ class TypeDef(_Object):
     def with_constructor(self, function: Function) -> Self:
         return self._with("withConstructor", Arg("function", function))
 
+    def with_collection(self) -> Self:
+        return self._with("withCollection")
+
+    def with_collection_keys(self, name: str) -> Self:
+        return self._with("withCollectionKeys", Arg("name", name))
+
+    def with_collection_get(self, name: str) -> Self:
+        return self._with("withCollectionGet", Arg("name", name))
+
+    def with_collection_delta(self, name: str) -> Self:
+        return self._with("withCollectionDelta", Arg("name", name))
+
 
 class Function(_Object):
     def with_description(self, description: str) -> Self:

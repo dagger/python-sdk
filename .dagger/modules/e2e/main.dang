@@ -1535,10 +1535,12 @@ type E2e {
   let callerSecretPath: String! = "review-secret.txt"
 
   """
-  The first release that runs Dang entrypoints and serves serveModule, which
-  is this SDK's floor. Its engine image carries its CLI, and git.
+  The first release with what this SDK's collections use: the projected
+  types every `dagger call` into a collection resolves, and item selectors on
+  `dagger call`. It is this SDK's floor. Its engine image carries its CLI,
+  and git.
   """
-  let floorVersion: String! = "1.0.0-beta.14"
+  let floorVersion: String! = "1.0.0-beta.17"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -1871,6 +1873,177 @@ type E2e {
 
     null
   }
+
+  """
+  The SDK refuses an engine release older than its floor before it generates
+  anything, and names the version it found and what to do: pin the SDK's last
+  release before the floor where that release runs, from v1.0.0-beta.14, and
+  only upgrade below it. Every other version passes, a development build and
+  one it cannot read among them, so an unexpected format never blocks a user.
+  """
+  pub engineFloorRefusalCheck: Void @check {
+    let pin = "dagger module install github.com/dagger/python-sdk@v1.1.1"
+    let pinned = ["v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
+    let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
+    let accepted = [
+      "v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.18", "v1.0.0-rc.1", "v1.0.0",
+      "v1.0.1", "v2.0.0-beta.1", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-dev.3", "devel", "",
+    ]
+    (pinned + upgradeOnly).each { engine =>
+      let refusal = pythonSdk.engineRefusal(engine)
+      let wants = ["needs Dagger engine v" + floorVersion + " or later", "this engine is " + engine + ".", "Upgrade the engine"]
+      wants.each { want =>
+        assertContains(refusal, want, "engine \"" + engine + "\": the refusal does not say \"" + want + "\": " + refusal)
+      }
+    }
+    pinned.each { engine =>
+      let refusal = pythonSdk.engineRefusal(engine)
+      assertContains(refusal, pin, "engine \"" + engine + "\": the refusal does not offer the last release that runs on it: " + refusal)
+    }
+    upgradeOnly.each { engine =>
+      let refusal = pythonSdk.engineRefusal(engine)
+      assertNotContains(refusal, "pin", "engine \"" + engine + "\": the refusal offers a release that does not run on it either: " + refusal)
+    }
+    accepted.each { engine =>
+      let refusal = pythonSdk.engineRefusal(engine)
+      assert(refusal == "", "the SDK refused engine \"" + engine + "\": " + refusal)
+    }
+    assert(pythonSdk.engineRefusal(version) == "", "the SDK refused the engine running the checks, " + version)
+    null
+  }
+
+  """
+  A module declares a collection, on this checkout's shared entrypoint, on
+  the one generated into it, and on this checkout's runtime, which registers
+  the types itself. The engine serves keys, list, get, subset and batch on it,
+  and the CLI names an item with a selector, after the collection or in place
+  of the path to it.
+
+  A copy the module returns keeps the collection's base, so its delta compares
+  it with the keys the module first returned; a new collection starts a base
+  of its own. Without that state a changed copy reads as unchanged.
+  """
+  pub collectionsCheck(ws: Workspace!): Void @check {
+    collections(ws, "shared")
+    collections(ws, "static")
+    collections(ws, "runtime")
+    null
+  }
+
+  """
+  A module calls the collection through the client generated from it. keys,
+  get, list, subset and batch exist only in the engine's projection of the
+  collection, so the client has them only if it was generated from that.
+  """
+  pub collectionsClientCheck(ws: Workspace!): Void @check {
+    let target = ".dagger/modules/shelf"
+    let caller = ".dagger/modules/shelf-caller"
+    let targetReady = cli(
+      cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "shelf", "--path", target])
+        .withFile(target + "/src/shelf/__init__.py", ws.file("/" + fixtureRoot + "/collections/shelf.py")),
+      ["generate", "-y"],
+    )
+    let withCaller = cli(targetReady, ["module", "init", "python", "--auto-apply", "--name", "shelf-caller", "--path", caller])
+      .withFile(caller + "/src/shelf_caller/__init__.py", ws.file("/" + fixtureRoot + "/collections/caller.py"))
+      .withWorkdir(caller)
+    let callerReady = cli(withCaller, ["module", "client", "add", "../shelf", "--sdk", "python", "--auto-apply"])
+      .withWorkdir(playgroundRoot)
+    let attempt = callerReady
+      .withExec(["dagger", "-m", caller, "call", "report"], experimentalPrivilegedNesting: true, expect: ReturnType.ANY)
+    let called = attempt.stdout + attempt.stderr
+    if (called.contains(ownTreeRefusal)) {
+      note(callerReady, "skipped, this engine resolves a local client in the caller's workspace " +
+        "instead of the module's own tree (dagger/dagger#14490)")
+    } else {
+      assert(attempt.exitCode == 0, "the caller's call failed: " + called)
+      let want = "keys=['b', 'a', 'c'] list=['item:b', 'item:a', 'item:c'] get=item:a removed=['b', 'a']"
+      assertContains(attempt.stdout, want, "the client did not reach the projected collection: " + called)
+    }
+    null
+  }
+
+  let collections(ws: Workspace!, form: String!): Void {
+    let path = ".dagger/modules/shelf"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "shelf", "--path", path])
+      .withFile(path + "/src/shelf/__init__.py", ws.file("/" + fixtureRoot + "/collections/shelf.py"))
+    # A static entrypoint bakes the module's types, so the source is in place
+    # before generation.
+    let ready = if (form == "static") {
+      cli(initialized, ["generate", "-y"])
+    } else if (form == "runtime") {
+      initialized.withNewFile(path + "/dagger-module.toml",
+        "name = \"shelf\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../runtime\"\n")
+    } else {
+      onCheckoutEntrypoint(initialized, ws, path, "shelf")
+    }
+
+    let queried = ready
+      .withExec(["dagger", "-m", path, "query"], stdin: collectionQuery, experimentalPrivilegedNesting: true)
+      .stdout
+    let compact = queried.replace(" ", "").replace("\n", "")
+    assert(compact == collectionAnswer, form + ": the collection API answered " + compact + ", not " + collectionAnswer)
+
+    let item = cli(ready, ["-m", path, "call", "items", "name", "--shelf-item=a"]).stdout
+    assert(item.trimSpace == "item:a", form + ": the selector after the collection did not name item a: " + item)
+    let rooted = cli(ready, ["-m", path, "call", "--shelf-item=c", "name"]).stdout
+    assert(rooted.trimSpace == "item:c", form + ": the selector in place of the path did not name item c: " + rooted)
+    let batch = cli(ready, ["-m", path, "call", "items", "selected", "--shelf-item=c", "--shelf-item=b"]).stdout
+    assert(batch.trimSpace == "b\nc", form + ": repeated selectors did not reach the batch with b and c: " + batch)
+    null
+  }
+
+  """
+  A module still loads on this checkout's shared entrypoint when its SDK
+  predates collections. The module keeps the SDK it was generated with while
+  the shared entrypoint moves with its tag, so the description it reads can
+  lack every collection key: the check strips them from the module's own
+  description, as that older SDK writes it.
+  """
+  pub collectionsOlderSdkCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/older-sdk"
+    let describe = path + "/sdk/src/dagger/mod/_describe.py"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "older-sdk", "--path", path])
+    let source = initialized.file(playgroundRoot + "/" + describe).contents
+    let older = source.replace(describeJSONReturn, olderDescribeJSONReturn)
+    assert(older != source, "the SDK has no describe_json return to rewrite")
+    let ready = onCheckoutEntrypoint(initialized.withNewFile(describe, older), ws, path, "older-sdk")
+    let ran = cli(ready, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
+    assert(ran.trimSpace != "", "a module on an SDK older than collections did not run on the shared entrypoint")
+    null
+  }
+
+  let describeJSONReturn: String! = "    return json.dumps(dataclasses.asdict(desc))\n"
+
+  let olderDescribeJSONReturn: String! = "    def older(value):\n" +
+    "        if isinstance(value, dict):\n" +
+    "            return {k: older(v) for k, v in value.items() if not k.startswith(\"collection\")}\n" +
+    "        if isinstance(value, (list, tuple)):\n" +
+    "            return [older(v) for v in value]\n" +
+    "        return value\n" +
+    "\n" +
+    "    return json.dumps(older(dataclasses.asdict(desc)))\n"
+
+  let collectionQuery: String! = "{ items {\n" +
+    "  keys\n" +
+    "  list { name }\n" +
+    "  get(key: \"a\") { name }\n" +
+    "  batch { selected removed }\n" +
+    "  subset(keys: [\"c\", \"b\"]) { keys batch { selected removed } }\n" +
+    "  changed: batch { change(names: [\"c\", \"d\"]) { keys batch { added removed } } }\n" +
+    "  fresh: subset(keys: [\"c\"]) { batch { fresh { keys batch { added removed } } } }\n" +
+    "} }"
+
+  """The answer to collectionQuery, with its keys sorted the way the CLI prints them."""
+  let collectionAnswer: String! = "{\"items\":{" +
+    "\"batch\":{\"removed\":[],\"selected\":[\"b\",\"a\",\"c\"]}," +
+    "\"changed\":{\"change\":{\"batch\":{\"added\":[\"d\"],\"removed\":[\"b\",\"a\"]},\"keys\":[\"c\",\"d\"]}}," +
+    "\"fresh\":{\"batch\":{\"fresh\":{\"batch\":{\"added\":[],\"removed\":[]},\"keys\":[\"z\"]}}}," +
+    "\"get\":{\"name\":\"item:a\"}," +
+    "\"keys\":[\"b\",\"a\",\"c\"]," +
+    "\"list\":[{\"name\":\"item:b\"},{\"name\":\"item:a\"},{\"name\":\"item:c\"}]," +
+    "\"subset\":{\"batch\":{\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]},\"keys\":[\"b\",\"c\"]}" +
+    "}}"
+
 
   """
   A module keeps the kind of entrypoint its manifest names when it is
