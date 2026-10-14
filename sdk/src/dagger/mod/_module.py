@@ -545,6 +545,13 @@ class Module:
     def collection(self, cls: T) -> T:
         """Mark an exposed object type as a collection."""
         setattr(cls, COLLECTION_DEF_KEY, True)
+        obj_def = cls.__dict__.get("__dagger_object_type__")
+        if obj_def and COLLECTION_BASE_ATTR not in cls.__dataclass_fields__:
+            # @object_type already made the dataclass, without the base.
+            cls.__dataclass_fields__[COLLECTION_BASE_ATTR] = _COLLECTION_BASE
+            setattr(cls, COLLECTION_BASE_ATTR, None)
+            _keep_base_through_init(cls)
+            self._process_type(cls, deprecated=obj_def.deprecated)
         return cls
 
     def get(self, func: Func[P, R]) -> Func[P, R]:
@@ -859,25 +866,14 @@ class Module:
                     )
                     raise BadUsageError(msg)
 
-            # Both decorator orders are supported: @collection can run after
-            # @object_type. Keep opaque engine state as an ordinary private field
-            # so copy.copy, deepcopy, and dataclasses.replace all preserve it.
-            cls.__annotations__ = dict(getattr(cls, "__annotations__", {}))
-            cls.__annotations__[COLLECTION_BASE_ATTR] = str | None
-            setattr(
-                cls,
-                COLLECTION_BASE_ATTR,
-                dataclasses.field(default=None, repr=False, compare=False),
-            )
-            if init := cls.__dict__.get("__init__"):
-
-                @wraps(init)
-                def init_with_state(instance, *args, **kwargs):
-                    base = kwargs.pop(COLLECTION_BASE_ATTR, None)
-                    init(instance, *args, **kwargs)
-                    setattr(instance, COLLECTION_BASE_ATTR, base)
-
-                cls.__init__ = init_with_state
+            # A collection keeps opaque engine state as an ordinary private
+            # field so copy.copy, deepcopy, and dataclasses.replace all
+            # preserve it. @collection adds it if it runs after this.
+            if getattr(cls, COLLECTION_DEF_KEY, False):
+                cls.__annotations__ = dict(getattr(cls, "__annotations__", {}))
+                cls.__annotations__[COLLECTION_BASE_ATTR] = str | None
+                setattr(cls, COLLECTION_BASE_ATTR, _collection_base_field())
+                _keep_base_through_init(cls)
             wrapped = dataclasses.dataclass(kw_only=True)(cls)
             return self._process_type(wrapped, deprecated=deprecated)
 
@@ -1043,6 +1039,32 @@ class Module:
             return cls
 
         return wrapper(cls) if cls else wrapper
+
+
+def _collection_base_field() -> Any:
+    return dataclasses.field(default=None, repr=False, compare=False)
+
+
+_COLLECTION_BASE = dataclasses.fields(
+    dataclasses.make_dataclass(
+        "_CollectionBase",
+        [(COLLECTION_BASE_ATTR, str | None, _collection_base_field())],
+        kw_only=True,
+    )
+)[0]
+
+
+def _keep_base_through_init(cls: type) -> None:
+    """Take the base out of the arguments of an __init__ that does not know it."""
+    if init := cls.__dict__.get("__init__"):
+
+        @wraps(init)
+        def init_with_state(instance, *args, **kwargs):
+            base = kwargs.pop(COLLECTION_BASE_ATTR, None)
+            init(instance, *args, **kwargs)
+            setattr(instance, COLLECTION_BASE_ATTR, base)
+
+        cls.__init__ = init_with_state
 
 
 def _describe_object(name: str, obj_type: ObjectType) -> ObjectDescription:

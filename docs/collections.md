@@ -124,7 +124,7 @@ are empty when the collection holds every item the module returned.
 
 The engine compares the current keys with the keys of the collection's base,
 the collection the module first returned. The SDK carries the base as private
-state on every object type, outside the module's schema. A copy keeps the
+state on the collection, outside the module's schema. A copy keeps the
 base: `dataclasses.replace`, `copy.copy`, `copy.deepcopy`, and an object that
 a function mutates and returns. A new instance starts a new base. In the
 example, the collection that `change(names=["c", "d"])` returns has a delta
