@@ -1873,10 +1873,11 @@ type E2e {
   }
 
   """
-  A module declares a collection, on this checkout's shared entrypoint and on
-  the one generated into it. The engine serves keys, list, get, subset and
-  batch on it, and the CLI names an item with a selector, after the
-  collection or in place of the path to it.
+  A module declares a collection, on this checkout's shared entrypoint, on
+  the one generated into it, and on this checkout's runtime, which registers
+  the types itself. The engine serves keys, list, get, subset and batch on it,
+  and the CLI names an item with a selector, after the collection or in place
+  of the path to it.
 
   A copy the module returns keeps the collection's base, so its delta compares
   it with the keys the module first returned; a new collection starts a base
@@ -1885,6 +1886,7 @@ type E2e {
   pub collectionsCheck(ws: Workspace!): Void @check {
     collections(ws, "shared")
     collections(ws, "static")
+    collections(ws, "runtime")
     null
   }
 
@@ -1928,6 +1930,9 @@ type E2e {
     # before generation.
     let ready = if (form == "static") {
       cli(initialized, ["generate", "-y"])
+    } else if (form == "runtime") {
+      initialized.withNewFile(path + "/dagger-module.toml",
+        "name = \"shelf\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../runtime\"\n")
     } else {
       onCheckoutEntrypoint(initialized, ws, path, "shelf")
     }
