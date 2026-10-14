@@ -112,6 +112,28 @@ A selector after the collection selects within it. A selector before the first
 function starts the pipeline at the item. A repeated selector selects a subset
 for a batch function. `get` and `subset` remain available by name.
 
+When more than one function returns the collection, each flag also names its
+function. If `items` and `others` both return `Items`, the flags are
+`--shelf-items-item` and `--shelf-others-item`, and `--shelf-item` is an
+unknown flag.
+
+The help of a command after the collection lists the flags under `SELECTION`,
+for example `dagger call items selected --help`. `dagger call --help` does not
+list them.
+
+`dagger check` takes the flags for a module that the workspace registers. For
+a check `verify` on `Items`:
+
+```shell
+dagger check --shelf --check=verify --shelf-item=a --shelf-item=b
+```
+
+With `-m`, the flags are unknown. Put the selectors in the check's link instead:
+
+```shell
+dagger check -m ./shelf 'items/verify?shelf-item=a&shelf-item=b'
+```
+
 ## Collection delta
 
 A field declared with `delta()`, or named `delta`, receives the changes since
@@ -119,6 +141,9 @@ the module created the collection. Its type is `CollectionDelta | None`. The
 engine fills it before each call. `await self.selection.added_keys()` and
 `await self.selection.removed_keys()` return the keys added and removed. Both
 are empty when the collection holds every item the module returned.
+
+The delta keys are text, whatever the key type. An `int` key `2` reads `"2"`.
+An enum key reads its member name, such as `"RED"`, not its value.
 
 ## Base state
 
