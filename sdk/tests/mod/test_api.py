@@ -49,6 +49,14 @@ TYPE_DEF_CASES = {
     "constructor": lambda api: (
         api.type_def().with_object("O").with_constructor(func(api))
     ),
+    "collection": lambda api: (
+        api.type_def()
+        .with_object("O")
+        .with_collection()
+        .with_collection_keys("k")
+        .with_collection_get("g")
+        .with_collection_delta("d")
+    ),
 }
 
 FUNCTION_CASES = {
