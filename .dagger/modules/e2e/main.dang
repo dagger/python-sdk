@@ -1991,8 +1991,9 @@ type E2e {
   release before the floor where that release runs, from v1.0.0-beta.14, and
   only upgrade below it. Every other version passes, a development build and
   one it cannot read among them, so an unexpected format never blocks a user.
+  On an engine the SDK refuses, generation itself refuses.
   """
-  pub engineFloorRefusalCheck: Void @check {
+  pub engineFloorRefusalCheck(ws: Workspace!): Void @check {
     let pin = "dagger module install github.com/dagger/python-sdk@v1.1.1"
     let pinned = ["v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
     let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
@@ -2019,7 +2020,13 @@ type E2e {
       let refusal = pythonSdk.engineRefusal(engine)
       assert(refusal == "", "the SDK refused engine \"" + engine + "\": " + refusal)
     }
-    assert(pythonSdk.engineRefusal(version) == "", "the SDK refused the engine running the checks, " + version)
+    let refusal = pythonSdk.engineRefusal(version)
+    if (refusal != "") {
+      let said = pythonSdk.generateScope(ws.withNewDirectory("/floor-probe", directory).withWorkdir("floor-probe"), isModule: true, name: "floor-probe", clients: []).cwd rescue {
+        err: Error => err.message
+      }
+      assert(said.contains(refusal), "generation on engine " + version + ", which the SDK refuses, said: " + said)
+    }
     null
   }
 
