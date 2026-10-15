@@ -5,6 +5,7 @@ import pytest
 
 from dagger.client.gen import CollectionDelta
 from dagger.mod import Module
+from dagger.mod._exceptions import BadUsageError
 
 
 @pytest.mark.parametrize("collection_first", [True, False])
@@ -42,6 +43,75 @@ def test_collection_markers_preserve_fields_and_functions(collection_first, get_
     assert obj.functions["lookup"].wrapped.__dagger_get__
     assert items_type().names == []
     assert items_type().selection is None
+
+
+@pytest.mark.parametrize("collection_first", [True, False])
+def test_get_without_function_is_refused(collection_first):
+    mod = Module("Main")
+
+    @mod.object_type
+    class Item:
+        name: str = mod.field()
+
+    class Items:
+        names: list[str] = mod.keys()
+
+        @mod.get
+        def lookup(self, name: str) -> Item:
+            return Item(name=name)
+
+    if collection_first:
+        mod.object_type(mod.collection(Items))
+    else:
+        mod.collection(mod.object_type(Items))
+
+    @mod.object_type
+    class Main:
+        pass
+
+    with pytest.raises(
+        BadUsageError,
+        match="Method 'lookup' of 'Items' is marked @get but not @function",
+    ):
+        mod.describe()
+
+
+@pytest.mark.parametrize("marked", [True, False])
+def test_get_without_function_beside_a_get_function_still_loads(marked):
+    mod = Module("Main")
+
+    @mod.object_type
+    class Item:
+        name: str = mod.field()
+
+    @mod.object_type
+    @mod.collection
+    class Main:
+        names: list[str] = mod.keys(default=list)
+
+        @mod.get
+        def helper(self, name: str) -> Item:
+            return Item(name=name)
+
+        def item(self, name: str) -> Item:
+            return Item(name=name)
+
+        item = mod.function(mod.get(item)) if marked else mod.function(name="get")(item)
+
+    main = next(o for o in mod.describe().objects if o.name == "Main")
+    assert [f.name for f in main.functions] == ["item" if marked else "get"]
+
+
+def test_get_without_function_outside_a_collection_still_loads():
+    mod = Module("Main")
+
+    @mod.object_type
+    class Main:
+        @mod.get
+        def helper(self, name: str) -> str:
+            return name
+
+    assert mod.describe().objects[0].functions == ()
 
 
 @pytest.mark.parametrize("clone", [copy, deepcopy, replace])
