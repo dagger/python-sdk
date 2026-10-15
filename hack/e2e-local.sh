@@ -1,7 +1,8 @@
 #!/bin/sh
-# Run the e2e checks on the local engine, in a copy of this tree, so a check
-# never writes into it. dagger.toml is the e2e workspace config: it registers
-# this checkout as the python SDK and the fixture scopes to it.
+# Run the e2e checks on the local engine, the way engine-e2e runs them on its
+# pinned engines: in a copy of this tree, so a check never writes into it, with
+# the e2e workspace config, .dagger/modules/engine-e2e/workspace.toml, in place
+# of dagger.toml. It registers this checkout as the python SDK.
 #
 #   hack/e2e-local.sh                  # every check
 #   hack/e2e-local.sh find-client-root-check generate-scope-clients-check
@@ -38,6 +39,7 @@ if [ -n "${E2E_WITH:-}" ]; then
   echo "applied $E2E_WITH since $(git -C "$root" rev-parse --short "$base")" >&2
 fi
 CDPATH= cd "$scratch"
+cat .dagger/modules/engine-e2e/workspace.toml > dagger.toml
 [ -d .git ] || git init --quiet
 echo "checks of $module in $scratch" >&2
 # Set by hack/e2e-floor.sh: the engine must be the floor before any check.

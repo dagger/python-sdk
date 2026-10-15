@@ -1,0 +1,5 @@
+name = "resources-app"
+
+[entrypoint]
+  kind = "dang"
+  source = "./sdk/entrypoint"

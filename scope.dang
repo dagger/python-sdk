@@ -287,9 +287,9 @@ type Scope {
       let scopeDir = target.directory(root).filter(exclude: [".venv", "**/.venv", "**/__pycache__"])
       # A path dependency of the user's own may sit outside the scope: a
       # package the modules of one repository share. uv reads it to lock, so
-      # the workspace comes in behind the scope when the scope file names one,
+      # the workspace comes in behind the scope when the scope reads one,
       # which keeps the lock's inputs to the scope alone for every other.
-      let tree = if (leavesScope(scopeDir)) {
+      let tree = if (PyprojectHelper().outsidePaths(target, path).length > 0) {
         ws.directory("/")
           .filter(exclude: [".git", "**/.venv", "**/__pycache__", "**/node_modules"])
           .withDirectory(path, scopeDir)
@@ -307,16 +307,6 @@ type Scope {
     } else {
       target
     }
-  }
-
-  """
-  Whether the scope file names a path dependency that leaves the scope, which
-  only the workspace around it holds.
-  """
-  let leavesScope(scopeDir: Directory!): Boolean! {
-    PyprojectHelper().pathSources(scopeDir.file(scopeFileName))
-      .filter { source => source.hasPrefix("../") }
-      .length > 0
   }
 
   let buildUvImage: String! {
@@ -782,15 +772,27 @@ type PyprojectHelper {
   }
 
   """
-  The path of every [tool.uv.sources] entry that names one, in the order the
-  helper lists them.
+  What the build of the scope at a workspace path reads outside it, as uv
+  follows the scope's pyproject.toml: its path sources, its workspace members,
+  and theirs in turn, then what its uv.lock adds. Generation locks with these
+  paths and writes them into a module's entrypoint, so both read the same.
   """
-  pub pathSources(pyproject: File!): [String!]! {
-    tool.withFile(path, pyproject)
-      .withExec(["pyproject", "get-path-sources", path])
-      .stdout
-      .split("\n")
-      .filter { line => line != "" }
+  pub outsidePaths(ws: Workspace!, scope: String!): [OutsidePath!]! {
+    let lockPath = if (scope == ".") { "uv.lock" } else { scope + "/uv.lock" }
+    # A .venv or node_modules tree is never a project a scope names, and its
+    # files may be unreadable; any other directory, one named venv among them,
+    # can hold the scope, a path source or a member.
+    let derived = tool
+      .withDirectory("/tree", ws.directory("/", include: ["**/pyproject.toml", lockPath], exclude: ["**/.git", "**/.venv", "**/node_modules"]))
+      .withExec(["pyproject", "derive-resources", "/tree", scope], expect: ReturnType.ANY)
+    if (derived.exitCode != 0) {
+      raise derived.stderr.trimSpace
+    } else {
+      json.withContents((derived.stdout :: Dagger.JSON!)).asArray.{{contents}}.map { raw =>
+        let entry = json.withContents(raw.contents)
+        OutsidePath(pattern: entry.field(["pattern"]).asString, rooted: entry.field(["rooted"]).asString)
+      }
+    }
   }
 
   """
@@ -812,4 +814,18 @@ type PyprojectHelper {
   }
 
   let path: String! = "/work/pyproject.toml"
+}
+
+type OutsidePath {
+  """Relative to the module directory."""
+  pub pattern: String!
+
+  """Relative to the workspace root."""
+  pub rooted: String!
+
+  new(pattern: String! = "", rooted: String! = "") {
+    self.pattern = pattern
+    self.rooted = rooted
+    self
+  }
 }

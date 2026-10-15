@@ -87,19 +87,26 @@ type Mod {
         .generatedContextDirectory
         .directory(rootPath))
     } else {
-      # The scope writes sdk/ whole, so an entrypoint from an earlier static
-      # generation is gone unless it is written again.
-      let scoped = Scope(
+      let scope = Scope(
         path: rootPath,
         ws: ws,
         clients: clients ?? declaredClients,
         isModule: true,
         engineVersion: engineVersion,
         migrating: migrating,
-      ).generated
+      )
+      # The scope writes sdk/ whole, so an entrypoint from an earlier static
+      # generation is gone unless it is written again. It also relocks
+      # uv.lock, which the derived resources are checked against.
+      let scoped = scope.generated
       if (entrypointMode == "generated") {
+        let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
+        checkResourcesLoad(scoped, outside)
         let entrypointPath = vendorDirName + "/" + entrypointDirName
-        entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped)), entrypointPath)
+        entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside))), entrypointPath)
+      } else if (entrypointMode == "remote") {
+        checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
+        scoped
       } else {
         scoped
       }
@@ -178,7 +185,7 @@ type Mod {
   shared or static, and build the module from source it has not generated
   yet. So the runtime manifest points back at the module being built.
   """
-  let staging(target: Workspace!): Workspace! {
+  let staging(target: Workspace!, outside: [String!]!): Workspace! {
     if (hasEntrypointManifest) {
       let staged = ManifestToml(ws.file("/" + manifestPath).contents).withoutEntrypoint
       let loaded = sdkHelpers.moduleManifest(loadToml: staged)
@@ -188,7 +195,10 @@ type Mod {
       } else {
         loaded.withLegacyPythonRuntime
       }
-      runnable.withName(name: moduleName)
+      # The build that renders the types reads the path sources outside the
+      # module directory, which the entrypoint's sources will return.
+      let included = outside.reduce(runnable) { manifest, pattern => manifest.withLegacyInclude(path: pattern) }
+      included.withName(name: moduleName)
         .generate(target.withWorkdir(rootPath), lock: false, legacyJson: false)
         .withWorkdir(".")
     } else {
@@ -200,10 +210,11 @@ type Mod {
   The entrypoint the engine loads instead of calling a runtime: the module's
   own container renders its types, and the container build travels with it.
   """
-  let entrypointDir(generated: Workspace!): Directory! {
+  let entrypointDir(generated: Workspace!, outside: [String!]!): Directory! {
     pythonSdkRuntime
-      .moduleRuntime(modSource: staging(generated).moduleSource("/" + rootPath), introspectionJson: null)
-      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput])
+      .moduleRuntime(modSource: staging(generated, outside).moduleSource("/" + rootPath), introspectionJson: null)
+      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput] +
+        outside.map { pattern => "--outside=" + pattern })
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
   }
@@ -231,6 +242,66 @@ type Mod {
     } else {
       line.captures[0] ?? ""
     }
+  }
+
+  let patterns(outside: [OutsidePath!]!): [String!]! {
+    outside.map { path => path.pattern }
+  }
+
+  """
+  Refuse derived resources this workspace cannot load: a path that holds no
+  file, or only what .gitignore drops from a local module, loads nothing, and
+  sources reads each path as a directory, which a wheel is not. A symlink is
+  imported without the path it names, so a path through one is refused before
+  it reads as missing or as a file.
+  """
+  let checkResourcesLoad(target: Workspace!, outside: [OutsidePath!]!): Void {
+    outside.each { path =>
+      let named = "module \"" + moduleName + "\" builds with " + path.pattern + ", which"
+      let prefixes = path.rooted.split("/").reduce([] :: [String!]!) { found, part =>
+        found + [if (found.length == 0) { part } else { (found[found.length - 1] ?? "") + "/" + part }]
+      }
+      let links = prefixes.filter { prefix =>
+        target.directory("/", include: [prefix], exclude: [prefix + "/**"]).exists(prefix, expectedType: ExistsType.SYMLINK_TYPE)
+      }
+      if (links.length > 0) {
+        raise named + " goes through the symlink " + (links[0] ?? "") + " in the workspace; outside path sources through a symlink are not supported: point the path source at the directory it names"
+      }
+      let selected = target.directory("/", include: [path.rooted], exclude: ["**/.git"])
+      if (files(selected).length == 0) {
+        raise named + " holds no file in the workspace"
+      }
+      if (selected.exists(path.rooted, expectedType: ExistsType.DIRECTORY_TYPE) == false) {
+        raise named + " is a file; outside file sources, such as a wheel, are not supported: point the path source at a directory, such as the project that builds it"
+      }
+      if (files(target.directory("/", include: [path.rooted], exclude: ["**/.git"], gitignore: true)).length == 0) {
+        raise named + " holds only files that .gitignore ignores"
+      }
+      null
+    }
+    null
+  }
+
+  """
+  Refuse derived resources on a module that runs on an entrypoint this SDK
+  does not generate into it: only that entrypoint returns them from its
+  sources, so the module would fail at call time.
+  """
+  let checkNoResources(outside: [OutsidePath!]!): Void {
+    if (outside.length > 0) {
+      raise "module \"" + moduleName + "\" builds with files outside its directory (" + patterns(outside).join(", ") +
+        "), which only the entrypoint this SDK generates into a module loads; it runs on the entrypoint " +
+        ManifestToml(ws.file("/" + manifestPath).contents).entrypointSource + " instead"
+    }
+    null
+  }
+
+  """
+  A directory whose files a filter removed is still listed, so it does not
+  count.
+  """
+  let files(dir: Directory!): [String!]! {
+    dir.glob("**").filter { path => path.hasSuffix("/") == false }
   }
 
   let vendorDirName: String! = "sdk"

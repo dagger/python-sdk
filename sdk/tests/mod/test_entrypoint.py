@@ -99,6 +99,11 @@ def test_main_golden():
     _assert_golden("main.dang", render_main("main"))
 
 
+def test_main_outside_golden():
+    rendered = render_main("main", ["../lib", '../../shared/"text"'])
+    _assert_golden("main_outside.dang", rendered)
+
+
 def test_quoting():
     mod = Module("Foo")
 
@@ -146,7 +151,14 @@ def test_write_entrypoint(mod: Module, tmp_path: pathlib.Path):
     assert 'let moduleName: String! = "main"' in (out / "main.dang").read_text()
 
 
-def test_command(tmp_path: pathlib.Path):
+@pytest.mark.parametrize(
+    ("args", "outside"),
+    [
+        ([], []),
+        (["--outside=../lib", "--outside=../../shared"], ["../lib", "../../shared"]),
+    ],
+)
+def test_command(tmp_path: pathlib.Path, args: list[str], outside: list[str]):
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "hello"\n')
     pkg = tmp_path / "src" / "hello"
     pkg.mkdir(parents=True)
@@ -165,6 +177,7 @@ def test_command(tmp_path: pathlib.Path):
             "hello",
             "--output",
             "out",
+            *args,
         ],
         cwd=tmp_path,
         env={
@@ -178,7 +191,8 @@ def test_command(tmp_path: pathlib.Path):
     types = (tmp_path / "out" / "types.dang").read_text()
     assert 'typeDef.withObject("Hello")' in types
     assert 'function("hi", typeDef.withKind(TypeDefKind.STRING_KIND))' in types
-    assert (
-        'let moduleName: String! = "hello"'
-        in (tmp_path / "out" / "main.dang").read_text()
-    )
+    main = (tmp_path / "out" / "main.dang").read_text()
+    assert 'let moduleName: String! = "hello"' in main
+    assert main.count("workspace.directory(") == len(outside) + 1
+    for path in outside:
+        assert f'workspace.directory("{path}", ' in main

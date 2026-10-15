@@ -1,0 +1,77 @@
+"""
+The e2e checks of the Python SDK on engines built from pinned dagger/dagger
+commits, so a run proves the floor whatever engine runs it. Keep each commit
+aligned with its engine-dev dependency in dagger-module.toml.
+"""
+type EngineE2e {
+  """
+  Commit of v1.0.0-beta.18, this SDK's floor.
+  """
+  let floorCommit: String! = "249edbd646e63c5181053c8af72623ed9bdf030d"
+
+  """
+  Commit of v1.0.0-beta.17, the last release below the floor.
+  """
+  let belowFloorCommit: String! = "0da36c8da9cb6a682c7d27eca9bd2c125de5ed09"
+
+  let assert(condition: Boolean!, message: String!): Void {
+    if (condition == false) {
+      raise message
+    }
+    null
+  }
+
+  let daggerSource(commit: String!): Workspace! {
+    git("https://github.com/dagger/dagger").ref(commit).asWorkspace
+  }
+
+  """
+  The checks need git, which the default client lacks.
+  """
+  let sdkClient(ws: Workspace!, engine: Container!): Container! {
+    let sdkSource = ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", ".dagger/modules/e2e/out"])
+      .withFile("dagger.toml", ws.file("/.dagger/modules/engine-e2e/workspace.toml"))
+    engine
+      .withMountedDirectory("/work/python-sdk", sdkSource)
+      .withWorkdir("/work/python-sdk")
+      .withExec(["git", "init", "--quiet"])
+  }
+
+  let clientBase: Container! {
+    container.from("alpine:3.22").withExec(["apk", "add", "--no-cache", "git"])
+  }
+
+  """
+  The outer engine hands each exec a session of its own, which a client
+  prefers over the engine installClient configures, and it sets it when the
+  process starts, so only the process can drop it.
+  """
+  let withoutOuterSession(args: [String!]!): [String!]! {
+    ["env", "-u", "DAGGER_SESSION_PORT", "-u", "DAGGER_SESSION_TOKEN", "dagger"] + args
+  }
+
+  """
+  Every e2e check, on the floor release's engine, which they first confirm
+  is the one they reach.
+  """
+  pub floorCheck(ws: Workspace!): Void @check {
+    sdkClient(ws, engineDev(ws: daggerSource(floorCommit)).installClient(client: clientBase))
+      .withExec(withoutOuterSession(["call", "-m", ".dagger/modules/e2e", "assert-floor-engine"]))
+      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e"]))
+      .sync
+    null
+  }
+
+  """
+  The release below the floor is refused: on its engine, generation names the
+  floor and the release to pin instead.
+  """
+  pub belowFloorCheck(ws: Workspace!): Void @check {
+    let checked = sdkClient(ws, belowFloorEngineDev(ws: daggerSource(belowFloorCommit)).installClient(client: clientBase))
+      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", "engine-floor-refusal-check"]))
+    # A pattern that matches no check passes too.
+    let said = checked.stdout + checked.stderr
+    assert(said.contains("1 passed"), "engine-floor-refusal-check did not run on the engine below the floor:\n" + said)
+    null
+  }
+}
