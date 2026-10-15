@@ -1845,10 +1845,13 @@ type E2e {
       .directory("sdk")
   }
 
-  let sdkContainer(ws: Workspace!): Container! {
+  let sdkContainer(ws: Workspace!, python: String! = "3.14"): Container! {
     container
-      .from("ghcr.io/astral-sh/uv:python3.14-alpine")
+      .from("ghcr.io/astral-sh/uv:python" + python + "-alpine")
       .withoutEntrypoint
+      # The image's Python, not the one sdk/.python-version names.
+      .withEnvVariable("UV_PYTHON", python)
+      .withEnvVariable("UV_PYTHON_DOWNLOADS", "never")
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
       .withDirectory("/sdk", sdkSource(ws))
       .withWorkdir("/sdk")
@@ -1859,7 +1862,33 @@ type E2e {
   builder, generator output and module registration.
   """
   pub sdkTestCheck(ws: Workspace!): Void @check {
-    sdkContainer(ws)
+    sdkTests(ws, "3.14")
+  }
+
+  """
+  A scope may run the SDK on any Python from its floor up, so the suites run on
+  the floor too. It is read from sdk/pyproject.toml so the check follows a
+  floor change.
+  """
+  pub sdkTestOldestPythonCheck(ws: Workspace!): Void @check {
+    let floor = ws.file("/sdk/pyproject.toml").contents.match("(?m)^requires-python = \">=([0-9.]+)\"")
+    if (floor == null) {
+      raise "sdk/pyproject.toml declares no requires-python floor"
+    } else {
+      sdkTests(ws, floor.captures[0] ?? "")
+    }
+  }
+
+  """
+  A module can ask for the newest Python release before the SDK's default
+  moves to it, so the suites run there too.
+  """
+  pub sdkTestNewestPythonCheck(ws: Workspace!): Void @check {
+    sdkTests(ws, "3.15")
+  }
+
+  let sdkTests(ws: Workspace!, python: String!): Void {
+    sdkContainer(ws, python)
       .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/client", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
       .sync
 

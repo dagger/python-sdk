@@ -17,6 +17,8 @@
 ["","oci-sha",["docker.io/library/golang:1.25-alpine"],"sha256:1ae0735f00daffa3aaf1363a5184c0d2dc55c78e3db4ec70241cdac97bf84b59"]
 ["","oci-sha",["docker.io/library/golang:1.26-alpine"],"sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628"]
 ["","oci-sha",["docker.io/tonistiigi/xx:1.2.1"],"sha256:8879a398dedf0aadaacfbd332b29ff2f84bc39ae6d4e9c0a1109db27ac5ba012"]
+["","oci-sha",["ghcr.io/astral-sh/uv:python3.12-alpine"],"sha256:a57a1dd942a83dc96d338f7479be4b4cbca018c476eae7e6f3f1d3603e90aaf8"]
 ["","oci-sha",["ghcr.io/astral-sh/uv:python3.14-alpine"],"sha256:513b826406ed7efc2604acdf4935266e020283ce17e2ea96509cd4f1a68b9f1a"]
+["","oci-sha",["ghcr.io/astral-sh/uv:python3.15-alpine"],"sha256:53c26a742bed4fa993487ff88da17b232c74869b5aabeebfdef786602547dba6"]
 ["","vanity-url",["https://dagger.io/linux/alpine"],"https://github.com/dagger/alpine"]
 ["","vanity-url",["https://dagger.io/sdk/helpers"],"https://github.com/dagger/sdk-helpers"]
