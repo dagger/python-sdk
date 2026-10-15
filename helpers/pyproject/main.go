@@ -20,7 +20,8 @@ func main() {
 // edit-scope and set-global-client edit the file in place and keep its
 // formatting: they touch a scope file that generation also owns.
 //
-// get-member-kinds takes a scope directory instead of a file.
+// get-member-kinds takes a scope directory instead of a file, and
+// python-refusal a module directory.
 //
 // derive-resources takes a directory of pyproject.toml files at their
 // workspace paths and a module directory in it, and prints as JSON the paths
@@ -58,6 +59,14 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Print(string(out))
+		return nil
+	}
+	if cmd == "python-refusal" {
+		out, err := pythonRefusal(path)
+		if err != nil {
+			return err
+		}
+		fmt.Print(out)
 		return nil
 	}
 
