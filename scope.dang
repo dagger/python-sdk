@@ -813,6 +813,14 @@ type PyprojectHelper {
     tool.withFile(at, file).withExec(["pyproject", "remove-table", at, table]).file(at)
   }
 
+  """
+  Why a module directory asks for a Python older than this SDK runs on, or
+  empty when it does not.
+  """
+  pub pythonRefusal(module: Directory!): String! {
+    tool.withDirectory("/module", module).withExec(["pyproject", "python-refusal", "/module"]).stdout
+  }
+
   let path: String! = "/work/pyproject.toml"
 }
 
