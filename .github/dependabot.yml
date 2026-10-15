@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /runtime/images/base
+      - /runtime/images/uv
+    schedule:
+      interval: weekly
+    ignore:
+      # A new Python minor changes what new modules run on: a decision, not a refresh.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  - package-ecosystem: uv
+    directory: /sdk
+    schedule:
+      interval: weekly
+    groups:
+      sdk:
+        patterns: ["*"]
