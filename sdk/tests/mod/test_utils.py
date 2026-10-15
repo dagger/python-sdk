@@ -1,8 +1,8 @@
 import dataclasses
-from typing import Annotated, List, Optional, Protocol  # noqa: UP035
+from typing import Annotated, List, Optional, Protocol, Self  # noqa: UP035
 
 import pytest
-from typing_extensions import Doc, Self
+from typing_extensions import Doc
 
 from dagger import Name
 from dagger.mod._utils import (

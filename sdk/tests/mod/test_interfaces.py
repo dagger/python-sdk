@@ -1,7 +1,7 @@
 import typing
+from typing import Self
 
 import pytest
-from typing_extensions import Self
 
 import dagger
 from dagger.client.base import Interface

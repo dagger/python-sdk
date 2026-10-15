@@ -4,10 +4,10 @@ import pathlib
 import subprocess
 import sys
 import typing
-from typing import Annotated
+from typing import Annotated, Self
 
 import pytest
-from typing_extensions import Doc, Self
+from typing_extensions import Doc
 
 from dagger import DefaultPath, Ignore, Name
 from dagger.client import gen

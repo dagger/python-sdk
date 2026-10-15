@@ -409,7 +409,7 @@ async def test_enum_conversion():
         TWO = "2"
 
     @mod.enum_type
-    class Primitive(str, enum.Enum):
+    class Primitive(str, enum.Enum):  # noqa: UP042
         THREE = "3"
         FOUR = "4"
 

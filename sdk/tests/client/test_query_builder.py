@@ -186,7 +186,7 @@ def test_snake_to_camel(value, expected):
 
 
 def test_enum_literal_before_str():
-    class StrColor(str, enum.Enum):
+    class StrColor(str, enum.Enum):  # noqa: UP042
         BLUE = "blue"
 
     assert to_literal(StrColor.BLUE) == "BLUE"

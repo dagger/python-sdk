@@ -1,5 +1,5 @@
 src = ["src", "tests"]
-target-version = "py310"
+target-version = "py312"
 
 [format]
 docstring-code-format = true
@@ -32,6 +32,12 @@ ignore = [
     "FIX002",
     # Pandas
     "PD",
+    # Keep the spellings from before PEP 695: a `type` alias is a
+    # TypeAliasType at runtime, which the SDK's type introspection does not
+    # unwrap.
+    "UP040",
+    "UP046",
+    "UP047",
     # Allow import inside functions to avoid circular imports issues.
     "PLC0415",
     # Avoid conflicts with the formatter

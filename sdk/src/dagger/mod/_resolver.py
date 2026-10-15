@@ -7,14 +7,16 @@ from typing import (
     Any,
     Generic,
     ParamSpec,
+    Self,
     TypeAlias,
     cast,
     get_type_hints,
     overload,
+    override,
 )
 
 from cattrs.preconf.json import JsonConverter, make_converter
-from typing_extensions import Self, TypeVar, override
+from typing_extensions import TypeVar
 
 from dagger.mod._arguments import Parameter
 from dagger.mod._exceptions import (

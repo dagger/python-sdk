@@ -1,8 +1,8 @@
 import itertools
-from typing import Annotated
+from typing import Annotated, Self
 
 import pytest
-from typing_extensions import Doc, Self
+from typing_extensions import Doc
 
 import dagger
 from dagger.client import gen

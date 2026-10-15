@@ -1,10 +1,10 @@
 import enum
 import typing
 from dataclasses import InitVar
-from typing import Annotated
+from typing import Annotated, Self
 
 import pytest
-from typing_extensions import Doc, Self
+from typing_extensions import Doc
 
 from dagger import DefaultPath, Ignore, Name
 from dagger.client import gen
