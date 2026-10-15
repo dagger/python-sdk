@@ -1,5 +1,5 @@
 from copy import copy, deepcopy
-from dataclasses import replace
+from dataclasses import asdict, fields, replace
 
 import pytest
 
@@ -116,11 +116,10 @@ def test_get_without_function_outside_a_collection_still_loads():
 
 @pytest.mark.parametrize("clone", [copy, deepcopy, replace])
 @pytest.mark.parametrize("custom_init", [False, True])
-def test_base_survives_copies_without_delta(clone, custom_init):
+@pytest.mark.parametrize("collection_first", [True, False])
+def test_base_survives_copies_without_delta(clone, custom_init, collection_first):
     mod = Module()
 
-    @mod.collection
-    @mod.object_type
     class Items:
         names: list[str] = mod.keys(default=list)
 
@@ -128,6 +127,11 @@ def test_base_survives_copies_without_delta(clone, custom_init):
 
             def __init__(self, names: list[str]):
                 self.names = names
+
+    if collection_first:
+        Items = mod.object_type(mod.collection(Items))  # noqa: N806
+    else:
+        Items = mod.collection(mod.object_type(Items))  # noqa: N806
 
     original = mod._converter.structure(
         {"names": ["a", "b"], "__daggerCollectionBase": "original"}, Items
@@ -144,6 +148,17 @@ def test_base_survives_copies_without_delta(clone, custom_init):
         "_dagger_collection_base"
         not in mod.get_object("Items").get_constructor().parameters
     )
+
+
+def test_plain_object_type_has_no_base():
+    mod = Module()
+
+    @mod.object_type
+    class Plain:
+        name: str = mod.field(default="a")
+
+    assert [f.name for f in fields(Plain)] == ["name"]
+    assert asdict(Plain()) == {"name": "a"}
 
 
 def test_collection_metadata_reaches_both_entrypoints():
