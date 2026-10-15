@@ -419,6 +419,7 @@ one to a Python scope is refused and the workspace is left unchanged.
 dagger check
 ```
 
-`engine-e-2-e:dev-sdk-check` builds the pinned dagger/dagger#13992 engine. It
-runs the SDK interface checks, initializes Python modules with default and
-explicit settings, and calls a generated module.
+`engine-e-2-e/floor-check` builds the engine of the floor release from its
+dagger/dagger commit and runs every e2e check on it;
+`engine-e-2-e/below-floor-check` checks that the release below the floor is
+refused. `hack/e2e-local.sh` runs the e2e checks on the local engine.
