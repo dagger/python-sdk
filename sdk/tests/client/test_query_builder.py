@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from dagger._exceptions import ClientError
 from dagger.client._core import Arg, Context, EnumName, snake_to_camel, to_literal
 from dagger.client.base import Enum, Input, Scalar, Type
 
@@ -125,6 +126,20 @@ def test_select_copies_args_per_fork():
     left.selections[-1].args["args"].append("b")
 
     assert 'withExec(args: ["a"])' in right.build()
+
+
+class Unloadable(Type):
+    async def id(self):
+        msg = "no id"
+        raise ClientError(msg)
+
+
+@pytest.mark.anyio
+async def test_resolve_ids_raises_the_error_not_its_group():
+    ctx = Context().root_select("container", [Arg("source", Unloadable(Context()))])
+
+    with pytest.raises(ClientError, match="no id"):
+        await ctx.resolve_ids()
 
 
 def test_build_aliases_multiple_fields():
