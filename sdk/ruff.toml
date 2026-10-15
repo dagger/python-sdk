@@ -78,6 +78,7 @@ ignore = [
     # argument.
     "EM101",
     "C901",
+    "PLR0912",
 ]
 "codegen/gen.py" = [
     "A",
