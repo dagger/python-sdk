@@ -46,7 +46,8 @@ async def test_unstructure_structure():
 
 class TestNameOverrides:
     @pytest.fixture(scope="class")
-    def mod(self):
+    @classmethod
+    def mod(cls):
         _mod = Module()
 
         @_mod.object_type
@@ -284,7 +285,8 @@ async def test_non_constructor_create_function():
 
 class TestFunctionFromExternalConstructor:
     @pytest.fixture(scope="class")
-    def mod(self):
+    @classmethod
+    def mod(cls):
         _mod = Module()
 
         @_mod.object_type
