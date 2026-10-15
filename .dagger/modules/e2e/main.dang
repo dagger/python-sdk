@@ -1600,12 +1600,11 @@ type E2e {
   let callerSecretPath: String! = "review-secret.txt"
 
   """
-  The first release with what this SDK's collections use: the projected
-  types every `dagger call` into a collection resolves, and item selectors on
-  `dagger call`. It is this SDK's floor. Its engine image carries its CLI,
+  The first release that loads a module's files through its entrypoint's
+  sources member. It is this SDK's floor. Its engine image carries its CLI,
   and git.
   """
-  let floorVersion: String! = "1.0.0-beta.17"
+  let floorVersion: String! = "1.0.0-beta.18"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -1993,10 +1992,10 @@ type E2e {
   """
   pub engineFloorRefusalCheck: Void @check {
     let pin = "dagger module install github.com/dagger/python-sdk@v1.1.1"
-    let pinned = ["v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
+    let pinned = ["v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
     let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
     let accepted = [
-      "v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.18", "v1.0.0-rc.1", "v1.0.0",
+      "v1.0.0-beta.18", "v1.0.0-beta.18+249edbd6", "v1.0.0-beta.19", "v1.0.0-rc.1", "v1.0.0",
       "v1.0.1", "v2.0.0-beta.1", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-dev.3", "devel", "",
     ]
     (pinned + upgradeOnly).each { engine =>

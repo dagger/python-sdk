@@ -43,17 +43,17 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a ref>` | an entrypoint served from elsewhere, the shared one below among them |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.17` or later, the first release with
-what its collections use (see `docs/collections.md`). An entrypoint runs a
-module on the engine's own version, so an entrypoint manifest keeps no
-`engineVersion`.
+This SDK needs an engine `v1.0.0-beta.18` or later, the first release that
+loads a module's files through its entrypoint's `sources` member. An
+entrypoint runs a module on the engine's own version, so an entrypoint
+manifest keeps no `engineVersion`.
 
 On an older engine, `dagger module init` and `dagger generate` stop before
 they write anything, with a message that names the engine's version. The
 shared entrypoint cannot say why: Dang rejects its file before any code runs,
 so a module on it fails to load on v1.0.0-beta.14 with `field
 "withCollection" not found in Dagger.TypeDef`. To stay on an engine from
-v1.0.0-beta.14 to v1.0.0-beta.16, pin `v1.1.1`, the last release that runs
+v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
 there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
 `dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint. An engine
 older than v1.0.0-beta.14 runs neither release, and needs an upgrade.

@@ -480,10 +480,10 @@ type PythonSdk {
   let staticEntrypointPath: String! = vendorDirName + "/entrypoint"
 
   """
-  The first engine release this SDK runs on: the first with the projected
-  types and item selectors that collections use.
+  The first engine release this SDK runs on: the first that loads a
+  module's files through its entrypoint's sources member.
   """
-  let engineFloor: String! = "v1.0.0-beta.17"
+  let engineFloor: String! = "v1.0.0-beta.18"
 
   """
   The last release of this SDK that runs on an engine below engineFloor.

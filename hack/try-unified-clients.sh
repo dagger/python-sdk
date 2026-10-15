@@ -13,7 +13,7 @@
 #   <workspace>/.dagger/modules/demo/        a module that calls lib through a client
 #
 # and then calls demo, which calls lib through serveModule. It needs an engine
-# at this SDK's floor, v1.0.0-beta.17, or later.
+# at this SDK's floor, v1.0.0-beta.18, or later.
 #
 # Why each module's manifest is rewritten: generation names the shared Dang
 # entrypoint this repository publishes, dagger.io/sdk/python/entrypoint@v1,
