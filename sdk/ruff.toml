@@ -32,6 +32,8 @@ ignore = [
     "FIX002",
     # Pandas
     "PD",
+    # The license is in LICENSE, not repeated in each file.
+    "CPY001",
     # Keep the spellings from before PEP 695: a `type` alias is a
     # TypeAliasType at runtime, which the SDK's type introspection does not
     # unwrap.

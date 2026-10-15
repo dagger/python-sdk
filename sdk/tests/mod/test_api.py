@@ -173,14 +173,16 @@ async def test_input_args_come_in_one_query(session: FakeSession):
 
     assert args == [_api.ArgValue(name="who", value='"you"')]
     assert session.queries == [
-        "query {\n"
-        "  currentFunctionCall {\n"
-        "    inputArgs {\n"
-        "      name\n"
-        "      value\n"
-        "    }\n"
-        "  }\n"
-        "}"
+        (
+            "query {\n"
+            "  currentFunctionCall {\n"
+            "    inputArgs {\n"
+            "      name\n"
+            "      value\n"
+            "    }\n"
+            "  }\n"
+            "}"
+        )
     ]
 
 

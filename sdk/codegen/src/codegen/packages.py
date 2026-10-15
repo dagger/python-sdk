@@ -447,6 +447,7 @@ def client_package(  # noqa: PLR0913
     name: str,
     ref: str,
     pin: str | None = None,
+    *,
     core_digest: str | None = None,
     schema_version: str = "",
 ) -> tuple[str, Files]:

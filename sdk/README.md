@@ -62,7 +62,8 @@ async def main(args: list[str]):
     async with dagger.connection():
         # build container with cowsay entrypoint
         ctr = (
-            core().container()
+            core()
+            .container()
             .from_("python:alpine")
             .with_exec(["pip", "install", "cowsay"])
         )
