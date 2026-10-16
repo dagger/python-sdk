@@ -603,7 +603,7 @@ type Scope {
       "dependencies = [" + dependencies.map { name => "\"" + name + "\"" }.join(", ") + "]\n" +
       "\n" +
       "[build-system]\n" +
-      "requires = [\"uv_build>=0.8.4,<0.12.0\"]\n" +
+      "requires = [\"uv_build>=0.8.4,<0.14.0\"]\n" +
       "build-backend = \"uv_build\"\n" +
       "\n" +
       "[tool.uv.build-backend]\n" +
@@ -811,6 +811,14 @@ type PyprojectHelper {
   pub withoutTable(file: File!, table: String!): File! {
     let at = "/work/" + file.name
     tool.withFile(at, file).withExec(["pyproject", "remove-table", at, table]).file(at)
+  }
+
+  """
+  Why a module directory asks for a Python older than this SDK runs on, or
+  empty when it does not.
+  """
+  pub pythonRefusal(module: Directory!): String! {
+    tool.withDirectory("/module", module).withExec(["pyproject", "python-refusal", "/module"]).stdout
   }
 
   let path: String! = "/work/pyproject.toml"

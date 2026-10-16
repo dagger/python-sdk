@@ -46,7 +46,8 @@ async def test_unstructure_structure():
 
 class TestNameOverrides:
     @pytest.fixture(scope="class")
-    def mod(self):
+    @classmethod
+    def mod(cls):
         _mod = Module()
 
         @_mod.object_type
@@ -284,7 +285,8 @@ async def test_non_constructor_create_function():
 
 class TestFunctionFromExternalConstructor:
     @pytest.fixture(scope="class")
-    def mod(self):
+    @classmethod
+    def mod(cls):
         _mod = Module()
 
         @_mod.object_type
@@ -409,7 +411,7 @@ async def test_enum_conversion():
         TWO = "2"
 
     @mod.enum_type
-    class Primitive(str, enum.Enum):
+    class Primitive(str, enum.Enum):  # noqa: UP042
         THREE = "3"
         FOUR = "4"
 

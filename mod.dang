@@ -87,6 +87,7 @@ type Mod {
         .generatedContextDirectory
         .directory(rootPath))
     } else {
+      checkPython
       let scope = Scope(
         path: rootPath,
         ws: ws,
@@ -111,6 +112,21 @@ type Mod {
         scoped
       }
     }
+  }
+
+  """
+  Refuse a module that asks for an older Python than the SDK runs on before
+  anything is written: uv would lock it to the SDK's Python, and the runtime
+  would still build it on the older one, where the install fails. Beside
+  checkEngine, which refuses the engine: this one reads the module, so only
+  generation runs it, and config set stays open to fix the module.
+  """
+  let checkPython: Void {
+    let refusal = PyprojectHelper().pythonRefusal(ws.directory("/" + rootPath, include: ["pyproject.toml", ".python-version"]))
+    if (refusal != "") {
+      raise "the module at " + rootPath + ": " + refusal + ", then run dagger generate again"
+    }
+    null
   }
 
   """

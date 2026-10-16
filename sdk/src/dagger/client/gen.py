@@ -3,9 +3,7 @@
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
-
-from typing_extensions import Self
+from typing import Protocol, Self, runtime_checkable
 
 from dagger.client._core import Arg
 from dagger.client._guards import type_error as _type_error

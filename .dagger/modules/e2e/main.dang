@@ -931,6 +931,59 @@ type E2e {
   }
 
   """
+  uv locks a scope to the SDK's Python floor whatever the module asks for, so
+  a module the runtime would build on an older Python fails at install, long
+  after generation. Generation refuses it first, unless the module names a
+  base image of its own, which the runtime builds on as named.
+  """
+  pub pythonFloorRefusalCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, tomlGenerateModulePath, "toml-generate-app")
+    let pyprojectPath = tomlGenerateModulePath + "/pyproject.toml"
+    let pyproject = ws.file("/" + pyprojectPath).contents
+    let onFloor = pyproject.replace("requires-python = \">=3.14\"", "requires-python = \">=3.12\"")
+    let belowFloor = pyproject.replace("requires-python = \">=3.14\"", "requires-python = \">=3.11\"")
+    assert(belowFloor != pyproject, "the fixture asks for no Python to lower")
+
+    let floor = pythonSdk.mod(ws.withNewFile("/" + pyprojectPath, onFloor), path: tomlGenerateModulePath).generate
+    assertAdded(floor, tomlGenerateModulePath + "/" + sdkMemberFile)
+
+    let older = pythonSdk.mod(ws.withNewFile("/" + pyprojectPath, belowFloor), path: tomlGenerateModulePath).generated.cwd rescue {
+      err: Error => err.message
+    }
+    assertContainsAll(older, [
+      "the module at " + tomlGenerateModulePath + ": this Python SDK needs Python 3.12 or later",
+      "requires-python = \">=3.11\" asks for Python 3.11. Ask for Python 3.12 or later",
+      "pin the last release of this SDK that runs on it: dagger module install github.com/dagger/python-sdk@v1.2.0",
+      "then run dagger generate again",
+    ])
+
+    let ownImage = belowFloor + "\n[tool.dagger]\nbase-image = \"python:3.14-slim\"\n"
+    let onOwnImage = pythonSdk.mod(ws.withNewFile("/" + pyprojectPath, ownImage), path: tomlGenerateModulePath).generate
+    assertAdded(onOwnImage, tomlGenerateModulePath + "/" + sdkMemberFile)
+
+    let pinned = ws.withNewFile("/" + tomlGenerateModulePath + "/.python-version", "3.11\n")
+    let pinRefused = pythonSdk.mod(pinned, path: tomlGenerateModulePath).generated.cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(pinRefused, "this Python SDK needs Python 3.12 or later, and .python-version pins Python 3.11. Set it to Python 3.12 or later", "a module pinned to Python 3.11 was generated")
+
+    let initScope = outputRoot + "/python-floor-init"
+    let initRefused = pythonSdk(template: "empty", pythonVersion: "3.11")
+      .generateScope(scope.withNewDirectory("/" + initScope, directory).withWorkdir(initScope), isModule: true, name: "python-floor-init", clients: [])
+      .cwd rescue {
+        err: Error => err.message
+      }
+    assertContains(initRefused, "asks for Python 3.11", "a new module asking for Python 3.11 was initialized")
+
+    let setRefused = pythonSdk.mod(ws, path: tomlGenerateModulePath).config.set(pythonVersion: "3.11").after.file(pyprojectPath).contents rescue {
+      err: Error => err.message
+    }
+    assertContains(setRefused, "asks for Python 3.11", "config set wrote Python 3.11")
+
+    null
+  }
+
+  """
   A module on this repository's runtime builds and runs, driven through the
   floor release's CLI. The fixture points `[runtime] source` at `runtime/` by relative
   path, so the runtime in this working tree answers.
@@ -1384,8 +1437,9 @@ type E2e {
 
   """
   The released CLI lists this checkout as the python SDK, initializes a module
-  from it, and runs it. The module's manifest names the entrypoint generated
-  into it and no runtime, so the module runs on code this checkout wrote.
+  from it, and runs it, on the default Python and on the SDK's floor. The
+  module's manifest names the entrypoint generated into it and no runtime, so
+  the module runs on code this checkout wrote.
   """
   pub cliSdkCheck(ws: Workspace!): Void @check {
     let path = ".dagger/modules/sdk-smoke"
@@ -1406,6 +1460,13 @@ type E2e {
     let release = cli(initialized, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
       .stdout
     assert(release.trimSpace != "", "the generated module did not run")
+
+    let floorPath = ".dagger/modules/sdk-floor"
+    let onFloor = cli(initialized, ["module", "init", "python", "--auto-apply", "--name", "sdk-floor", "--path", floorPath, "--python-version", "3.12"])
+      .withExec(["grep", "-q", ">=3.12", floorPath + "/pyproject.toml"])
+    let floorRelease = cli(onFloor, ["-m", floorPath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
+      .stdout
+    assert(floorRelease.trimSpace != "", "the default template did not run on the Python floor")
 
     cli(initialized, [
         "module", "init", "python", "--auto-apply",
@@ -1784,10 +1845,13 @@ type E2e {
       .directory("sdk")
   }
 
-  let sdkContainer(ws: Workspace!): Container! {
+  let sdkContainer(ws: Workspace!, python: String! = "3.14"): Container! {
     container
-      .from("ghcr.io/astral-sh/uv:python3.14-alpine")
+      .from("ghcr.io/astral-sh/uv:python" + python + "-alpine")
       .withoutEntrypoint
+      # The image's Python, not the one sdk/.python-version names.
+      .withEnvVariable("UV_PYTHON", python)
+      .withEnvVariable("UV_PYTHON_DOWNLOADS", "never")
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
       .withDirectory("/sdk", sdkSource(ws))
       .withWorkdir("/sdk")
@@ -1798,7 +1862,33 @@ type E2e {
   builder, generator output and module registration.
   """
   pub sdkTestCheck(ws: Workspace!): Void @check {
-    sdkContainer(ws)
+    sdkTests(ws, "3.14")
+  }
+
+  """
+  A scope may run the SDK on any Python from its floor up, so the suites run on
+  the floor too. It is read from sdk/pyproject.toml so the check follows a
+  floor change.
+  """
+  pub sdkTestOldestPythonCheck(ws: Workspace!): Void @check {
+    let floor = ws.file("/sdk/pyproject.toml").contents.match("(?m)^requires-python = \">=([0-9.]+)\"")
+    if (floor == null) {
+      raise "sdk/pyproject.toml declares no requires-python floor"
+    } else {
+      sdkTests(ws, floor.captures[0] ?? "")
+    }
+  }
+
+  """
+  A module can ask for the newest Python release before the SDK's default
+  moves to it, so the suites run there too.
+  """
+  pub sdkTestNewestPythonCheck(ws: Workspace!): Void @check {
+    sdkTests(ws, "3.15")
+  }
+
+  let sdkTests(ws: Workspace!, python: String!): Void {
+    sdkContainer(ws, python)
       .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/client", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
       .sync
 

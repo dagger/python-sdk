@@ -813,7 +813,8 @@ type PythonSdk {
       let withPy = if (pythonVersion == "") { built } else { built.withExec(["pyproject", "set-python-version", pyproj, pythonVersion]) }
       let withUv = if (useUv) { withPy } else { withPy.withExec(["pyproject", "set-use-uv", pyproj, "false"]) }
       let withImg = if (baseImage == "") { withUv } else { withUv.withExec(["pyproject", "set-base-image", pyproj, baseImage]) }
-      withImg.directory("/rendered")
+      let refusal = withImg.withExec(["pyproject", "python-refusal", "/rendered"]).stdout
+      if (refusal != "") { raise refusal + "." } else { withImg.directory("/rendered") }
     }
   }
 }

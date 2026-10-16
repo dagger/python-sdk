@@ -739,6 +739,20 @@ def _introspection(sdl: str) -> dict:
     return {**result, "__schemaVersion": "v0.21.0"}
 
 
+def test_cli_keeps_input_defaults_from_introspection(tmp_path):
+    block = 'input Block { text: String = "", errored: Boolean = false }'
+    sdl = _sdl(Query="fromBlock(block: Block): Directory!") + block
+    path = tmp_path / "schema.json"
+    path.write_text(json.dumps(_introspection(sdl)))
+    out = tmp_path / "src"
+
+    cli.main(["generate-core", "-i", str(path), "-o", str(out)])
+
+    core = (out / "dagger_clients/core/__init__.py").read_text()
+    assert "text: str | None = ''" in core
+    assert "errored: bool | None = False" in core
+
+
 @pytest.fixture
 def introspection(tmp_path):
     path = tmp_path / "schema.json"

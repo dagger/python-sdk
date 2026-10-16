@@ -73,10 +73,9 @@ import warnings as _warnings  # noqa: F401
 from collections.abc import Callable as _Callable
 from dataclasses import dataclass as _dataclass
 from typing import Protocol as _Protocol
+from typing import Self as _Self
 from typing import overload as _overload
 from typing import runtime_checkable as _runtime_checkable
-
-from typing_extensions import Self as _Self
 
 %s
 from dagger.client._core import Arg as _Arg
@@ -448,6 +447,7 @@ def client_package(  # noqa: PLR0913
     name: str,
     ref: str,
     pin: str | None = None,
+    *,
     core_digest: str | None = None,
     schema_version: str = "",
 ) -> tuple[str, Files]:

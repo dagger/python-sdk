@@ -98,6 +98,10 @@ type ModConfig {
       withImage
     }
 
+    let refusal = if (pythonVersion != null) { withGlobal.withExec(["pyproject", "python-refusal", toolDir]).stdout } else { "" }
+    if (refusal != "") {
+      raise refusal + "."
+    }
     let edited = withGlobal.file(toolPath).contents
     ws.withNewFile("/" + pyprojectPath, edited).changes(ws)
   }
@@ -138,7 +142,8 @@ type ModConfig {
     if (path == ".") { "pyproject.toml" } else { path + "/pyproject.toml" }
   }
 
-  let toolPath: String! = "/work/pyproject.toml"
+  let toolDir: String! = "/work"
+  let toolPath: String! = toolDir + "/pyproject.toml"
 
   """
   Container with the pyproject helper built and the module's pyproject.toml

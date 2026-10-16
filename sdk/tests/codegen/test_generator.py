@@ -600,18 +600,24 @@ def test_arg_check_expected_type(ctx: Context):
         ),
         (
             {"tags": Argument(NonNull(List(NonNull(String))))},
-            "if not (isinstance(tags, list) "
-            "and all(isinstance(_v0, str) for _v0 in tags)):",
+            (
+                "if not (isinstance(tags, list) "
+                "and all(isinstance(_v0, str) for _v0 in tags)):"
+            ),
         ),
         (
             {"labels": Argument(List(String))},
-            "if not (labels is None or (isinstance(labels, list) "
-            "and all(_v0 is None or isinstance(_v0, str) for _v0 in labels))):",
+            (
+                "if not (labels is None or (isinstance(labels, list) "
+                "and all(_v0 is None or isinstance(_v0, str) for _v0 in labels))):"
+            ),
         ),
         (
             {"tags": Argument(NonNull(List(NonNull(String))), [])},
-            "if not (tags is None or (isinstance(tags, list) "
-            "and all(isinstance(_v0, str) for _v0 in tags))):",
+            (
+                "if not (tags is None or (isinstance(tags, list) "
+                "and all(isinstance(_v0, str) for _v0 in tags))):"
+            ),
         ),
         (
             {
