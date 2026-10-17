@@ -1848,7 +1848,7 @@ type E2e {
       .directory("sdk")
   }
 
-  let sdkContainer(ws: Workspace!, python: String! = "3.14"): Container! {
+  let sdkBase(python: String!): Container! {
     container
       .from("ghcr.io/astral-sh/uv:python" + python + "-alpine")
       .withoutEntrypoint
@@ -1856,6 +1856,10 @@ type E2e {
       .withEnvVariable("UV_PYTHON", python)
       .withEnvVariable("UV_PYTHON_DOWNLOADS", "never")
       .withMountedCache("/root/.cache/uv", cacheVolume("python-sdk-uv"))
+  }
+
+  let sdkContainer(ws: Workspace!, python: String! = "3.14"): Container! {
+    sdkBase(python)
       .withDirectory("/sdk", sdkSource(ws))
       .withWorkdir("/sdk")
   }
@@ -1891,11 +1895,9 @@ type E2e {
   }
 
   let sdkTests(ws: Workspace!, python: String!): Void {
-    sdkContainer(ws, python)
-      .withExec(["uv", "run", "--frozen", "pytest", "-q", "tests/client", "tests/codegen", "tests/mod"], experimentalPrivilegedNesting: true)
-      .sync
-
-    null
+    pytest(base: sdkBase(python), args: ["-q", "tests/client", "tests/codegen", "tests/mod"])
+      .project(ws, "sdk")
+      .test(ws)
   }
 
   """
