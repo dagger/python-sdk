@@ -1697,10 +1697,14 @@ type E2e {
   }
 
   """
-  The files of a workspace that the playground mounts.
+  The files of a workspace that the playground mounts, with the e2e
+  workspace config as its dagger.toml. The checks may run from a workspace
+  whose config registers other modules, such as engine-e2e, which the
+  playground's CLI would then load.
   """
   let playgroundTree(ws: Workspace!): Directory! {
     ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot])
+      .withFile("dagger.toml", ws.file("/.dagger/modules/engine-e2e/workspace.toml"))
   }
 
   """

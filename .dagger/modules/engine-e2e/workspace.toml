@@ -1,6 +1,7 @@
 # The workspace the e2e checks run in: this checkout as its python SDK, and
 # the e2e checks of it. engine-e2e and hack/e2e-local.sh put this file in
-# place of dagger.toml in the copy they run the checks on.
+# place of dagger.toml in the copy they run the checks on, and the e2e
+# playground in place of the workspace's.
 
 [modules.e2e]
 source = ".dagger/modules/e2e"
