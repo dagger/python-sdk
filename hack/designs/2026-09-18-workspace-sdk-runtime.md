@@ -91,10 +91,11 @@ branch name would be baked into a user's manifest.
 
 ## Until then
 
-`hack/try-unified-clients.sh` copies the checkout's own shared entrypoint into
-each module, so the walkthrough runs on the SDK under test rather than on a
-published release. A branch pushed to a fork and named by git ref works too, and
-is what a developer testing this SDK does today.
+The e2e checks copy the checkout's own shared entrypoint into each module
+(`onCheckoutEntrypoint` in `.dagger/modules/e2e/main.dang`), so they run on the
+SDK under test rather than on a published release. A branch pushed to a fork
+and named by git ref works too, and is what a developer testing this SDK does
+today.
 
 **Before releasing unified clients, tag `entrypoint/v1.x` from the branch that
 carries them.** Until that tag exists, every module this SDK generates names a

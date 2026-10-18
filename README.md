@@ -422,4 +422,5 @@ dagger check
 `engine-e-2-e/floor-check` builds the engine of the floor release from its
 dagger/dagger commit and runs every e2e check on it;
 `engine-e-2-e/below-floor-check` checks that the release below the floor is
-refused. `hack/e2e-local.sh` runs the e2e checks on the local engine.
+refused. AGENTS.md has the commands that run the e2e checks on the local
+engine.

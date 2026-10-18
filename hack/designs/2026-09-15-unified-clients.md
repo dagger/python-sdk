@@ -1039,8 +1039,8 @@ Verified while building it, against a live engine:
   then strip that module out of the schema. Core comes out byte for byte the
   same as without the stand-in.
 - The whole path works with the released CLI on a released engine, outside the
-  check harness (`hack/try-unified-clients.sh`): `dagger module init python`
-  twice, `dagger module client add ../lib`, then a module calling
+  check harness (`hack/try-unified-clients.sh` at 652ac99): `dagger module init
+  python` twice, `dagger module client add ../lib`, then a module calling
   `lib().greeting()` through `dagger_clients.lib`, and `core()` beside it.
 - A plain program, in a scope with no `[project]` table, calls a client through
   `dagger.connection()`. The engine is provisioned, the module is loaded, and

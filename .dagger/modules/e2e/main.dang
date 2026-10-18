@@ -1673,8 +1673,8 @@ type E2e {
   running the check, so that the CLI it drives and the engine it reaches
   through nesting are one version. A CLI older than that engine waits for an
   answer it never gets, and the floor is proven by running these checks on the
-  floor engine (hack/e2e-floor.sh), not by pinning an older CLI in here. An
-  engine built from source names the release it came from before the `+`.
+  floor engine (engine-e2e's floorCheck), not by pinning an older CLI in here.
+  An engine built from source names the release it came from before the `+`.
   """
   let playgroundImage: String! {
     "registry.dagger.io/engine:" + (version.split("+")[0] ?? version)
@@ -1688,19 +1688,22 @@ type E2e {
   client of the engine running the checks, and its workspace is this tree.
 
   So the engine is whichever runs the checks. A pass proves the floor only
-  on the floor's engine, which the floor job (hack/e2e-floor.sh) runs them on
-  and asserts with assertFloorEngine; an ordinary run takes the engine it
-  finds.
+  on the floor's engine, which engine-e2e's floorCheck runs them on and
+  asserts with assertFloorEngine; an ordinary run takes the engine it finds.
   """
   let playground(ws: Workspace!): Container! {
     playgroundOf(playgroundTree(ws))
   }
 
   """
-  The files of a workspace that the playground mounts.
+  The files of a workspace that the playground mounts, with the e2e
+  workspace config as its dagger.toml. The checks may run from a workspace
+  whose config registers other modules, such as engine-e2e, which the
+  playground's CLI would then load.
   """
   let playgroundTree(ws: Workspace!): Directory! {
     ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot])
+      .withFile("dagger.toml", ws.file("/.dagger/modules/engine-e2e/workspace.toml"))
   }
 
   """
@@ -1716,18 +1719,18 @@ type E2e {
   }
 
   """
-  The floor job's precondition, not a check of its own: the engine the
+  floorCheck's precondition, not a check of its own: the engine the
   playground's CLI talks to is the floor release, by the version it reports
   itself. A release reports its build after a "+", which is not part of the
-  version; a dev or later build is refused. hack/e2e-floor.sh calls it before
-  the checks, so that job cannot pass on another engine.
+  version; a dev or later build is refused. engine-e2e's floorCheck calls it
+  before the checks, so that check cannot pass on another engine.
   """
   pub assertFloorEngine(ws: Workspace!): Void {
     let answered = playground(ws).withExec(["dagger", "query"], stdin: "{ version }", experimentalPrivilegedNesting: true).stdout
     let reported = json.withContents((answered :: Dagger.JSON!)).field(["version"]).asString
     if ((reported.split("+")[0] ?? "") != "v" + floorVersion) {
       raise "the checks drive the floor release's CLI, v" + floorVersion + ", against the engine running them, which is " +
-        reported + ": a pass would not prove the floor. Run the floor job, which provisions its engine: hack/e2e-floor.sh"
+        reported + ": a pass would not prove the floor. Run `dagger check engine-e2e:floor-check`, which provisions its engine"
     }
     null
   }

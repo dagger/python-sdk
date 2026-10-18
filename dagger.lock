@@ -20,5 +20,6 @@
 ["","oci-sha",["ghcr.io/astral-sh/uv:python3.12-alpine"],"sha256:a57a1dd942a83dc96d338f7479be4b4cbca018c476eae7e6f3f1d3603e90aaf8"]
 ["","oci-sha",["ghcr.io/astral-sh/uv:python3.14-alpine"],"sha256:513b826406ed7efc2604acdf4935266e020283ce17e2ea96509cd4f1a68b9f1a"]
 ["","oci-sha",["ghcr.io/astral-sh/uv:python3.15-alpine"],"sha256:53c26a742bed4fa993487ff88da17b232c74869b5aabeebfdef786602547dba6"]
+["","oci-sha",["registry.dagger.io/engine:v1.0.0-beta.18"],"sha256:bdba5a56b1286e38244ad060c21fb4a5db6d30abc0077d79677f7450c737ae48"]
 ["","vanity-url",["https://dagger.io/linux/alpine"],"https://github.com/dagger/alpine"]
 ["","vanity-url",["https://dagger.io/sdk/helpers"],"https://github.com/dagger/sdk-helpers"]
