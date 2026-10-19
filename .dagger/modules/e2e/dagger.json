@@ -12,6 +12,11 @@
     {
       "name": "python-sdk-runtime",
       "source": "../../../runtime"
+    },
+    {
+      "name": "pytest",
+      "source": "github.com/dagger/python/pytest@8836aab1dc2278078c7ef7464f79d3d343da6f20",
+      "pin": "8836aab1dc2278078c7ef7464f79d3d343da6f20"
     }
   ]
 }
