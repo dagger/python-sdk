@@ -211,7 +211,7 @@ type E2e {
       "kind = \"dang\"",
       "source = \"./sdk/entrypoint\"",
     ])
-    ["main.dang", "types.dang", "build.dang"].each { file => assertAdded(changes, scope + "/sdk/entrypoint/" + file) }
+    ["main.dang", "types.dang", "build.dang", "workspace_reader.py"].each { file => assertAdded(changes, scope + "/sdk/entrypoint/" + file) }
     # The entrypoint runs the module, on the engine's own version.
     assertContainsNone(manifest, ["[runtime]", "engineVersion", "[[dependencies]]"])
     let defaultSource = changes.layer.file(scope + "/src/scope_init/__init__.py").contents
@@ -1765,15 +1765,16 @@ type E2e {
   """
   runtime/build.dang as the shared entrypoint carries it.
 
-  The engine copies only the .dang files at the top of an entrypoint
-  directory, and `currentModule` inside an entrypoint is the module it serves,
-  so a shared entrypoint can read none of its own non-Dang files. The externals
-  block that reads the pinned Dockerfiles is written out here instead, the same
-  way a generated per-module entrypoint carries it.
+  `currentModule` inside an entrypoint is the module it serves, so the
+  externals block that reads the pinned Dockerfiles is written out here
+  instead, the same way a generated per-module entrypoint carries it. The
+  workspace reader is read from the copy beside the build, in the directory
+  the served module names as its entrypoint.
   """
   pub sharedEntrypointBuild(ws: Workspace!): File! {
     let pins = "let defaultBaseImage: String! = \"" + imageFrom(ws, "runtime/images/base/Dockerfile") + "\"\n" +
-      "  let defaultUvImage: String! = \"" + imageFrom(ws, "runtime/images/uv/Dockerfile") + "\""
+      "  let defaultUvImage: String! = \"" + imageFrom(ws, "runtime/images/uv/Dockerfile") + "\"\n" +
+      "  let workspaceReader: String! { EntrypointFiles().directory.file(\"workspace_reader.py\").contents }"
     let inlined = ws.file("/runtime/build.dang").contents
       .replaceMatches("(?s)#<externals>.*?#</externals>", pins)
     if (inlined.contains("currentModule")) {
@@ -1805,8 +1806,10 @@ type E2e {
   }
 
   """
-  The committed copy of the build in the shared entrypoint matches the runtime
-  module's, so a Dependabot bump to a pinned image reaches both.
+  The committed copies of the build and the workspace reader in the shared
+  entrypoint match the runtime module's, so a Dependabot bump to a pinned
+  image or a change to the reader reaches both. The build reads the reader
+  from its file and does not inline it.
   """
   pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check {
     let want = sharedEntrypointBuild(ws).contents
@@ -1814,6 +1817,11 @@ type E2e {
     assert(
       got == want,
       sharedEntrypointBuildPath + " is stale; refresh it with `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path " + sharedEntrypointBuildPath + "`",
+    )
+    assertNotContains(got, "import glob, os, re, sys, tomllib", sharedEntrypointBuildPath + " inlines the workspace reader")
+    assert(
+      ws.file("/entrypoint/workspace_reader.py").contents == ws.file("/runtime/workspace_reader.py").contents,
+      "entrypoint/workspace_reader.py is stale; refresh it with `cp runtime/workspace_reader.py entrypoint/`",
     )
     null
   }
@@ -2076,6 +2084,7 @@ type E2e {
     let build = changes.layer.file(scope + "/sdk/entrypoint/build.dang").contents
     assertContainsAll(build, ["type PythonModuleBuild", "let defaultBaseImage: String! = \"python:", "let defaultUvImage: String! = \"ghcr.io/astral-sh/uv:"])
     assertNotContains(build, "currentModule", "build.dang still reads the SDK module's source")
+    assertNotContains(build, "import glob, os, re, sys, tomllib", "build.dang still inlines the workspace reader")
 
     null
   }
@@ -2320,7 +2329,7 @@ type E2e {
     let switched = written.after.file(manifestPath).contents
     assertContains(switched, "source = \"./sdk/entrypoint\"", "a module was not given an entrypoint of its own")
     assertNotContains(switched, "manifestVersion", "the entrypoint manifest carries a manifestVersion the engine refuses")
-    ["main.dang", "types.dang", "build.dang"].each { file => assertAdded(written, entrypointPath + "/" + file) }
+    ["main.dang", "types.dang", "build.dang", "workspace_reader.py"].each { file => assertAdded(written, entrypointPath + "/" + file) }
     assert(written.modifiedPaths.filter { path => path.hasPrefix(tomlGenerateModulePath + "/src/") }.length == 0, "generating touched user files")
 
     # The manifest is read as TOML, so a single-quoted name is the same name
@@ -2641,7 +2650,7 @@ type E2e {
     let main = entrypoint.file("main.dang").contents
     assertContains(main, ".withDirectory(workspace.cwd, workspace.directory(\".\", ", "sources does not return the module directory: " + main)
     assert(main.split("workspace.directory(").length == 2, "sources of a module with nothing outside returns more than its directory: " + main)
-    ["main.dang", "types.dang", "build.dang"].each { file =>
+    ["main.dang", "types.dang", "build.dang", "workspace_reader.py"].each { file =>
       assertNotContains(entrypoint.file(file).contents, "resources", file + " still names resources")
     }
     null
