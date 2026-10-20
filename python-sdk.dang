@@ -39,21 +39,56 @@ type PythonSdk {
 
   """
   Find the Python client root containing the workspace cwd: the directory of
-  the nearest pyproject.toml, relative to the workspace root. A generated
-  member, marked `[tool.dagger] generated` in its pyproject.toml, belongs to
-  the scope above it, so that scope answers. A module's vendored client
-  library from before the marker carries its own pyproject.toml too, so the
-  Python module owning it answers instead; a directory with a module config
-  of its own is a module, never a vendored library. Null when there is none.
+  the nearest pyproject.toml, relative to the workspace root, or of the
+  nearest script scope where that is deeper. A generated member, marked
+  `[tool.dagger] generated` in its pyproject.toml, belongs to the scope above
+  it, so that scope answers. A module's vendored client library from before
+  the marker carries its own pyproject.toml too, so the Python module owning
+  it answers instead; a directory with a module config of its own is a
+  module, never a vendored library. Null when there is none.
   """
   pub findClientRoot(ws: Workspace!): String {
     let found = ws.findUp("pyproject.toml")
-    if (found == null) {
+    let project = if (found == null) {
       null
     } else {
       clientRootOf(ws, normalizePath(found.trimSuffix("pyproject.toml")))
     }
+    let script = scriptScopeAbove(ws, ".")
+    if (pathDepth(script) > pathDepth(project)) { script } else { project }
   }
+
+  """
+  The nearest script scope at or above a cwd-relative directory, or null. A
+  main.py without a script block is only code, so the search goes on above it.
+  """
+  let scriptScopeAbove(ws: Workspace!, from: String!): String {
+    let found = ws.findUp(scriptFileName, from: from)
+    if (found == null) {
+      null
+    } else {
+      let scope = normalizePath(found.trimSuffix(scriptFileName))
+      if (isScriptScope(ws, scope)) {
+        scope
+      } else if (scope == ".") {
+        null
+      } else {
+        scriptScopeAbove(ws, "/" + parentPath(scope))
+      }
+    }
+  }
+
+  """
+  A pyproject.toml makes a project scope, whose main.py is only code even
+  with a script block.
+  """
+  let isScriptScope(ws: Workspace!, scope: String!): Boolean! {
+    scopeHasFile(ws, scope, "pyproject.toml") == false and
+      scopeHasFile(ws, scope, scriptFileName) and
+      ScriptMetadata(ws.file("/" + scopePath(scope, scriptFileName)).contents).scriptBlocks.length > 0
+  }
+
+  let scriptFileName: String! = "main.py"
 
   """
   The scope that a pyproject.toml belongs to.
@@ -64,7 +99,7 @@ type PythonSdk {
       # a member of something else, so lift until the file is not a member's.
       let above = ws.findUp("pyproject.toml", from: "/" + parentPath(scope))
       if (above == null) {
-        scope
+        scriptScopeAbove(ws, "/" + parentPath(scope)) ?? scope
       } else {
         clientRootOf(ws, normalizePath(above.trimSuffix("pyproject.toml")))
       }
@@ -816,6 +851,33 @@ type PythonSdk {
       let refusal = withImg.withExec(["pyproject", "python-refusal", "/rendered"]).stdout
       if (refusal != "") { raise refusal + "." } else { withImg.directory("/rendered") }
     }
+  }
+}
+
+"""
+The PEP 723 metadata blocks of a Python file, matched with the PEP's
+reference expression, loosened where the PEP's text, which takes precedence
+over it, allows: a carriage return may end a line, as the reference
+implementation reads the file in text mode, and a block may hold no content
+line, as every field is optional. A block that is not closed is no block.
+"""
+type ScriptMetadata {
+  pub contents: String!
+
+  new(contents: String! = "") {
+    self.contents = contents
+    self
+  }
+
+  """
+  Every `script` block. A file with two still makes a script scope, so the
+  build refuses it with its reason instead of discovery passing over it.
+  """
+  pub scriptBlocks: [String!]! {
+    contents
+      .matchAll("(?m)^# /// ([a-zA-Z0-9-]+)\\r?$\\s((^#(| .*)\\r?$\\s)*)^# ///\\r?$")
+      .filter { m => (m.captures[0] ?? "") == "script" }
+      .map { m => m.string }
   }
 }
 
