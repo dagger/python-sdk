@@ -2,7 +2,8 @@
 The container a Python module runs in, built from its committed files.
 The runtime module, the generated static entrypoint and the shared entrypoint
 under entrypoint/ all share this build; the two entrypoints carry a copy with
-the block below inlined, because neither can read a file of its own.
+the block below inlined, because inside an entrypoint the current module is
+the module it serves.
 """
 type PythonModuleBuild {
   """

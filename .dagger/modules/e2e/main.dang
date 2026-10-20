@@ -1765,20 +1765,16 @@ type E2e {
   """
   runtime/build.dang as the shared entrypoint carries it.
 
-  The engine copies only the .dang files at the top of an entrypoint
-  directory, and `currentModule` inside an entrypoint is the module it serves,
-  so a shared entrypoint can read none of its own non-Dang files. The externals
-  block that reads the pinned Dockerfiles is written out here instead, the same
-  way a generated per-module entrypoint carries it, and the workspace reader is
-  inlined as a string literal.
+  `currentModule` inside an entrypoint is the module it serves, so the
+  externals block that reads the pinned Dockerfiles is written out here
+  instead, the same way a generated per-module entrypoint carries it. The
+  workspace reader is read from the copy beside the build, in the directory
+  the served module names as its entrypoint.
   """
   pub sharedEntrypointBuild(ws: Workspace!): File! {
-    let reader = ws.file("/runtime/workspace_reader.py").contents.trimSuffix("\n").split("\n").map { line =>
-      "    \"" + line.split("\\").join("\\\\").split("\"").join("\\\"") + "\\n\""
-    }
     let pins = "let defaultBaseImage: String! = \"" + imageFrom(ws, "runtime/images/base/Dockerfile") + "\"\n" +
       "  let defaultUvImage: String! = \"" + imageFrom(ws, "runtime/images/uv/Dockerfile") + "\"\n" +
-      "  let workspaceReader: String! =\n" + reader.join(" +\n")
+      "  let workspaceReader: String! { EntrypointFiles().directory.file(\"workspace_reader.py\").contents }"
     let inlined = ws.file("/runtime/build.dang").contents
       .replaceMatches("(?s)#<externals>.*?#</externals>", pins)
     if (inlined.contains("currentModule")) {
@@ -1810,8 +1806,10 @@ type E2e {
   }
 
   """
-  The committed copy of the build in the shared entrypoint matches the runtime
-  module's, so a Dependabot bump to a pinned image reaches both.
+  The committed copies of the build and the workspace reader in the shared
+  entrypoint match the runtime module's, so a Dependabot bump to a pinned
+  image or a change to the reader reaches both. The build reads the reader
+  from its file and does not inline it.
   """
   pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check {
     let want = sharedEntrypointBuild(ws).contents
@@ -1819,6 +1817,11 @@ type E2e {
     assert(
       got == want,
       sharedEntrypointBuildPath + " is stale; refresh it with `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path " + sharedEntrypointBuildPath + "`",
+    )
+    assertNotContains(got, "import glob, os, re, sys, tomllib", sharedEntrypointBuildPath + " inlines the workspace reader")
+    assert(
+      ws.file("/entrypoint/workspace_reader.py").contents == ws.file("/runtime/workspace_reader.py").contents,
+      "entrypoint/workspace_reader.py is stale; refresh it with `cp runtime/workspace_reader.py entrypoint/`",
     )
     null
   }

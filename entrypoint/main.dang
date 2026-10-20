@@ -241,3 +241,40 @@ type Entrypoint implements ModuleEntrypoint {
     }
   }
 }
+
+"""
+This entrypoint's own directory, where its files other than Dang sit.
+
+The engine evaluates only the .dang files at the top of it and hands the
+program nothing else, so the directory is found again from the served
+module's `[entrypoint] source`, resolved as ResolveSource in dagger/dagger's
+core/sdk/entrypoint resolves it.
+"""
+type EntrypointFiles {
+  pub directory: Directory! {
+    # The engine loaded this entrypoint before running it, so the source is a
+    # path that exists in the module, an address or a module reference. A
+    # value with a dot but no scheme or colon is a path only when it exists.
+    if (source.hasPrefix(".")) {
+      currentModule.source.directory(source)
+    } else if (source.contains("://")) {
+      reference
+    } else if (source.contains(":")) {
+      address(source).directory
+    } else if (currentModule.source.exists(source)) {
+      currentModule.source.directory(source)
+    } else {
+      reference
+    }
+  }
+
+  let source: String! {
+    let manifest = json.withContents((JSON.encode(TOML.decode(currentModule.source.file("dagger-module.toml").contents)) :: Dagger.JSON!))
+    manifest.field(["entrypoint", "source"]).asString
+  }
+
+  let reference: Directory! {
+    let resolved = moduleSource(refString: source, disableFindUp: true, allowNotExists: true)
+    resolved.contextDirectory.directory(resolved.sourceRootSubpath)
+  }
+}

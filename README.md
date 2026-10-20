@@ -214,15 +214,18 @@ workspace instead, and can serve the wrong module.
 | --- | --- |
 | `main.dang` | the `ModuleEntrypoint`: `types` and `call` |
 | `build.dang` | the container build, generated from `runtime/build.dang` |
+| `workspace_reader.py` | the workspace reader the build runs, copied from `runtime/workspace_reader.py` |
 
-`build.dang` is generated, not hand-edited: the engine copies only the `.dang`
-files at the top of an entrypoint directory, and `currentModule` inside an
-entrypoint is the module it serves, so a shared entrypoint can read none of its
-own non-Dang files. The externals block that reads `runtime/images/` is written
-out into the copy. The workspace reader in `runtime/workspace_reader.py` is
-inlined into the copy as a string literal. `dagger check -m .dagger/modules/e2e`
-fails when the copy drifts; refresh it with
-`dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`.
+`build.dang` is generated, not hand-edited: `currentModule` inside an
+entrypoint is the module it serves, so the externals block that reads
+`runtime/images/` is written out into the copy. The engine evaluates only the
+`.dang` files at the top of an entrypoint directory and hands the program no
+other file. The build therefore resolves the served module's
+`[entrypoint] source` the way the engine does, and reads `workspace_reader.py`
+from that directory. `dagger check -m .dagger/modules/e2e` fails when either
+copy drifts; refresh them with
+`dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`
+and `cp runtime/workspace_reader.py entrypoint/`.
 
 The address above only resolves once `entrypoint/` is on this repository's
 default branch and a `v1` release is tagged: `@v1` selects the greatest
