@@ -23,6 +23,8 @@ type E2e {
   let staticTypesModulePath: String! = fixtureRoot + "/static-types"
   let runtimeGreeting: String! = "served by the python-sdk runtime"
   let mixedDiscoveryModulePath: String! = fixtureRoot + "/mixed-discovery/ancestor/work/app"
+  let scriptModulePath: String! = fixtureRoot + "/script/app"
+  let emptyScriptPath: String! = fixtureRoot + "/script/empty/app"
   let mixedDiscoveryNestedPath: String! = mixedDiscoveryModulePath + "/nested/deeper"
 
   let legacyBindingsPath: String! = "sdk/src/dagger/client/gen.py"
@@ -2781,6 +2783,176 @@ type E2e {
       called.exitCode == 0 and called.stdout.trimSpace == "hello from greet and text",
       "a module with an outside library did not run from Git:\n" + called.stdout + called.stderr,
     )
+    null
+  }
+
+  """
+  generateScope initializes a script module from the script template: a
+  main.py whose block names sdk/ and core as path sources, its lock, the
+  generated members and the entrypoint generated into it, and no
+  pyproject.toml or uv.lock. The template refuses pip, and a script scope
+  refuses the global client and a scope without a module.
+  """
+  pub scriptInitCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/script-init"
+    let scoped = ws.withNewDirectory("/" + scope, directory).withWorkdir(scope)
+    let initialized = pythonSdk(template: "script").generateScope(scoped, isModule: true, name: "script-init", clients: [])
+    let generated = initialized.withWorkdir(".")
+    let changes = generated.changes(scoped.withWorkdir("."))
+    [
+      "main.py", "main.py.lock", "dagger-module.toml", sdkMemberFile, coreMemberFile, coreInitPath,
+      "sdk/entrypoint/main.dang", "sdk/entrypoint/types.dang",
+    ].each { file => assertAdded(changes, scope + "/" + file) }
+    let root = generated.directory("/" + scope)
+    ["pyproject.toml", "uv.lock", "src"].each { file =>
+      assert(root.exists(file) == false, "a script module got " + file)
+    }
+    assertContainsAll(root.file("dagger-module.toml").contents, ["name = \"script-init\"", "kind = \"dang\"", "source = \"./sdk/entrypoint\""])
+    let script = root.file("main.py").contents
+    assertContainsAll(script, [
+      "# /// script\n",
+      "# dependencies = [\"dagger-io\", \"dagger-clients-core\"]\n",
+      "# dagger-io = { path = \"sdk\" }\n",
+      "# dagger-clients-core = { path = \"clients/core\" }\n",
+      "class ScriptInit:",
+      "from dagger_clients.core import",
+    ])
+    assertContainsNone(script, ["[tool.uv.workspace]", "workspace = true", "{{"])
+    assertContainsAll(root.file("main.py.lock").contents, [
+      "name = \"dagger-io\"",
+      "source = { directory = \"sdk\" }",
+      "name = \"dagger-clients-core\"",
+      "source = { directory = \"clients/core\" }",
+    ])
+    assertContains(root.file("sdk/entrypoint/types.dang").contents, "typeDef.withObject(\"ScriptInit\"", "the entrypoint does not describe the script's main object")
+
+    let pipScope = outputRoot + "/script-pip"
+    let pip = pythonSdk(template: "script", useUv: false)
+      .generateScope(ws.withNewDirectory("/" + pipScope, directory).withWorkdir(pipScope), isModule: true, name: "script-pip", clients: [])
+      .directory(".")
+      .entries
+      .join(", ") rescue {
+        err: Error => err.message
+      }
+    assertContains(pip, "builds with uv only", "the script template was initialized for pip: " + pip)
+
+    let global = initialized.withNewFile("/" + scope + "/main.py", script.replace("# ///\n", "#\n# [tool.dagger]\n# global-client = true\n# ///\n"))
+    let globalRefused = pythonSdk
+      .generateScope(global, isModule: true, name: "script-init", clients: [])
+      .directory(".")
+      .entries
+      .join(", ") rescue {
+        err: Error => err.message
+      }
+    assertContains(globalRefused, "gets no global client", "a script got the global client: " + globalRefused)
+    let plainRefused = pythonSdk
+      .generateScope(initialized, isModule: false, name: "", clients: [])
+      .directory(".")
+      .entries
+      .join(", ") rescue {
+        err: Error => err.message
+      }
+    assertContains(plainRefused, "holds a script without a module", "a script scope was generated without its module: " + plainRefused)
+    null
+  }
+
+  """
+  A script module runs: one call through the entrypoint generated into it
+  and one through this checkout's shared entrypoint, driven through the
+  released CLI from `dagger module init --template script`. An edit of the
+  script's code keeps its dependency install, an edit of its block installs
+  again, and a dependency added to the block without locking it again is
+  refused rather than installed from the old lock.
+  """
+  pub scriptCallCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/script-call"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "script-call", "--path", path, "--template", "script"])
+      .withExec(["test", "-f", path + "/main.py.lock"])
+      .withExec(["test", "!", "-e", path + "/pyproject.toml"])
+    let call = ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]
+    let static = cli(initialized, call).stdout
+    assert(static.trimSpace != "", "the script module did not run on its generated entrypoint")
+    let shared = cli(onCheckoutEntrypoint(initialized, ws, path, "script-call"), call).stdout
+    assert(shared.trimSpace != "", "the script module did not run on the shared entrypoint")
+
+    let scope = outputRoot + "/script-call"
+    let generated = pythonSdk(template: "script")
+      .generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "script-call", clients: [])
+      .withWorkdir(".")
+    let installed = scriptInstalledAt(generated, scope)
+    let scriptPath = "/" + scope + "/main.py"
+    let script = generated.file(scriptPath).contents
+    let edited = generated.withNewFile(scriptPath, script + "\n# edited\n")
+    assert(scriptInstalledAt(edited, scope) == installed, "an edit of the script's code installed its dependencies again")
+    let block = generated.withNewFile(scriptPath, script.replace("# ///\n", "# # edited\n# ///\n"))
+    assert(scriptInstalledAt(block, scope) != installed, "an edit of the script's block kept the install before it")
+    let unlocked = generated.withNewFile(scriptPath, script.replace("\"dagger-clients-core\"]", "\"dagger-clients-core\", \"httpx>=0.20\"]"))
+    let stale = scriptInstalledAt(unlocked, scope) rescue "raised"
+    assert(stale == "raised", "a dependency missing from main.py.lock was not refused")
+    null
+  }
+
+  """
+  When the build installed the SDK files: a dependency install that is
+  cached gives back the same files, and one that runs again writes new ones.
+  """
+  let scriptInstalledAt(generated: Workspace!, path: String!): String! {
+    pythonSdkRuntime
+      .moduleRuntime(modSource: runtimeSource(generated, path), introspectionJson: null)
+      .withExec(["python", "-c", "import os, dagger; print(os.stat(dagger.__file__).st_mtime_ns)"])
+      .stdout
+      .trimSpace
+  }
+
+  """
+  A client of a script module is a path source of its block: generation
+  writes `{ path = "clients/<dir>" }` and the dependency into the block and
+  locks them in main.py.lock, and takes both out with the client, which
+  gives the block back. A script saved with CRLF line ends is still one, and
+  the line generation adds ends the same way. findClientRoot answers with
+  the script scope from inside it, from its generated members, and past a
+  main.py that is only code or opens a block it never closes. A block with
+  no content line is a block, so its script scope answers rather than the
+  project above it.
+  """
+  pub scriptClientCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/script-client"
+    let scriptPath = "/" + scope + "/main.py"
+    let initialized = pythonSdk(template: "script")
+      .generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "script-client", clients: [])
+    let script = initialized.file(scriptPath).contents
+    let withClient = pythonSdk.generateScope(initialized, isModule: true, name: "script-client", clients: [ws.moduleSource("/" + clientDepPath)])
+    let root = withClient.directory("/" + scope)
+    let edited = root.file("main.py").contents
+    assertContainsAll(edited, [
+      "# dependencies = [\"dagger-io\", \"dagger-clients-core\", \"dagger-clients-client-dep\"]\n",
+      "# dagger-clients-client-dep = { path = \"clients/client-dep\" }\n",
+    ])
+    assertContainsNone(edited, ["[tool.uv.workspace]", "workspace = true"])
+    assert(root.exists(clientDepMember + "/pyproject.toml"), "the client of a script was not generated")
+    assertContains(root.file("main.py.lock").contents, "source = { directory = \"clients/client-dep\" }", "the client of a script was not locked")
+
+    let removed = pythonSdk.generateScope(withClient, isModule: true, name: "script-client", clients: [])
+    assert(removed.file(scriptPath).contents == script, "removing the client did not give the block back: " + removed.file(scriptPath).contents)
+    assert(removed.directory("/" + scope).exists(clientDepMember) == false, "the removed client of a script was left")
+
+    let crlf = pythonSdk.generateScope(
+      initialized.withNewFile(scriptPath, script.replace("\n", "\r\n")),
+      isModule: true,
+      name: "script-client",
+      clients: [ws.moduleSource("/" + clientDepPath)],
+    )
+    assert(crlf.directory("/" + scope).exists("pyproject.toml") == false, "a script with CRLF line ends was generated as a project")
+    assertContains(crlf.file(scriptPath).contents, "# dagger-clients-client-dep = { path = \"clients/client-dep\" }\r\n", "the client of a CRLF script was not written with its line end")
+
+    # findUp does not see files added to the workspace, so the scope is a
+    # fixture on disk.
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(scriptModulePath)) == scriptModulePath, "findClientRoot should answer with a script scope")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(scriptModulePath + "/sdk")) == scriptModulePath, "findClientRoot should lift a script's sdk/ to the script")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(scriptModulePath + "/clients/core")) == scriptModulePath, "findClientRoot should lift a script's core to the script")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(scriptModulePath + "/tools")) == scriptModulePath, "findClientRoot should look past a main.py without a script block")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(scriptModulePath + "/unclosed")) == scriptModulePath, "findClientRoot should look past a main.py whose script block is never closed")
+    assert(pythonSdk.findClientRoot(ws.withWorkdir(emptyScriptPath)) == emptyScriptPath, "findClientRoot should answer with a script scope whose block is empty, not the project above it")
     null
   }
 
