@@ -18,7 +18,7 @@ type PythonSdkRuntime {
       moduleName: modName,
     )
 
-    if (modSource.configExists == false or build.source.exists("pyproject.toml") == false) {
+    if (modSource.configExists == false or (build.source.exists("pyproject.toml") == false and build.source.exists("main.py") == false)) {
       raise "module \"" + modName + "\" has no source to trust; run `dagger generate` and commit the generated files"
     } else {
       # After the install, so those layers are shared with the static entrypoint.
