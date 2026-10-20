@@ -8,6 +8,11 @@ so is a plain project. Both get the same tree:
   sdk/              the SDK files, no generated code
   clients/core/     the core bindings
   clients/<name>/   one member per declared client
+
+A script module's scope has a main.py whose PEP 723 block stands for
+pyproject.toml, and no pyproject.toml. A script cannot be a workspace root, so
+its block names sdk/ and each client as a path source, and main.py.lock is
+its lock.
 """
 type Scope {
   """
@@ -51,6 +56,7 @@ type Scope {
   is.
   """
   pub generated: Workspace! {
+    checkScript
     let existing = ws.directory(root)
     let members = clientMembers
     checkNames(members)
@@ -72,29 +78,69 @@ type Scope {
     }
     let file = scopeFile(existing, members, stale)
     checkRuntimeReads(file, members)
-    relocked(existing, withClients.withNewFile(memberPath(scopeFileName), file.contents))
+    relocked(existing, withClients.withNewFile(memberPath(scopeFilePath), file.contents))
+  }
+
+  let script: Boolean! {
+    let existing = ws.directory(root)
+    existing.exists(scopeFileName) == false and
+      existing.exists(scriptFileName) and
+      ScriptMetadata(existing.file(scriptFileName).contents).scriptBlocks.length > 0
+  }
+
+  """
+  What a script scope cannot be, refused before anything is written.
+  """
+  let checkScript: Void {
+    if (script) {
+      if (isModule == false) {
+        raise path + " holds a script without a module: a script scope must be a module's. " +
+          "Initialize a module there, or add a pyproject.toml for a scope without one"
+      }
+      if (migrating) {
+        raise "the module at " + path + " is a script on the builtin Python runtime, which generation does not migrate: " +
+          "move its code into a module initialized with the default template"
+      }
+      if (globalClient) {
+        raise "the module at " + path + " is a script, which gets no global client: " +
+          "remove global-client from the [tool.dagger] table of its script block, and import core from dagger_clients.core"
+      }
+    }
+    null
+  }
+
+  """
+  The file that names the scope's members and sources.
+  """
+  let scopeFilePath: String! {
+    if (script) { scriptFileName } else { scopeFileName }
   }
 
   """
   A module's scope file must say to the runtime what it says to uv, or the
   module generates and then fails to build, or installs a member no one
-  named. Generation asks the runtime which members it reads, asks uv's
-  reading of the TOML, and refuses a file where the two differ either way,
-  or where the runtime refuses to read the members at all.
+  named. Generation asks the runtime which members it reads, or for a script
+  which path sources, asks uv's reading of the TOML, and refuses a file where
+  the two differ either way, or where the runtime refuses to read it at all.
   """
   let checkRuntimeReads(file: File!, members: [ClientMember!]!): Void {
     if (isModule) {
-      # Members are never empty, so a leading newline marks the refusal.
-      let read = pythonSdkRuntime.scopeMembers(file).join("\n") rescue {
+      # Members and sources are never empty, so a leading newline marks the refusal.
+      let read = (if (script) { pythonSdkRuntime.scriptSources(file) } else { pythonSdkRuntime.scopeMembers(file) }).join("\n") rescue {
         err: Error => "\n" + err.message
       }
       let uvReads = PyprojectHelper().tool
         .withFile(toolPath, file)
-        .withExec(["pyproject", "get-members", toolPath])
+        .withExec(["pyproject", if (script) { "get-path-sources" } else { "get-members" }, toolPath])
         .stdout
         .split("\n")
         .filter { line => line != "" }
-      let form = "Write members as an array of strings, not a nested array or other values, then run dagger generate again"
+      let entries = if (script) { "path sources" } else { "workspace members" }
+      let form = if (script) {
+        "Write each source as an inline table, such as dagger-io = { path = \"sdk\" }, then run dagger generate again"
+      } else {
+        "Write members as an array of strings, not a nested array or other values, then run dagger generate again"
+      }
       # The runtime reads [project] dependencies with the members, and names
       # the key it refuses.
       if (read.hasPrefix("\n")) {
@@ -102,9 +148,9 @@ type Scope {
         let m = read.match("(\\S+) is not an array of strings")
         let key = if (m == null) { "" } else { m.captures[0] ?? "" }
         if (key == "") {
-          raise scopeFileName + " of " + path + " cannot be read by the module runtime: " + read.trimSpace
+          raise scopeFilePath + " of " + path + " cannot be read by the module runtime: " + read.trimSpace
         } else {
-          raise scopeFileName + " of " + path + " has " + key + " the module runtime cannot read: " +
+          raise scopeFilePath + " of " + path + " has " + key + " the module runtime cannot read: " +
             key + " is not an array of strings, so the module would not build as written. Write " + key +
             " as an array of strings, not a nested array or other values, then run dagger generate again"
         }
@@ -115,7 +161,7 @@ type Scope {
         if (missed.length > 0 or invented.length > 0) {
           let misses = if (missed.length > 0) { ["misses " + missed.join(", ")] } else { [] :: [String!]! }
           let invents = if (invented.length > 0) { ["reads " + invented.join(", ") + ", which uv does not"] } else { [] :: [String!]! }
-          raise scopeFileName + " of " + path + " lists workspace members the module runtime does not read the way uv does " +
+          raise scopeFilePath + " of " + path + " lists " + entries + " the module runtime does not read the way uv does " +
             "(it " + (misses + invents).join("; ") + "), so the module would not build as written. " + form
         }
       }
@@ -128,6 +174,8 @@ type Scope {
   let coreDirName: String! = "core"
   let scopeFileName: String! = "pyproject.toml"
   let lockFileName: String! = "uv.lock"
+  let scriptFileName: String! = "main.py"
+  let scriptLockFileName: String! = "main.py.lock"
   let sdkDistribution: String! = "dagger-io"
   let coreDistribution: String! = "dagger-clients-core"
 
@@ -175,6 +223,8 @@ type Scope {
     let existing = ws.directory(root)
     let setting = if (existing.exists(scopeFileName)) {
       PyprojectHelper().globalClientSetting(existing.file(scopeFileName))
+    } else if (script) {
+      PyprojectHelper().globalClientSetting(existing.file(scriptFileName))
     } else {
       null
     }
@@ -280,10 +330,11 @@ type Scope {
   A committed uv.lock names the members, so it is locked again against the
   new ones; `uv sync --locked` in the module build refuses a stale lock. The
   uv is the one the module build runs, so the build can read the lock. A
-  scope without a lock gets none.
+  scope without a lock gets none, except a script's, which the build
+  installs from main.py.lock alone.
   """
   let relocked(existing: Directory!, target: Workspace!): Workspace! {
-    if (existing.exists(lockFileName)) {
+    if (script or existing.exists(lockFileName)) {
       let scopeDir = target.directory(root).filter(exclude: [".venv", "**/.venv", "**/__pycache__"])
       # A path dependency of the user's own may sit outside the scope: a
       # package the modules of one repository share. uv reads it to lock, so
@@ -297,13 +348,14 @@ type Scope {
         directory.withDirectory(path, scopeDir)
       }
       let at = "/scope/" + path
+      let lockName = if (script) { scriptLockFileName } else { lockFileName }
       let lockFile = codegenBase
         .withMountedFile("/usr/local/bin/uv", container.from(buildUvImage).rootfs.file("uv"))
         .withDirectory("/scope", tree)
         .withWorkdir(at)
-        .withExec(["uv", "lock"])
-        .file(at + "/" + lockFileName)
-      target.withFile(memberPath(lockFileName), lockFile)
+        .withExec(if (script) { ["uv", "lock", "--script", scriptFileName] } else { ["uv", "lock"] })
+        .file(at + "/" + lockName)
+      target.withFile(memberPath(lockName), lockFile)
     } else {
       target
     }
@@ -621,9 +673,38 @@ type Scope {
 
   The editor removes only the stale members named here, the ones whose
   directory carries the generated marker: any other member under clients/
-  is the user's, and stays in the workspace with its directory.
+  is the user's, and stays in the workspace with its directory. A script has
+  no members: each of its sources is a path source, and the editor removes
+  the stale ones by their names, which are the SDK's.
   """
   let scopeFile(existing: Directory!, members: [ClientMember!]!, stale: [String!]!): File! {
+    if (script) {
+      scriptFile(existing, members)
+    } else {
+      projectFile(existing, members, stale)
+    }
+  }
+
+  let scriptFile(existing: Directory!, members: [ClientMember!]!): File! {
+    let base = [
+      "--path-sources",
+      "--source", sdkDistribution + "=" + sdkDirName,
+      "--source", coreDistribution + "=" + clientsDirName + "/" + coreDirName,
+      "--dependency", coreDistribution,
+    ]
+    let perClient = members.reduce([] :: [String!]!) { flags, member =>
+      flags + [
+        "--source", member.distribution + "=" + clientsDirName + "/" + member.dir,
+        "--dependency", member.distribution,
+      ]
+    }
+    PyprojectHelper().tool
+      .withFile(toolPath, existing.file(scriptFileName))
+      .withExec(["pyproject", "edit-scope", toolPath] + base + perClient)
+      .file(toolPath)
+  }
+
+  let projectFile(existing: Directory!, members: [ClientMember!]!, stale: [String!]!): File! {
     let current = if (existing.exists(scopeFileName)) {
       existing.file(scopeFileName)
     } else {
@@ -656,7 +737,13 @@ type Scope {
       .file(toolPath)
   }
 
-  let toolPath: String! = "/work/pyproject.toml"
+  """
+  The helper reads a .py file as its script block, so the scope file keeps
+  its name.
+  """
+  let toolPath: String! {
+    "/work/" + scopeFilePath
+  }
 
   """
   The code generator's environment, synced once per SDK version and shared by
@@ -801,7 +888,8 @@ type PyprojectHelper {
   like.
   """
   pub globalClientSetting(pyproject: File!): Boolean {
-    let value = tool.withFile(path, pyproject).withExec(["pyproject", "get-global-client", path]).stdout
+    let at = "/work/" + pyproject.name
+    let value = tool.withFile(at, pyproject).withExec(["pyproject", "get-global-client", at]).stdout
     if (value == "true") { true } else if (value == "false") { false } else { null }
   }
 
