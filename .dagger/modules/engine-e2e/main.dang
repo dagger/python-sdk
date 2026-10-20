@@ -37,8 +37,12 @@ type EngineE2e {
       .withExec(["git", "init", "--quiet"])
   }
 
+  """
+  Without ripgrep, the CLI searches a workspace with GNU grep flags, which
+  BusyBox grep rejects.
+  """
   let clientBase: Container! {
-    container.from("alpine:3.22").withExec(["apk", "add", "--no-cache", "git"])
+    container.from("alpine:3.22").withExec(["apk", "add", "--no-cache", "git", "ripgrep"])
   }
 
   """

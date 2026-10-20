@@ -17,3 +17,7 @@ updates:
     groups:
       sdk:
         patterns: ["*"]
+    ignore:
+      # graphql-core 3.3 breaks the code generator, so sdk/codegen keeps it below 3.3.
+      - dependency-name: graphql-core
+        versions: [">=3.3"]
