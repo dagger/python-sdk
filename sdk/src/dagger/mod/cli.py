@@ -6,6 +6,7 @@ import importlib.metadata
 import importlib.util
 import logging
 import os
+import sys
 import typing
 
 import anyio
@@ -23,6 +24,7 @@ logger = logging.getLogger(__package__)
 ENTRY_POINT_NAME: typing.Final[str] = "main_object"
 ENTRY_POINT_GROUP: typing.Final[str] = typing.cast(str, __package__)
 IMPORT_PKG: typing.Final[str] = os.getenv("DAGGER_DEFAULT_PYTHON_PACKAGE", "main")
+SCRIPT_MODULE: typing.Final[str] = "main"
 
 
 def app(mod: Module | None = None, register: bool = False) -> int | None:
@@ -82,6 +84,14 @@ def load_module() -> Module:
 
 def get_entry_point() -> importlib.metadata.EntryPoint:
     """Get the entry point for the main object."""
+    if script := os.getenv("DAGGER_MODULE_SCRIPT"):
+        import_script(script)
+        return importlib.metadata.EntryPoint(
+            group=ENTRY_POINT_GROUP,
+            name=ENTRY_POINT_NAME,
+            value=f"{SCRIPT_MODULE}:{MAIN_OBJECT}",
+        )
+
     sel = importlib.metadata.entry_points(
         group=ENTRY_POINT_GROUP,
         name=ENTRY_POINT_NAME,
@@ -110,3 +120,24 @@ def get_entry_point() -> importlib.metadata.EntryPoint:
         name=ENTRY_POINT_NAME,
         value=f"{import_pkg}:{MAIN_OBJECT}",
     )
+
+
+def import_script(path: str) -> None:
+    """Import a script module's file as the top-level module ``main``.
+
+    A script is no installed package, so nothing finds it by name.
+    """
+    spec = importlib.util.spec_from_file_location(SCRIPT_MODULE, path)
+    if spec is None or spec.loader is None:
+        msg = f"Cannot load the module script '{path}'"
+        raise ModuleLoadError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[SCRIPT_MODULE] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        del sys.modules[SCRIPT_MODULE]
+        logger.exception(
+            "Error while importing Python module '%s' with Dagger functions", path
+        )
+        raise ModuleLoadError(str(e)) from e
