@@ -361,9 +361,59 @@ dagger module init python --name my-module \
 generated into it.
 
 `--template` picks a starter template: `default` (a small working module) when
-you pass nothing, or `empty` for a bare object class. The three
-`pyproject.toml` flags are optional; by default the template's Python version
-is used, uv is enabled, and no base image override is written.
+you pass nothing, `empty` for a bare object class, or `script` for a module in
+a single file, as "Script modules" describes. The three `pyproject.toml` flags
+are optional; by default the template's Python version is used, uv is enabled,
+and no base image override is written. The `script` template takes them in its
+script block.
+
+## Script modules
+
+A module can be one [PEP 723](https://peps.python.org/pep-0723/) script
+instead of a project. The `script` template creates one:
+
+```sh
+dagger module init python --name my-module --template script
+```
+
+The module directory holds these files:
+
+| Path | What it is |
+| --- | --- |
+| `main.py` | the module's code, with a `# /// script` metadata block at the top |
+| `main.py.lock` | the script's lock, written by `uv lock --script main.py` |
+| `sdk/`, `clients/core/`, `clients/<name>/` | the generated SDK files and clients, as in a project module |
+| `dagger-module.toml` | the manifest |
+
+The script block holds what `pyproject.toml` holds in a project module:
+`requires-python`, `dependencies`, and a `[tool]` table. A script cannot be a
+uv workspace root, so the block names `sdk/` and each client as a path source,
+such as `dagger-io = { path = "sdk" }`. `dagger generate` writes these sources
+and the client dependencies into the block, and locks the script again. Every
+other line of `main.py` keeps its bytes.
+
+The SDK tells the layout from the files. A directory with no `pyproject.toml`
+and a `main.py` that holds a `# /// script` block is a script module. No
+command converts a project module into a script module, or back.
+
+The build installs the dependencies from `main.py.lock`, with the sources and
+artifact hashes it records. The build refuses a lock that no longer
+matches the script block: run `dagger generate` to lock the script again. The
+dependency layer reads the script block, the lock and the local packages the
+block names, so an edit of the code below the block reuses it. The SDK loads
+`main.py` as the top-level module `main`.
+
+A script module has these limits:
+
+- It builds with uv. The build refuses `use-uv = false` in the script block,
+  and the `script` template refuses `--use-uv=false`.
+- It gets no global client. Its code imports core from `dagger_clients.core`.
+- Generation does not migrate a script module from a pre-1.0 `dagger.json`.
+- A script scope always holds a module. A scope with clients and no module
+  needs a `pyproject.toml`.
+- Its path sources sit inside the module directory. The entrypoint does not
+  load a path source outside it.
+- `dagger call python-sdk mod config` reads and writes `pyproject.toml` only.
 
 ## Configure an existing module
 
