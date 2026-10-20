@@ -233,15 +233,18 @@ type Mod {
         outside.map { pattern => "--outside=" + pattern })
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
+      .withNewFile("workspace_reader.py", currentModule.source.file("runtime/workspace_reader.py").contents)
   }
 
   """
   runtime/build.dang with its reads of this module's source inlined, so the
-  copy in a generated entrypoint needs nothing but itself.
+  copy in a generated entrypoint needs nothing but itself and the workspace
+  reader written beside it.
   """
   let buildDang: String! {
     let pins = "let defaultBaseImage: String! = \"" + imageFrom("runtime/images/base/Dockerfile") + "\"\n" +
-      "  let defaultUvImage: String! = \"" + imageFrom("runtime/images/uv/Dockerfile") + "\""
+      "  let defaultUvImage: String! = \"" + imageFrom("runtime/images/uv/Dockerfile") + "\"\n" +
+      "  let workspaceReader: String! { source.file(\"" + vendorDirName + "/" + entrypointDirName + "/workspace_reader.py\").contents }"
     let inlined = currentModule.source.file("runtime/build.dang").contents
       .replaceMatches("(?s)#<externals>.*?#</externals>", pins)
     if (inlined.contains("currentModule")) {

@@ -219,8 +219,9 @@ workspace instead, and can serve the wrong module.
 files at the top of an entrypoint directory, and `currentModule` inside an
 entrypoint is the module it serves, so a shared entrypoint can read none of its
 own non-Dang files. The externals block that reads `runtime/images/` is written
-out into the copy. `dagger check -m .dagger/modules/e2e` fails when the copy
-drifts; refresh it with
+out into the copy. The workspace reader in `runtime/workspace_reader.py` is
+inlined into the copy as a string literal. `dagger check -m .dagger/modules/e2e`
+fails when the copy drifts; refresh it with
 `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`.
 
 The address above only resolves once `entrypoint/` is on this repository's
@@ -249,6 +250,7 @@ SDK files:
 | `types.dang` | the module's types, as a literal list of `TypeDef` values |
 | `main.dang` | the `ModuleEntrypoint`: returns the types and runs calls in the module's container |
 | `build.dang` | the container build, copied from `runtime/build.dang` |
+| `workspace_reader.py` | the workspace reader the build runs, copied from `runtime/workspace_reader.py` |
 
 The types come from importing the module in its own container and reading
 what its decorators registered, so they are the ones the runtime would
