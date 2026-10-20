@@ -31,6 +31,10 @@ func main() {
 // get-generated prints nothing for a file that does not parse: such a file is
 // no member of the SDK's, which is all its callers ask.
 //
+// Every command that takes a file reads a .py file as its PEP 723 script
+// block, and writes back only the lines of the block it changes. A script
+// holds at its top level what a pyproject.toml holds under [project].
+//
 // usage: pyproject <command> <file> [value | flags]
 func run(args []string) error {
 	if len(args) < 2 {
@@ -74,13 +78,29 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	var block *scriptBlock
+	if isScript(path) {
+		if block, err = readScriptBlock(path, data); err != nil {
+			return err
+		}
+		data = block.toml()
+	}
+	write := func(out []byte) error {
+		if string(out) == string(data) {
+			return nil
+		}
+		if block != nil {
+			out = block.embed(out)
+		}
+		return os.WriteFile(path, out, 0o644)
+	}
 	switch cmd {
 	case "edit-scope":
-		return runEditScope(path, data, args[2:])
+		return runEditScope(data, args[2:], block != nil, write)
 	case "set-global-client":
-		return runSetGlobalClient(path, data, args)
+		return runSetGlobalClient(data, args, write)
 	case "remove-table":
-		return runRemoveTable(path, data, args)
+		return runRemoveTable(data, args, write)
 	case "get-generated":
 		fmt.Print(generatedKind(data))
 		return nil
@@ -88,6 +108,9 @@ func run(args []string) error {
 	doc, err := load(data)
 	if err != nil {
 		return err
+	}
+	if block != nil {
+		doc = asProject(doc)
 	}
 
 	switch cmd {
@@ -106,6 +129,9 @@ func run(args []string) error {
 		return nil
 	case "get-members":
 		fmt.Print(getMembers(doc))
+		return nil
+	case "get-path-sources":
+		fmt.Print(getPathSources(doc))
 		return nil
 	case "get-global-client":
 		if v, ok := getGlobalClient(doc); ok {
@@ -134,32 +160,50 @@ func run(args []string) error {
 		return fmt.Errorf("unknown command: %s", cmd)
 	}
 
+	if block != nil {
+		doc = fromProject(doc)
+	}
 	out, err := dump(doc)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0o644)
+	return write(out)
 }
 
-// runEditScope sets the SDK-owned entries of a scope pyproject.toml, and
-// leaves the file alone when nothing changes.
+// runEditScope sets the SDK-owned entries of a scope pyproject.toml or
+// script, and leaves the file alone when nothing changes. With
+// --path-sources, each source names its member directory, as S=DIR, and is
+// written as a path source; no workspace is written, since a script cannot
+// be a workspace root.
 //
 // usage: pyproject edit-scope <file> [--member M]... [--stale-member M]... [--source S]...
-// [--dependency D]... [--global-client true|false]
-func runEditScope(path string, data []byte, args []string) error {
+// [--dependency D]... [--global-client true|false] [--path-sources]
+func runEditScope(data []byte, args []string, script bool, write func([]byte) error) error {
 	flags := flag.NewFlagSet("edit-scope", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	var edit scopeEdit
+	edit := scopeEdit{Script: script}
 	flags.Var((*repeated)(&edit.Members), "member", "a workspace member the SDK generates")
 	flags.Var((*repeated)(&edit.Stale), "stale-member", "a workspace member the SDK generated before and removes now")
 	flags.Var((*repeated)(&edit.Sources), "source", "a distribution that resolves to a workspace member")
 	flags.Var((*repeated)(&edit.Dependencies), "dependency", "a generated distribution the project depends on")
 	globalClient := flags.String("global-client", "", "write (true) or clear (false) the global client flag")
+	pathSources := flags.Bool("path-sources", false, "write each source as S=DIR, a path source, and no workspace")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() > 0 {
 		return fmt.Errorf("edit-scope: unexpected argument: %s", flags.Arg(0))
+	}
+	if *pathSources {
+		edit.Paths = map[string]string{}
+		for i, source := range edit.Sources {
+			name, dir, ok := strings.Cut(source, "=")
+			if !ok || name == "" || dir == "" {
+				return fmt.Errorf("edit-scope: --path-sources takes each source as NAME=DIR, not %q", source)
+			}
+			edit.Sources[i] = name
+			edit.Paths[normalizeDistribution(name)] = dir
+		}
 	}
 	switch *globalClient {
 	case "":
@@ -173,17 +217,14 @@ func runEditScope(path string, data []byte, args []string) error {
 	if err != nil {
 		return err
 	}
-	if string(out) == string(data) {
-		return nil
-	}
-	return os.WriteFile(path, out, 0o644)
+	return write(out)
 }
 
 // runSetGlobalClient writes or clears the global client flag and nothing
 // else, so clearing it gives back the file as it was before it was set.
 //
 // usage: pyproject set-global-client <file> true|false
-func runSetGlobalClient(path string, data []byte, args []string) error {
+func runSetGlobalClient(data []byte, args []string, write func([]byte) error) error {
 	v, err := value(args)
 	if err != nil {
 		return err
@@ -195,10 +236,7 @@ func runSetGlobalClient(path string, data []byte, args []string) error {
 	if err != nil {
 		return err
 	}
-	if string(out) == string(data) {
-		return nil
-	}
-	return os.WriteFile(path, out, 0o644)
+	return write(out)
 }
 
 // repeated collects every value of a flag given more than once.
@@ -215,7 +253,7 @@ func (r *repeated) Set(v string) error {
 // when it has no such table.
 //
 // usage: pyproject remove-table <file> <table>
-func runRemoveTable(path string, data []byte, args []string) error {
+func runRemoveTable(data []byte, args []string, write func([]byte) error) error {
 	name, err := value(args)
 	if err != nil {
 		return err
@@ -224,10 +262,7 @@ func runRemoveTable(path string, data []byte, args []string) error {
 	if err != nil {
 		return err
 	}
-	if string(out) == string(data) {
-		return nil
-	}
-	return os.WriteFile(path, out, 0o644)
+	return write(out)
 }
 
 func value(args []string) (string, error) {

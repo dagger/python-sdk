@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -121,4 +123,24 @@ func removeDaggerKey(doc map[string]any, key string) {
 	if len(tool) == 0 {
 		delete(doc, "tool")
 	}
+}
+
+// getPathSources lists the paths of the [tool.uv.sources] path sources uv
+// reads, one a line, cleaned and in source name order.
+func getPathSources(doc map[string]any) string {
+	sources := table(table(table(doc, "tool"), "uv"), "sources")
+	names := make([]string, 0, len(sources))
+	for name := range sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out strings.Builder
+	for _, name := range names {
+		for _, source := range sourceTables(sources[name]) {
+			if p, ok := source["path"].(string); ok {
+				out.WriteString(path.Clean(p) + "\n")
+			}
+		}
+	}
+	return out.String()
 }

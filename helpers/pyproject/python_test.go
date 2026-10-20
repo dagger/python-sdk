@@ -74,6 +74,12 @@ func TestPythonRefusal(t *testing.T) {
 		"range the runtime ignores": {map[string]string{"pyproject.toml": project("~=3.11")}, ""},
 		"no requires-python":        {map[string]string{"pyproject.toml": "[project]\nname = \"app\"\n"}, ""},
 		"no pyproject.toml":         {map[string]string{}, ""},
+		"older script":              {map[string]string{"main.py": "# /// script\n# requires-python = \">=3.11\"\n# ///\n"}, "asks for Python 3.11."},
+		"pyproject.toml over script": {
+			map[string]string{"pyproject.toml": project(">=3.14"), "main.py": "# /// script\n# requires-python = \">=3.11\"\n# ///\n"},
+			"",
+		},
+		"main.py without a block": {map[string]string{"main.py": "print('hello')\n"}, ""},
 		"older pin": {
 			map[string]string{".python-version": "3.11.9\n", "pyproject.toml": project(">=3.14")},
 			"this Python SDK needs Python 3.12 or later, and .python-version pins Python 3.11.9. Set it to Python 3.12 or later, or pin the last release",

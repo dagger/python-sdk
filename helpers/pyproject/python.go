@@ -57,11 +57,7 @@ func atoi(s string) int {
 // The Python is read the way baseImageFor and pythonVersionFor in
 // runtime/build.dang pick the base image; keep them in step.
 func pythonRefusal(dir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "pyproject.toml"))
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return "", err
-	}
-	doc, err := load(data)
+	doc, err := moduleProject(dir)
 	if err != nil {
 		return "", err
 	}
@@ -92,6 +88,35 @@ func pythonRefusal(dir string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// moduleProject reads a module's pyproject.toml, or where it has none, the
+// script block of its main.py.
+func moduleProject(dir string) (map[string]any, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "pyproject.toml"))
+	if err == nil {
+		return load(data)
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	script := filepath.Join(dir, "main.py")
+	data, err = os.ReadFile(script)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	block, err := findScriptBlock(script, data)
+	if err != nil || block == nil {
+		return map[string]any{}, err
+	}
+	doc, err := load(block.toml())
+	if err != nil {
+		return nil, err
+	}
+	return asProject(doc), nil
 }
 
 func remedy(fix, v string) string {

@@ -628,3 +628,84 @@ func TestRemoveTableKeepsEveryOtherByte(t *testing.T) {
 		})
 	}
 }
+
+const scriptTemplate = `requires-python = ">=3.14"
+dependencies = ["dagger-io", "dagger-clients-core"]
+
+[tool.uv.sources]
+dagger-io = { path = "sdk" }
+dagger-clients-core = { path = "clients/core" }
+`
+
+func scriptEdit(clients ...string) scopeEdit {
+	e := scopeEdit{
+		Sources:      []string{"dagger-io", "dagger-clients-core"},
+		Dependencies: []string{"dagger-clients-core"},
+		Script:       true,
+		Paths:        map[string]string{"dagger-io": "sdk", "dagger-clients-core": "clients/core"},
+	}
+	for _, client := range clients {
+		e.Sources = append(e.Sources, "dagger-clients-"+client)
+		e.Dependencies = append(e.Dependencies, "dagger-clients-"+client)
+		e.Paths["dagger-clients-"+client] = "clients/" + client
+	}
+	return e
+}
+
+func TestEditScopeWritesAScriptsPathSources(t *testing.T) {
+	if got := mustEdit(t, scriptTemplate, scriptEdit()); got != scriptTemplate {
+		t.Errorf("a script that already matches was rewritten:\n%s", got)
+	}
+	got := mustEdit(t, scriptTemplate, scriptEdit("linter"))
+	want := `requires-python = ">=3.14"
+dependencies = ["dagger-io", "dagger-clients-core", "dagger-clients-linter"]
+
+[tool.uv.sources]
+dagger-io = { path = "sdk" }
+dagger-clients-core = { path = "clients/core" }
+dagger-clients-linter = { path = "clients/linter" }
+`
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	if got := mustEdit(t, want, scriptEdit()); got != scriptTemplate {
+		t.Errorf("removing the client left:\n%s", got)
+	}
+}
+
+func TestEditScopeTurnsOtherSourcesIntoAScriptsPaths(t *testing.T) {
+	src := `dependencies = ["httpx"]
+
+[tool.uv.sources.dagger-io]
+workspace = true
+
+[tool.uv.sources.dagger-clients-core]
+path = "elsewhere"
+editable = true
+`
+	want := `dependencies = ["httpx", "dagger-clients-core"]
+
+[tool.uv.sources.dagger-io]
+path = "sdk"
+
+[tool.uv.sources.dagger-clients-core]
+path = "clients/core"
+`
+	if got := mustEdit(t, src, scriptEdit()); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestEditScopeAddsAScriptsMissingEntries(t *testing.T) {
+	got := mustEdit(t, "requires-python = \">=3.14\"\n", scriptEdit())
+	want := `requires-python = ">=3.14"
+dependencies = ["dagger-clients-core"]
+
+[tool.uv.sources]
+dagger-io = { path = "sdk" }
+dagger-clients-core = { path = "clients/core" }
+`
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}

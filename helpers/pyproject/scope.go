@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -14,12 +15,33 @@ import (
 // members it generates, their sources, and the generated distributions the
 // project depends on. Stale names the members generation made before and
 // removes now; GlobalClient nil leaves the flag as it is.
+//
+// A script scope holds its dependencies at the top level, and is no
+// workspace: Paths maps each source to the member directory it is a path
+// source for, and no members are written.
 type scopeEdit struct {
 	Members      []string
 	Stale        []string
 	Sources      []string
 	Dependencies []string
 	GlobalClient *bool
+	Script       bool
+	Paths        map[string]string
+}
+
+// sourceFields is the inline table a source is written as, without braces.
+func (e scopeEdit) sourceFields(name string) string {
+	if dir, ok := e.Paths[normalizeDistribution(name)]; ok {
+		return "path = " + quote(dir)
+	}
+	return "workspace = true"
+}
+
+func (e scopeEdit) projectTable() string {
+	if e.Script {
+		return ""
+	}
+	return "project"
 }
 
 // ownedMember reports whether generation may remove a workspace member. The
@@ -67,10 +89,12 @@ func editScope(src []byte, edit scopeEdit) ([]byte, error) {
 	}
 	d := &document{text: string(src)}
 
-	d.editArray("tool.uv.workspace", "members", edit.Members, edit.ownedMember, normalizeMember, true)
-	d.editSources(edit.Sources)
-	if d.section("project") != nil {
-		d.editArray("project", "dependencies", edit.Dependencies, ownedDependency, dependencyName, false)
+	if edit.Paths == nil {
+		d.editArray("tool.uv.workspace", "members", edit.Members, edit.ownedMember, normalizeMember, true)
+	}
+	d.editSources(edit.Sources, edit.sourceFields)
+	if d.section(edit.projectTable()) != nil {
+		d.editArray(edit.projectTable(), "dependencies", edit.Dependencies, ownedDependency, dependencyName, false)
 	}
 	if edit.GlobalClient != nil {
 		d.editGlobalClient(*edit.GlobalClient)
@@ -104,15 +128,17 @@ func checkScope(out []byte, edit scopeEdit) error {
 		return fmt.Errorf("pyproject.toml has a layout the SDK cannot edit: %s", what)
 	}
 	uv := table(table(doc, "tool"), "uv")
-	members, _ := table(uv, "workspace")["members"].([]any)
-	if err := checkList(members, edit.Members, edit.ownedMember, normalizeMember); err != nil {
-		return fail("[tool.uv.workspace] members " + err.Error() + ". " + workspaceForm + regenerate)
+	if edit.Paths == nil {
+		members, _ := table(uv, "workspace")["members"].([]any)
+		if err := checkList(members, edit.Members, edit.ownedMember, normalizeMember); err != nil {
+			return fail("[tool.uv.workspace] members " + err.Error() + ". " + workspaceForm + regenerate)
+		}
 	}
 	sources := table(uv, "sources")
 	for _, name := range edit.Sources {
 		source, _ := sources[name].(map[string]any)
-		if workspace, _ := source["workspace"].(bool); !workspace || len(source) != 1 {
-			return fail("[tool.uv.sources] lacks " + name + " = { workspace = true }. Write " + sourcesForm + regenerate)
+		if !sameSource(source, edit.sourceFields(name)) {
+			return fail("[tool.uv.sources] lacks " + name + " = { " + edit.sourceFields(name) + " }. Write " + sourcesForm + regenerate)
 		}
 	}
 	for name := range sources {
@@ -120,7 +146,11 @@ func checkScope(out []byte, edit scopeEdit) error {
 			return fail("[tool.uv.sources] keeps " + name + ". Write " + sourcesForm + regenerate)
 		}
 	}
-	if project := table(doc, "project"); project != nil {
+	project := table(doc, "project")
+	if edit.Script {
+		project = doc
+	}
+	if project != nil {
 		dependencies, _ := project["dependencies"].([]any)
 		if err := checkList(dependencies, edit.Dependencies, ownedDependency, dependencyName); err != nil {
 			return fail("[project] dependencies " + err.Error())
@@ -747,13 +777,13 @@ func stringValue(seg string) (string, bool) {
 	return "", false
 }
 
-// editSources points every owned source at the workspace, drops the owned
+// editSources writes every owned source as its fields say, drops the owned
 // ones that are gone, and keeps the user's. A source is a key of
 // [tool.uv.sources] or a table of its own, [tool.uv.sources.<name>], which is
 // how a file re-marshaled by a TOML library writes it; a new source follows
 // the file's style.
-func (d *document) editSources(want []string) {
-	tables := d.editSourceTables(want)
+func (d *document) editSources(want []string, fields func(string) string) {
+	tables := d.editSourceTables(want, fields)
 
 	var stale []int
 	var keep, present []string
@@ -781,7 +811,7 @@ func (d *document) editSources(want []string) {
 		}
 		for _, key := range dottedNames {
 			lines := dotted[normalizeDistribution(key)]
-			if len(lines) == 1 && isWorkspaceLine(d.text[lines[0].start:lines[0].end]) {
+			if len(lines) == 1 && isSourceLine(d.text[lines[0].start:lines[0].end], fields(key)) {
 				present = append(present, key)
 				continue
 			}
@@ -798,8 +828,8 @@ func (d *document) editSources(want []string) {
 	}
 	for _, key := range keep {
 		kv := d.findKey(d.section(sourcesTable), key)
-		if !isWorkspaceSource(d.text[kv.valueStart:kv.valueEnd]) {
-			d.replace(kv.valueStart, kv.valueEnd, "{ workspace = true }")
+		if !isSourceValue(d.text[kv.valueStart:kv.valueEnd], fields(key)) {
+			d.replace(kv.valueStart, kv.valueEnd, "{ "+fields(key)+" }")
 		}
 	}
 	present = append(present, keep...)
@@ -808,10 +838,10 @@ func (d *document) editSources(want []string) {
 			continue
 		}
 		if d.section(sourcesTable) == nil && len(tables) > 0 {
-			d.appendSourceTable(w)
+			d.appendSourceTable(w, fields(w))
 			continue
 		}
-		d.insertLine(d.ensureSection(sourcesTable), w+" = { workspace = true }")
+		d.insertLine(d.ensureSection(sourcesTable), w+" = { "+fields(w)+" }")
 	}
 }
 
@@ -825,8 +855,8 @@ func sourceTableName(sec section) (string, bool) {
 // editSourceTables applies editSources to the sources written as tables, one
 // edit at a time because each moves the offsets after it, and returns the
 // names of every source table left.
-func (d *document) editSourceTables(want []string) []string {
-	for d.editOneSourceTable(want) {
+func (d *document) editSourceTables(want []string, fields func(string) string) []string {
+	for d.editOneSourceTable(want, fields) {
 	}
 	var names []string
 	for _, sec := range d.sections() {
@@ -837,7 +867,7 @@ func (d *document) editSourceTables(want []string) []string {
 	return names
 }
 
-func (d *document) editOneSourceTable(want []string) bool {
+func (d *document) editOneSourceTable(want []string, fields func(string) string) bool {
 	for _, sec := range d.sections() {
 		name, ok := sourceTableName(sec)
 		if !ok || !ownedSource(normalizeDistribution(name)) {
@@ -848,10 +878,10 @@ func (d *document) editOneSourceTable(want []string) bool {
 			return true
 		}
 		body := d.text[sec.bodyStart:sec.bodyEnd]
-		if !isWorkspaceTable(body) {
+		if !isSourceTable(body, fields(name)) {
 			// The blank lines that part it from the next table stay.
 			end := sec.bodyStart + len(strings.TrimRight(body, " \t\r\n"))
-			d.replace(sec.bodyStart, end, "workspace = true")
+			d.replace(sec.bodyStart, end, fields(name))
 			return true
 		}
 	}
@@ -860,7 +890,7 @@ func (d *document) editOneSourceTable(want []string) bool {
 
 // appendSourceTable adds a source table after the last one, before the blank
 // lines that part it from what follows.
-func (d *document) appendSourceTable(name string) {
+func (d *document) appendSourceTable(name, fields string) {
 	var last section
 	for _, sec := range d.sections() {
 		if _, ok := sourceTableName(sec); ok {
@@ -875,16 +905,24 @@ func (d *document) appendSourceTable(name string) {
 		d.text = d.text[:at] + "\n" + d.text[at:]
 		at++
 	}
-	d.text = d.text[:at] + "\n[" + sourcesTable + "." + name + "]\nworkspace = true\n" + d.text[at:]
+	d.text = d.text[:at] + "\n[" + sourcesTable + "." + name + "]\n" + fields + "\n" + d.text[at:]
 }
 
-func isWorkspaceTable(body string) bool {
+// sameSource reports whether a source holds exactly the given fields.
+func sameSource(source map[string]any, fields string) bool {
+	var want map[string]any
+	if err := toml.Unmarshal([]byte(fields), &want); err != nil {
+		return false
+	}
+	return source != nil && reflect.DeepEqual(source, want)
+}
+
+func isSourceTable(body, fields string) bool {
 	var source map[string]any
 	if err := toml.Unmarshal([]byte(body), &source); err != nil {
 		return false
 	}
-	workspace, _ := source["workspace"].(bool)
-	return workspace && len(source) == 1
+	return sameSource(source, fields)
 }
 
 const keyPart = `(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)`
@@ -901,28 +939,26 @@ func lineKey(text string) (string, bool, bool) {
 	return strings.Trim(m[1], `"'`), m[2] != "", true
 }
 
-// isWorkspaceLine reports whether one line alone makes a workspace source.
-func isWorkspaceLine(text string) bool {
+// isSourceLine reports whether one line alone makes the source.
+func isSourceLine(text, fields string) bool {
 	var parsed map[string]any
 	if err := toml.Unmarshal([]byte(text), &parsed); err != nil || len(parsed) != 1 {
 		return false
 	}
 	for _, v := range parsed {
 		source, _ := v.(map[string]any)
-		workspace, _ := source["workspace"].(bool)
-		return workspace && len(source) == 1
+		return sameSource(source, fields)
 	}
 	return false
 }
 
-func isWorkspaceSource(value string) bool {
+func isSourceValue(value, fields string) bool {
 	var parsed map[string]any
 	if err := toml.Unmarshal([]byte("x = "+value), &parsed); err != nil {
 		return false
 	}
 	source, _ := parsed["x"].(map[string]any)
-	workspace, _ := source["workspace"].(bool)
-	return workspace && len(source) == 1
+	return sameSource(source, fields)
 }
 
 // editGlobalClient writes or clears [tool.dagger] global-client, pruning a
