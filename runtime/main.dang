@@ -39,6 +39,14 @@ type PythonSdkRuntime {
   }
 
   """
+  The path sources this runtime reads from a script's block. Generation
+  checks the script it writes with it.
+  """
+  pub scriptSources(script: File!): [String!]! {
+    PythonModuleBuild().scriptSources(script)
+  }
+
+  """
   The class name of a module's main object.
   """
   pub mainObjectName(name: String!): String! {

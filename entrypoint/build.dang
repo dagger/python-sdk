@@ -37,6 +37,8 @@ type PythonModuleBuild {
   let clientsDir: String! = "clients"
   let sdkGenPath: String! = "src/dagger/client/gen.py"
   let projectCfg: String! = "pyproject.toml"
+  let scriptCfg: String! = "main.py"
+  let scriptLock: String! = "main.py.lock"
   let pipCompileLock: String! = "requirements.lock"
   let uvLock: String! = "uv.lock"
   let uvCacheVolume: String! = "modpython-uv"
@@ -58,12 +60,15 @@ type PythonModuleBuild {
   of that name would shadow the global `container` that `base` starts from.
   """
   pub installed: Container! {
-    if (source.exists(projectCfg) == false) {
+    if (source.exists(projectCfg) == false and scriptBlock(source) == "") {
       raise "module \"" + moduleName + "\" has no " + projectCfg + "; run `dagger generate` and commit the generated files"
     } else if (hasPythonFiles(source) == false) {
       raise "no python files found in module source"
     } else {
       let cfg = pyConfig(contextDir, subPath)
+      if (cfg.script and cfg.useUv == false) {
+        raise "module \"" + moduleName + "\" is a script, which builds with uv only: remove use-uv = false from the script block of " + scriptCfg
+      }
       checkGeneratedFiles(source, moduleName, requiredGeneratedFiles(source, cfg))
 
       let baseImage = baseImageFor(source, cfg)
@@ -94,6 +99,13 @@ type PythonModuleBuild {
   """
   pub scopeMembers(pyproject: File!): [String!]! {
     pyConfig(directory.withFile(projectCfg, pyproject), ".").members
+  }
+
+  """
+  The path sources of a script's block, read as the build does.
+  """
+  pub scriptSources(script: File!): [String!]! {
+    pyConfig(directory.withFile(scriptCfg, script), ".").sources
   }
 
   """
@@ -172,11 +184,29 @@ type PythonModuleBuild {
   source edit leaves this layer cached. The SDK files and the generated
   clients are installed non-editable so uv compiles their bytecode once, not
   on every call into a throwaway mount.
+
+  A script's main.py is its code too, so only its block goes in, and the
+  layer is cached until the block changes.
   """
   let dependencies(ctr: Container!, source: Directory!, cfg: PyConfig!): Container! {
     if (cfg.useUv == false) {
       # pip installs a project's dependencies only with the project itself.
       ctr
+    } else if (cfg.script) {
+      let inputs = dependencyInputs(cfg).withNewFile(join(subPath, scriptCfg).trimPrefix("./"), scriptBlock(source))
+      let inputsPath = modSourceDirPath + "/" + inputs.digest
+      ctr
+        .withExec(["uv", "venv", venvPath])
+        .withEnvVariable("VIRTUAL_ENV", venvPath)
+        .withWorkdir(join(inputsPath, subPath))
+        .withMountedDirectory(inputsPath, inputs)
+        # Installed from the lock, with the sources and artifact hashes it
+        # records, and --locked refuses a lock the block no longer matches, as
+        # a project's sync does. --active installs into VIRTUAL_ENV instead of
+        # an environment uv keeps for the script.
+        .withExec(["uv", "sync", "--script", scriptCfg, "--locked", "--active", "--no-editable"])
+        .withoutMount(inputsPath)
+        .withEnvVariable("PATH", "$VIRTUAL_ENV/bin:$PATH", expand: true)
     } else {
       let inputs = dependencyInputs(cfg)
       # Unique per input, for the same reason as the source's own path.
@@ -209,10 +239,13 @@ type PythonModuleBuild {
   }
 
   """
-  The module's own package, editable, on top of its dependencies.
+  The module's own package, editable, on top of its dependencies. A script is
+  no package: the SDK loads it from its file.
   """
   let install(ctr: Container!, source: Directory!, cfg: PyConfig!): Container! {
-    if (cfg.useUv and source.exists(uvLock)) {
+    if (cfg.script) {
+      ctr.withEnvVariable("DAGGER_MODULE_SCRIPT", scriptCfg)
+    } else if (cfg.useUv and source.exists(uvLock)) {
       # uv pip ignores VIRTUAL_ENV while UV_SYSTEM_PYTHON is set.
       ctr.withExec(["uv", "pip", "install", "--python", venvPath + "/bin/python", "--no-deps", "-e", "."])
     } else if (cfg.useUv) {
@@ -288,15 +321,18 @@ type PythonModuleBuild {
   changes. A file that does not read is named.
   """
   let workspaceRead(dir: Directory!, sub: String!): [String!]! {
+    let files = filesOf(
+      dir,
+      include: ["**/" + projectCfg, "**/uv.toml", "**/.python-version", "**/" + pipCompileLock],
+      # No member lives in these, and a virtualenv alone holds hundreds of
+      # pyproject.toml files that would reach the read and its cache key.
+      exclude: ["**/.venv", "**/__pycache__", "**/node_modules", "**/.git"],
+    )
+    let block = scriptBlock(subdir(dir, sub))
+    let scope = if (block == "") { files } else { files.withNewFile(join(sub, scriptCfg).trimPrefix("./"), block) }
     let lines = container
       .from(defaultBaseImage)
-      .withMountedDirectory("/scope", filesOf(
-        dir,
-        include: ["**/" + projectCfg, "**/uv.toml", "**/.python-version", "**/" + pipCompileLock],
-        # No member lives in these, and a virtualenv alone holds hundreds of
-        # pyproject.toml files that would reach the read and its cache key.
-        exclude: ["**/.venv", "**/__pycache__", "**/node_modules", "**/.git"],
-      ))
+      .withMountedDirectory("/scope", scope)
       .withExec(["python", "-c", workspaceReader, "/scope", sub, genDir])
       .stdout
       .split("\n")
@@ -311,10 +347,15 @@ type PythonModuleBuild {
 
   """
   The generated files a module needs before it builds. A scope needs each of
-  the SDK's members it lists; a user's member is the user's to provide.
+  the SDK's members it lists, and a script each it names as a path source,
+  and its lock; a user's member is the user's to provide.
   """
   let requiredGeneratedFiles(source: Directory!, cfg: PyConfig!): [String!]! {
-    if (cfg.isScope) {
+    if (cfg.script) {
+      cfg.sources
+        .filter { path => path == genDir or path.hasPrefix(clientsDir + "/") }
+        .map { path => path + "/" + projectCfg } + [scriptLock]
+    } else if (cfg.isScope) {
       cfg.members
         .filter { member =>
           (member == genDir or member.hasPrefix(clientsDir + "/")) and member.contains("*") == false
@@ -401,6 +442,25 @@ type PythonModuleBuild {
     }
   }
 
+  """
+  The PEP 723 script block of a module's main.py, from `# /// script` to
+  `# ///`, or empty for a module with a pyproject.toml or no such block. A
+  carriage return may end each line, as the reader's text mode takes it, and
+  a block may hold no content line, as every field is optional.
+  Every script block is kept, so the workspace reader refuses more than one.
+  """
+  let scriptBlock(source: Directory!): String! {
+    if (source.exists(projectCfg) or source.exists(scriptCfg) == false) {
+      ""
+    } else {
+      source.file(scriptCfg).contents
+        .matchAll("(?m)^# /// ([a-zA-Z0-9-]+)\\r?$\\s((^#(| .*)\\r?$\\s)*)^# ///\\r?$")
+        .filter { m => (m.captures[0] ?? "") == "script" }
+        .map { m => m.string + "\n" }
+        .join("\n")
+    }
+  }
+
   let hasPythonFiles(source: Directory!): Boolean! {
     source.glob("src/**/*.py").length > 0 or source.glob("*.py").length > 0
   }
@@ -455,6 +515,8 @@ type PythonModuleBuild {
       inputs: readLines(workspace, "input"),
       indexURL: setting(workspace, "indexURL"),
       extraIndexURL: setting(workspace, "extraIndexURL"),
+      script: setting(workspace, "script") == "true",
+      sources: readLines(workspace, "source"),
     )
   }
 
@@ -470,7 +532,7 @@ type PythonModuleBuild {
 }
 
 """
-What this runtime reads from a module's pyproject.toml.
+What this runtime reads from a module's pyproject.toml, or a script's block.
 """
 type PyConfig {
   pub projectName: String!
@@ -498,6 +560,17 @@ type PyConfig {
   pub indexURL: String!
   pub extraIndexURL: String!
 
+  """
+  Whether the module is a script: a main.py whose PEP 723 block stands for
+  pyproject.toml, with no workspace.
+  """
+  pub script: Boolean!
+
+  """
+  The path sources of a script's block.
+  """
+  pub sources: [String!]!
+
   new(
     projectName: String! = "",
     requiresPython: String! = "",
@@ -510,6 +583,8 @@ type PyConfig {
     inputs: [String!]! = [],
     indexURL: String! = "",
     extraIndexURL: String! = "",
+    script: Boolean! = false,
+    sources: [String!]! = [],
   ) {
     self.projectName = projectName
     self.requiresPython = requiresPython
@@ -522,6 +597,8 @@ type PyConfig {
     self.inputs = inputs
     self.indexURL = indexURL
     self.extraIndexURL = extraIndexURL
+    self.script = script
+    self.sources = sources
     self
   }
 

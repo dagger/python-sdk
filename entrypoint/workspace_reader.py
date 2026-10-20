@@ -36,12 +36,33 @@ def reads_beside(rel, project):
     uv = {key: value for key, value in table(project, 'tool', 'uv').items() if key != 'sources'}
     tool = dict(table(project, 'tool'), uv=uv)
     return names_parent(dict(project, tool=tool)) or os.path.exists(os.path.join(module, rel, 'uv.toml'))
+def load_script():
+    try:
+        with open(os.path.join(module, 'main.py'), encoding='utf-8') as f:
+            text = f.read()
+    except (UnicodeDecodeError, OSError) as e:
+        fail(f'main.py does not read: {e}')
+    # PEP 723's reference expression, and its rule against more than one block.
+    # The PEP's text, which takes precedence, allows a block with no content line.
+    pattern = r'(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)*)^# ///$'
+    blocks = [m for m in re.finditer(pattern, text) if m.group('type') == 'script']
+    if len(blocks) != 1:
+        fail(f'main.py has {len(blocks)} `# /// script` metadata blocks, where a script module has exactly one')
+    lines = blocks[0].group('content').splitlines(keepends=True)
+    try:
+        return tomllib.loads(''.join(line[2:] if line.startswith('# ') else line[1:] for line in lines))
+    except tomllib.TOMLDecodeError as e:
+        fail(f'the script block of main.py is not valid TOML: {e}')
 def name(requirement):
     m = re.match(r'\s*([A-Za-z0-9][A-Za-z0-9._-]*)', requirement if isinstance(requirement, str) else '')
     return re.sub(r'[-_.]+', '-', m.group(1).lower()) if m else ''
-doc = load('.')
-members = strings(table(doc, 'tool', 'uv', 'workspace').get('members'), 'members', 'pyproject.toml')
-wanted = {name(r) for r in strings(table(doc, 'project').get('dependencies'), 'dependencies', 'pyproject.toml')}
+# A script holds at its top level what a pyproject.toml holds under [project],
+# and is no workspace root.
+script = not os.path.exists(os.path.join(module, 'pyproject.toml')) and os.path.exists(os.path.join(module, 'main.py'))
+doc = load_script() if script else load('.')
+scope_project = doc if script else table(doc, 'project')
+members = [] if script else strings(table(doc, 'tool', 'uv', 'workspace').get('members'), 'members', 'pyproject.toml')
+wanted = {name(r) for r in strings(scope_project.get('dependencies'), 'dependencies', 'main.py' if script else 'pyproject.toml')}
 dirs = []
 for member in members:
     print('member\t' + member)
@@ -65,7 +86,7 @@ while True:
 for rel in dirs:
     if rel in needed:
         print('local\t./' + rel)
-inputs = ['pyproject.toml', 'uv.lock', 'uv.toml', '.python-version'] + dirs + ([] if vendored in members else [vendored])
+inputs = (['main.py.lock'] if script else ['pyproject.toml', 'uv.lock']) + ['uv.toml', '.python-version'] + dirs + ([] if vendored in members else [vendored])
 paths = []
 sourced = {}
 pending = list(docs.items())
@@ -80,6 +101,8 @@ while pending:
             if path in paths:
                 continue
             paths.append(path)
+            if rel == '.' and script:
+                print('source\t' + path)
             if path not in dirs and not os.path.isabs(path) and not outside(path) and os.path.exists(os.path.join(module, path, 'pyproject.toml')):
                 sourced[path] = load(path)
                 pending.append((path, sourced[path]))
@@ -94,7 +117,8 @@ for uv in settings + [table(uv, 'pip') for uv in settings]:
     for key in ('extra-index-url', 'find-links'):
         urls += uv.get(key) if isinstance(uv.get(key), list) else []
 whole = any(isinstance(url, str) and '://' not in url for url in urls)
-whole = whole or any('project' not in member or bool(set(table(member, 'project').get('dynamic') or []) - {'version'}) for member in list(docs.values()) + list(sourced.values()))
+whole = whole or any('project' not in member or bool(set(table(member, 'project').get('dynamic') or []) - {'version'}) for member in [docs[rel] for rel in dirs] + list(sourced.values()))
+whole = whole or (not script and ('project' not in doc or bool(set(scope_project.get('dynamic') or []) - {'version'})))
 whole = whole or os.path.exists(os.path.join(module, 'requirements.lock'))
 whole = whole or any(os.path.isabs(path) or outside(path) for path in inputs)
 # The module itself installs after the source mount, so members, path sources and the
@@ -116,19 +140,19 @@ def text(value):
     return value if isinstance(value, str) and '\t' not in value and '\n' not in value else ''
 def flag(value, default):
     return value if isinstance(value, bool) else default
-project = table(doc, 'project')
 dagger = table(doc, 'tool', 'dagger')
 indexes = table(doc, 'tool', 'uv').get('index')
 indexes = [index for index in (indexes if isinstance(indexes, list) else [indexes]) if isinstance(index, dict) and text(index.get('name')) == '']
 settings = {
-    'projectName': text(project.get('name')),
-    'requiresPython': text(project.get('requires-python')),
+    'projectName': text(scope_project.get('name')),
+    'requiresPython': text(scope_project.get('requires-python')),
     'baseImage': text(dagger.get('base-image')),
     'useUv': 'true' if flag(dagger.get('use-uv'), True) else 'false',
     'uvVersion': text(dagger.get('uv-version')),
     'vendorPath': text(table(doc, 'tool', 'uv', 'sources', 'dagger-io').get('path')),
     'indexURL': next((text(index.get('url')) for index in indexes if flag(index.get('default'), False)), ''),
     'extraIndexURL': next((text(index.get('url')) for index in indexes if not flag(index.get('default'), False)), ''),
+    'script': 'true' if script else 'false',
 }
 for key, value in settings.items():
     print('setting\t' + key + '\t' + value)
