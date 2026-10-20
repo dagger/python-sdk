@@ -825,17 +825,22 @@ type PythonSdk {
   }
 
   """
-  Apply non-default configuration flags to a rendered template's pyproject.toml.
+  Apply non-default configuration flags to a rendered template's pyproject.toml,
+  or to the script block of its main.py for a template without one.
 
   When all flags are at their defaults, the source is returned unchanged (no
   helper run, no reformatting). When any flag is non-default, the helper
-  re-marshals pyproject.toml, normalizing formatting while preserving all data.
+  re-marshals the TOML, normalizing formatting while preserving all data.
   """
   let configuredTemplate(source: Directory!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
     if (pythonVersion == "" and useUv and baseImage == "") {
       source
     } else {
-      let pyproj = "/rendered/pyproject.toml"
+      let script = source.exists("pyproject.toml") == false
+      if (script and useUv == false) {
+        raise "a script module builds with uv only: set useUv to true, or pick a template with a pyproject.toml"
+      }
+      let pyproj = if (script) { "/rendered/main.py" } else { "/rendered/pyproject.toml" }
       let built = container
         .from("golang:1.25-alpine")
         .withoutEntrypoint

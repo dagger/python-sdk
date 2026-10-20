@@ -1,0 +1,51 @@
+# /// script
+# requires-python = ">=3.14"
+# dependencies = ["dagger-io", "dagger-clients-core"]
+#
+# [tool.uv.sources]
+# dagger-io = { path = "sdk" }
+# dagger-clients-core = { path = "clients/core" }
+# ///
+
+from __future__ import annotations
+
+from dagger import function, object_type
+from dagger_clients.core import Container, Directory, Workspace, core
+
+
+@object_type
+class {{ .ModuleType }}:
+    source: Directory
+    base_image_address: str
+
+    @classmethod
+    def create(
+        cls,
+        ws: Workspace,
+        base_image_address: str = "alpine:3.24",
+    ) -> {{ .ModuleType }}:
+        return cls(
+            source=ws.directory(
+                "/",
+                exclude=[
+                    "**/.dagger",
+                    "**/.git",
+                    "**/.venv",
+                    "**/__pycache__",
+                    "**/node_modules",
+                    "**/dist",
+                ],
+            ),
+            base_image_address=base_image_address,
+        )
+
+    @function
+    def container(self) -> Container:
+        """A container with the workspace source, ready to build."""
+        return (
+            core()
+            .container()
+            .from_(self.base_image_address)
+            .with_directory("/src", self.source)
+            .with_workdir("/src")
+        )
