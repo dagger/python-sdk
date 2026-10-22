@@ -445,17 +445,19 @@ type Scope {
   cores differ, as it refuses a client generated against another core.
   """
   let globalSource(members: [ClientMember!]!): Directory! {
-    let mounted = if (members.length == 0) {
-      codegenEnv.withMountedFile(schemasPath + "/" + coreDirName + ".json", coreSchema)
+    let schemas = if (members.length == 0) {
+      directory.withFile(coreDirName + ".json", coreSchema)
     } else {
-      members.reduce(codegenEnv) { ctr, member =>
-        ctr.withMountedFile(schemasPath + "/" + member.dir + ".json", clientSchema(member))
+      members.reduce(directory) { dir, member =>
+        dir.withFile(member.dir + ".json", clientSchema(member))
       }
     }
     let names = if (members.length == 0) { [coreDirName] } else { members.map { member => member.dir } }
     let inputs = names.reduce([] :: [String!]!) { args, name => args + ["-i", schemasPath + "/" + name + ".json"] }
-    mounted
-      .withExec([codegenPython, "-m", "codegen", "generate-global"] + inputs + ["-o", outputPath])
+    codegenEnv
+      .withMountedDirectory(schemasPath, schemas)
+      .withMountedFile(namesPath, NamesHelper().namesFile(schemas))
+      .withExec([codegenPython, "-m", "codegen", "generate-global"] + inputs + ["-n", namesPath, "-o", outputPath])
       .directory(outputPath + "/" + globalPackage)
   }
 
@@ -473,7 +475,8 @@ type Scope {
   let coreSource: Directory! {
     codegenEnv
       .withMountedFile(schemaPath, coreSchema)
-      .withExec([codegenPython, "-m", "codegen", "generate-core", "-i", schemaPath, "-o", outputPath])
+      .withMountedFile(namesPath, NamesHelper().namesOf(coreSchema))
+      .withExec([codegenPython, "-m", "codegen", "generate-core", "-i", schemaPath, "-n", namesPath, "-o", outputPath])
       .directory(outputPath)
   }
 
@@ -584,9 +587,10 @@ type Scope {
     let pin = if (member.pin == null) { [] :: [String!]! } else { ["--pin", member.pin ?? ""] }
     codegenEnv
       .withMountedFile(schemaPath, clientSchema(member))
+      .withMountedFile(namesPath, NamesHelper().namesOf(clientSchema(member)))
       .withExec([
         codegenPython, "-m", "codegen", "generate-client",
-        "-i", schemaPath, "-o", outputPath,
+        "-i", schemaPath, "-n", namesPath, "-o", outputPath,
         "--name", member.name, "--ref", member.ref, "--core-digest", coreDigest,
       ] + pin)
       .directory(outputPath)
@@ -693,6 +697,7 @@ type Scope {
   let stripScriptPath: String! = "/strip-dev-sections.py"
   let schemaPath: String! = "/schema.json"
   let schemasPath: String! = "/schemas"
+  let namesPath: String! = "/names.json"
   let coreOnlyScriptPath: String! = "/core-only.py"
   let coreOnlyPath: String! = "/core-only.json"
   let outputPath: String! = "/generated"
@@ -835,5 +840,47 @@ type OutsidePath {
     self.pattern = pattern
     self.rooted = rooted
     self
+  }
+}
+
+"""
+The names helper, helpers/names, which writes the names file the code
+generator reads: a schema's names in snake_case, as the engine formats them.
+
+A schema served at v1.0.0-beta.21 or later is named by the engine's naming
+rules, and has Query.formatIdentifiers to tell how to write its names. This
+module is served before that version, so it can't call it; the helper formats
+the names with a copy of the engine's naming package instead. For a schema
+without Query.formatIdentifiers it writes a file with no names, and the
+generator keeps its own conversion.
+"""
+type NamesHelper {
+  pub tool: Container! {
+    container
+      .from("golang:1.25-alpine")
+      .withoutEntrypoint
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withDirectory("/helper", currentModule.source.directory("helpers/names"))
+      .withWorkdir("/helper")
+      .withExec(["go", "build", "-o", "/usr/local/bin/names", "."])
+  }
+
+  """
+  The names file of one introspection result.
+  """
+  pub namesOf(schema: File!): File! {
+    namesFile(directory.withFile("schema.json", schema))
+  }
+
+  """
+  The names file of every introspection result in a directory, the schemas
+  of one scope, which share a version.
+  """
+  pub namesFile(schemas: Directory!): File! {
+    tool
+      .withMountedDirectory("/schemas", schemas)
+      .withExec(["sh", "-c", "names -o /names.json /schemas/*.json"])
+      .file("/names.json")
   }
 }
