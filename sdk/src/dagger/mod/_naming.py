@@ -84,6 +84,18 @@ class SchemaNames:
             return EnumName(name)
         return value
 
+    def enum_reader(self, cls: typing.Any) -> Callable[[str], enum.Enum] | None:
+        """Read a member of one of the module's own enums by its schema name.
+
+        The engine returns a member by the name it gave it (``READY``), not
+        by its Python name (``Ready``). None for any other type.
+        """
+        members = self.enum_members.get(cls) if isinstance(cls, type) else None
+        if not members:
+            return None
+        python = {schema: member for member, schema in members.items()}
+        return lambda name: cls[python.get(name, name)]
+
 
 async def resolve_schema_names(
     main_name: str,
@@ -176,17 +188,25 @@ async def _enum_member_names(
 
 _supported: bool | None = None
 
+IDENTIFIER_CASING_VERSION = "v1.0.0-beta.21"
+"""The first engine release that names modules by its naming rules."""
+
 
 async def supports_identifiers() -> bool:
-    """Whether the session's schema has ``Query.formatIdentifiers``.
+    """Whether the engine names the module by its naming rules.
 
-    The engine serves it in the views it names schemas by its naming rules
-    (v1.0.0-beta.21 and later), and only in those. The runtime's session is
-    served in its module's view, so it tells how the engine names the module.
-    Asked once per process.
+    From v1.0.0-beta.21 the engine serves ``Query.formatIdentifiers`` in the
+    views it names schemas by those rules, and only in those. The runtime's
+    session is served in its module's view, so the API being there tells how
+    the engine names the module. Released engines before that serve the API
+    in every v1 view but name modules by their legacy rules, so the engine's
+    version is checked first. Asked once per process.
     """
     global _supported  # noqa: PLW0603
     if _supported is None:
+        if not names_schemas(await _engine_version()):
+            _supported = False
+            return _supported
         try:
             await _format_identifiers([], CAMEL)
         except QueryError as e:
@@ -196,6 +216,50 @@ async def supports_identifiers() -> bool:
         else:
             _supported = True
     return _supported
+
+
+_SEMVER = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
+)
+
+
+def names_schemas(engine: str) -> bool:
+    """Whether an engine release names schemas by its naming rules.
+
+    A release from v1.0.0-beta.21 on. An unreadable version leaves the
+    decision to the schema.
+    """
+    version, cut = _SEMVER.match(engine), _SEMVER.match(IDENTIFIER_CASING_VERSION)
+    assert cut is not None
+    if version is None:
+        return True
+    return not _precedes(version, cut)
+
+
+def _precedes(a: re.Match[str], b: re.Match[str]) -> bool:
+    """Semver precedence of two versions matched by ``_SEMVER``."""
+    core_a, core_b = tuple(map(int, a.groups()[:3])), tuple(map(int, b.groups()[:3]))
+    if core_a != core_b:
+        return core_a < core_b
+    pre_a, pre_b = a.group(4), b.group(4)
+    if not pre_a or not pre_b:
+        # A release follows its prereleases.
+        return bool(pre_a) and not pre_b
+    ids_a, ids_b = pre_a.split("."), pre_b.split(".")
+    for x, y in zip(ids_a, ids_b, strict=False):
+        if x == y:
+            continue
+        if x.isdigit() and y.isdigit():
+            return int(x) < int(y)
+        if x.isdigit() or y.isdigit():
+            # Numbers come before words.
+            return x.isdigit()
+        return x < y
+    return len(ids_a) < len(ids_b)
+
+
+async def _engine_version() -> str:
+    return await Context().root_select("version", []).execute(str)
 
 
 async def format_names(names: list[str], casing: str) -> list[str]:

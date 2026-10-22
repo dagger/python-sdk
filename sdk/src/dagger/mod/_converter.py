@@ -147,7 +147,12 @@ def make_method(  # noqa: C901
     # Anything else triggers execution (async)
     async def exec_method(self, *args, **kwargs):
         _ctx = select(self, *args, **kwargs)
+        # The module's own enums come back by the names the engine gave them.
+        if read := names.enum_reader(ret_type):
+            return read(await _ctx.execute(str))
         if cls := list_of(ret_type):
+            if read := names.enum_reader(cls):
+                return [read(v) for v in await _ctx.execute(list[str])]
             if cls is proto:
                 cls = type(self)
             elif is_dagger_interface_type(cls):

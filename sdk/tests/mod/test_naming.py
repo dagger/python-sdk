@@ -17,6 +17,7 @@ from dagger.mod._converter import to_interface_impl
 from dagger.mod._naming import (
     SchemaNames,
     format_names,
+    names_schemas,
     resolve_schema_names,
     supports_identifiers,
 )
@@ -270,6 +271,52 @@ async def test_interface_call_enum_members():
     assert "wait(status: READY, statuses: [HTTP_OK])" in query
 
 
+@pytest.mark.parametrize("schema_names", [False, True])
+async def test_interface_call_enum_results(
+    monkeypatch: pytest.MonkeyPatch, schema_names: bool
+):
+    # The engine returns a module's enum members by the names it gave them.
+    m = Module("Pond")
+
+    @m.enum_type
+    class Status(enum.Enum):
+        Ready = "ready"
+        HttpOk = "ok"
+
+    @m.interface
+    class Waiter(typing.Protocol):
+        @m.function
+        async def status(self) -> Status: ...
+
+        @m.function
+        async def statuses(self) -> list[Status]: ...
+
+    @m.object_type
+    class Pond:
+        waiter: Waiter = dagger.field()
+
+    if schema_names:
+        names = await resolve_schema_names(
+            "Pond", interfaces(m), engine_formatter, enums=[Status]
+        )
+        assert names is not None
+        m._schema_names = names
+        status, statuses = "READY", ["HTTP_OK", "READY"]
+    else:
+        # Before the cut, they're the Python names.
+        status, statuses = "Ready", ["HttpOk", "Ready"]
+
+    async def execute(ctx, return_type=None):
+        value = statuses if ctx.selections[-1].name == "statuses" else status
+        return ctx.converter.structure(value, return_type)
+
+    monkeypatch.setattr(Context, "execute", execute)
+    obj = to_interface_impl(interface(m, "Waiter"))(Context())
+
+    assert await obj.status() is Status.Ready
+    assert await obj.statuses() == [Status.HttpOk, Status.Ready]
+
+
 def validation_error() -> QueryError:
     return QueryError(
         [
@@ -285,6 +332,48 @@ def validation_error() -> QueryError:
 @pytest.fixture
 def unknown_support(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(_naming, "_supported", None)
+
+    async def engine_version():
+        return "v1.0.0-beta.21"
+
+    monkeypatch.setattr(_naming, "_engine_version", engine_version)
+
+
+@pytest.mark.usefixtures("unknown_support")
+async def test_supports_identifiers_released_before_the_cut(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Released engines before v1.0.0-beta.21 serve the API in every v1 view,
+    # but name modules by their legacy rules.
+    async def engine_version():
+        return "v1.0.0-beta.20+0da36c8d"
+
+    async def format_identifiers(*_):
+        pytest.fail("unexpected call to formatIdentifiers")
+
+    monkeypatch.setattr(_naming, "_engine_version", engine_version)
+    monkeypatch.setattr(_naming, "_format_identifiers", format_identifiers)
+
+    assert not await supports_identifiers()
+
+
+@pytest.mark.parametrize(
+    ("engine", "expected"),
+    [
+        ("v1.0.0-beta.19", False),
+        ("v1.0.0-beta.20+0da36c8d", False),
+        ("v0.21.9", False),
+        ("v1.0.0-beta.21", True),
+        ("v1.0.0-beta.100", True),
+        ("v1.0.0-dev-0123456789ab", True),
+        ("v1.0.0-rc.1", True),
+        ("v1.0.0", True),
+        ("v1.1.0", True),
+        ("devel", True),
+    ],
+)
+def test_names_schemas(engine: str, expected: bool):
+    assert names_schemas(engine) is expected
 
 
 @pytest.mark.usefixtures("unknown_support")
