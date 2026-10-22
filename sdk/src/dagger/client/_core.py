@@ -28,7 +28,7 @@ from dagger.client._session import (
     as_session,
     default_session,
 )
-from dagger.client.base import Input, Scalar, Type
+from dagger.client.base import Input, Scalar, Type, ValueEnum
 
 from ._guards import (
     IDType,
@@ -141,7 +141,10 @@ def _scalar_literal(value: Any) -> str:
 
 
 def _enum_literal(value: enum.Enum | EnumName) -> str:
-    if isinstance(value, enum.Enum):
+    if isinstance(value, ValueEnum):
+        # Named by Python's convention: the value is the API's name.
+        value = EnumName(value.value)
+    elif isinstance(value, enum.Enum):
         return value.name
     # Rendered bare, so anything but a name would inject query syntax.
     if not _ENUM_NAME_RE.fullmatch(value):
@@ -395,12 +398,22 @@ def make_converter(ctx: Context):
 
 
 def configure_converter_enum(conv: cattrs.Converter, cl: typing.Any = enum.Enum):
-    """Register hooks for structuring and destructuring enums using member names."""
+    """Register hooks for structuring and destructuring enums using member names.
+
+    Members of a :py:class:`~dagger.client.base.ValueEnum` are named by
+    Python's convention and go over the wire by value instead. They're still
+    structured by name, since such an enum keeps the API's spellings as
+    aliases, and by value for a name it doesn't have.
+    """
 
     def to_enum_name(val: enum.Enum) -> str:
+        if isinstance(val, ValueEnum):
+            return val.value
         return val.name
 
     def from_enum_name(name: str, cls: type[enum.Enum]) -> enum.Enum:
+        if issubclass(cls, ValueEnum) and name not in cls.__members__:
+            return cls(name)
         return cls[name]
 
     conv.register_unstructure_hook(cl, to_enum_name)

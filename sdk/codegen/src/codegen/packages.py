@@ -6,7 +6,7 @@ And, only when asked, the temporary global client, `dagger_global`.
 import json
 import pathlib
 import textwrap
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from itertools import groupby
 
 from graphql import (
@@ -24,8 +24,8 @@ from codegen import partition
 from codegen.generator import (
     Context,
     _ObjectField,
+    enum_bases,
     expected_type_name,
-    format_name,
     indent,
     is_builtin_scalar_type,
     is_input_object_type,
@@ -87,6 +87,17 @@ from dagger.client.base import Scalar as _Scalar
 from dagger.client.base import Type as _Type
 """
 
+_VALUE_ENUM_IMPORT = "from dagger.client.base import ValueEnum as _ValueEnum\n"
+"""What the header imports too for a schema the engine names, whose core enums
+are value enums."""
+
+
+def _header(ctx: Context, modules: str) -> str:
+    header = _HEADER % modules
+    if "ValueEnum" in enum_bases(ctx):
+        header += _VALUE_ENUM_IMPORT
+    return header
+
 
 def _aliased(*names: str) -> str:
     return "\n".join(f"from dagger.client import {name} as _{name}" for name in names)
@@ -144,7 +155,7 @@ class _ContributedField(_ObjectField):
         parent: GraphQLObjectType | GraphQLInterfaceType,
     ) -> None:
         super().__init__(ctx, name, field, parent)
-        self.receiver = format_name(parent.name)
+        self.receiver = ctx.format_name(parent.name)
         self.receiver_is_interface = is_interface_type(parent)
         self.receiver_class = (
             f"_{parent.name}Client" if self.receiver_is_interface else parent.name
@@ -247,11 +258,15 @@ def _all(names: list[str]) -> str:
 
 
 @joiner
-def _core_init(schema: GraphQLSchema, schema_version: str) -> Iterator[str]:
-    ctx = new_context(schema, schema_version, partitioned=True)
+def _core_init(
+    schema: GraphQLSchema,
+    schema_version: str,
+    names: Mapping[str, str] | None = None,
+) -> Iterator[str]:
+    ctx = new_context(schema, schema_version, partitioned=True, names=names)
     digest = partition.core_digest(schema, legacy_sdk_compat=ctx.legacy_sdk_compat)
 
-    yield _HEADER % _aliased("Session", "client_root")
+    yield _header(ctx, _aliased("Session", "client_root"))
     yield from render_types(ctx, _owned(schema, None))
     yield _block(
         "def core(*, session: _Session | None = None) -> Query:",
@@ -347,9 +362,13 @@ def _core_imports(ctx: Context, module: str, references: dict[str, str]) -> list
 
 @joiner
 def _client_init(
-    schema: GraphQLSchema, module: str, package: str, schema_version: str
+    schema: GraphQLSchema,
+    module: str,
+    package: str,
+    schema_version: str,
+    names: Mapping[str, str] | None = None,
 ) -> Iterator[str]:
-    ctx = new_context(schema, schema_version, partitioned=True)
+    ctx = new_context(schema, schema_version, partitioned=True, names=names)
     owned = _owned(schema, module)
 
     entry: _EntryField | None = None
@@ -370,9 +389,9 @@ def _client_init(
     references = _references(schema, module, owned)
     references |= {f.parent_name: f.label for f in contributed}
 
-    yield _HEADER.rstrip() % _aliased(
-        "Session", "Target", "check_core", "client_root", "client_select"
-    )
+    yield _header(
+        ctx, _aliased("Session", "Target", "check_core", "client_root", "client_select")
+    ).rstrip()
     yield f"from {NAMESPACE}.{partition.CORE} import CORE_DIGEST as _installed_core"
     yield ""
     yield "from ._target import CORE_DIGEST, NAME, PIN, REF"
@@ -433,11 +452,15 @@ def _target(name: str, ref: str, pin: str | None, core_digest: str) -> str:
     )
 
 
-def core_package(schema: GraphQLSchema, schema_version: str = "") -> Files:
+def core_package(
+    schema: GraphQLSchema,
+    schema_version: str = "",
+    names: Mapping[str, str] | None = None,
+) -> Files:
     """Files of `dagger_clients.core`, whatever clients the schema holds."""
     partition.check_attribution(schema)
     return {
-        "__init__.py": _core_init(schema, schema_version),
+        "__init__.py": _core_init(schema, schema_version, names),
         "py.typed": "",
     }
 
@@ -450,6 +473,7 @@ def client_package(  # noqa: PLR0913
     *,
     core_digest: str | None = None,
     schema_version: str = "",
+    names: Mapping[str, str] | None = None,
 ) -> tuple[str, Files]:
     """Package name and files of one client, whatever the other clients are."""
     partition.check_attribution(schema)
@@ -472,7 +496,7 @@ def client_package(  # noqa: PLR0913
         )
         raise partition.ClientError(msg)
     return package, {
-        "__init__.py": _client_init(schema, module, package, schema_version),
+        "__init__.py": _client_init(schema, module, package, schema_version, names),
         "_target.py": _target(name, ref, pin, core_digest),
         "py.typed": "",
     }
@@ -577,10 +601,12 @@ def _global_clients(
 
 @joiner
 def _global_init(
-    schemas: Sequence[GraphQLSchema], schema_version: str
+    schemas: Sequence[GraphQLSchema],
+    schema_version: str,
+    names: Mapping[str, str] | None = None,
 ) -> Iterator[str]:
     core_schema = schemas[0]
-    ctx = new_context(core_schema, schema_version, partitioned=True)
+    ctx = new_context(core_schema, schema_version, partitioned=True, names=names)
     legacy = ctx.legacy_sdk_compat
     clients = _global_clients(schemas)
 
@@ -599,7 +625,7 @@ def _global_init(
                 name,
                 f,
                 query,
-                f"{core_root}.{format_name(name)}",
+                f"{core_root}.{ctx.format_name(name)}",
                 owner=partition.CORE,
             )
             for name, f in partition.own_fields(query).items()
@@ -607,14 +633,14 @@ def _global_init(
 
     for package, (module, schema) in sorted(clients.items()):
         alias = f"_{package}"
-        names = sorted(_type_names(schema, module, legacy=legacy))
-        exported |= set(names)
-        if names:
-            imports.append(f"from {NAMESPACE}.{package} import ({_lines(names)})")
-        client_ctx = new_context(schema, schema_version, partitioned=True)
+        type_names = sorted(_type_names(schema, module, legacy=legacy))
+        exported |= set(type_names)
+        if type_names:
+            imports.append(f"from {NAMESPACE}.{package} import ({_lines(type_names)})")
+        client_ctx = new_context(schema, schema_version, partitioned=True, names=names)
         owner = f'the client "{module}"'
         for parent, name, f in partition.contributed_fields(schema, module):
-            function = format_name(name)
+            function = client_ctx.format_name(name)
             if parent.name == "Query" and name.lower() == package.replace("_", ""):
                 methods.append(
                     _GlobalField(
@@ -683,7 +709,11 @@ def _lines(names: Sequence[str]) -> str:
     return "\n" + "".join(indent(f"{name},") + "\n" for name in names)
 
 
-def global_package(schemas: Sequence[GraphQLSchema], schema_version: str = "") -> Files:
+def global_package(
+    schemas: Sequence[GraphQLSchema],
+    schema_version: str = "",
+    names: Mapping[str, str] | None = None,
+) -> Files:
     """Files of `dagger_global`, for core and every client the schemas hold.
 
     Each client is generated from a schema of core and that module, so the
@@ -708,7 +738,7 @@ def global_package(schemas: Sequence[GraphQLSchema], schema_version: str = "") -
             )
             raise partition.ClientError(msg)
     return {
-        "__init__.py": _global_init(schemas, schema_version),
+        "__init__.py": _global_init(schemas, schema_version, names),
         "py.typed": "",
     }
 
