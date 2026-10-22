@@ -1873,6 +1873,40 @@ type E2e {
   }
 
   """
+  The names helper formats a schema's names as the engine does. Its copy of
+  the engine's naming package is byte for byte the package at the dagger/dagger
+  commit naming/pin.go names, and formats the engine's own test vectors,
+  copied with it, as the engine does.
+  """
+  pub namesHelperTestCheck(ws: Workspace!): Void @check {
+    let helper = ws.directory("/helpers/names")
+    let pin = helper.file("naming/pin.go").contents.match("Commit = \"([0-9a-f]{40})\"")
+    let commit = if (pin == null) {
+      raise "helpers/names/naming/pin.go names no commit"
+    } else {
+      pin.captures[0] ?? ""
+    }
+    let upstream = git("https://github.com/dagger/dagger").commit(commit).tree.directory("engine/naming")
+    ["dictionary.go", "format.go", "naming.go", "version.go", "testdata/vectors.json"].each { file =>
+      assert(
+        helper.file("naming/" + file).contents == upstream.file(file).contents,
+        "helpers/names/naming/" + file + " is not engine/naming/" + file + " at the pinned commit: copy it again",
+      )
+    }
+    container
+      .from("golang:1.25-alpine")
+      .withoutEntrypoint
+      .withMountedCache("/go/pkg/mod", cacheVolume("go-mod"))
+      .withMountedCache("/root/.cache/go-build", cacheVolume("go-build"))
+      .withDirectory("/helper", helper)
+      .withWorkdir("/helper")
+      .withExec(["go", "vet", "./..."])
+      .withExec(["go", "test", "./..."])
+      .sync
+    null
+  }
+
+  """
   The client library and code generator pass their own suites: the query
   builder, generator output and module registration.
   """
@@ -2086,6 +2120,42 @@ type E2e {
     assertNotContains(build, "currentModule", "build.dang still reads the SDK module's source")
     assertNotContains(build, "import glob, os, re, sys, tomllib", "build.dang still inlines the workspace reader")
 
+    null
+  }
+
+  """
+  The entrypoint generated into a module declares the engine version it runs
+  on in a dang.toml beside it, which the engine reads for it: a new module
+  the engine it is created on, a module that already had an entrypoint but no
+  dang.toml the last version before the engine's naming rules, which is what
+  the engine serves it without one. A dang.toml the module has is kept byte
+  for byte, and its version is the view the scope is generated in.
+  """
+  pub entrypointVersionCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/entrypoint-version"
+    let scoped = ws.withNewDirectory("/" + scope, directory).withWorkdir(scope)
+    let fresh = pythonSdk.generateScope(scoped, isModule: true, name: "entrypoint-version", clients: [])
+    let tomlPath = "/" + scope + "/sdk/entrypoint/dang.toml"
+    let engine = version.split("+")[0] ?? version
+    assert(
+      fresh.file(tomlPath).contents == "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"" + engine + "\"\n",
+      "a new module does not declare the engine it was created on: " + fresh.file(tomlPath).contents,
+    )
+    let again = pythonSdk.generateScope(fresh, isModule: true, name: "entrypoint-version", clients: [])
+    assert(again.changes(fresh).isEmpty, "generating a new module again changed it")
+
+    # An entrypoint from before the dang.toml keeps the version the engine
+    # served it without one.
+    let unversioned = fresh.withoutFile(tomlPath)
+    let regenerated = pythonSdk.generateScope(unversioned, isModule: true, name: "entrypoint-version", clients: [])
+    assertContains(regenerated.file(tomlPath).contents, "dagger = \"v1.0.0-beta.20\"", "an existing entrypoint moved to another version")
+    let direct = unversioned.withChanges(pythonSdk.mod(unversioned, path: scope, findUp: false).generate)
+    assertContains(direct.file(tomlPath).contents, "dagger = \"v1.0.0-beta.20\"", "generating the module on its own moved it to another version")
+
+    # The module's own dang.toml stays as it is.
+    let own = "# mine\ndang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"v1.0.0-beta.19\"\n"
+    let kept = pythonSdk.generateScope(fresh.withNewFile(tomlPath, own), isModule: true, name: "entrypoint-version", clients: [])
+    assert(kept.file(tomlPath).contents == own, "generation rewrote the module's dang.toml: " + kept.file(tomlPath).contents)
     null
   }
 
