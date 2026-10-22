@@ -37,8 +37,16 @@ func introspection(version string, queryFields ...string) string {
 
 func generate(t *testing.T, schemas ...string) (File, string) {
 	t.Helper()
+	return generateOn(t, "", schemas...)
+}
+
+func generateOn(t *testing.T, engine string, schemas ...string) (File, string) {
+	t.Helper()
 	dir := t.TempDir()
 	args := []string{"-o", filepath.Join(dir, "names.json")}
+	if engine != "" {
+		args = append(args, "-engine", engine)
+	}
 	for i, s := range schemas {
 		path := filepath.Join(dir, "schema"+string(rune('a'+i))+".json")
 		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
@@ -98,6 +106,35 @@ func TestNamesWithFormatIdentifiers(t *testing.T) {
 	}
 	if len(snake) != len(want) {
 		t.Errorf("got %d names, want %d: %v", len(snake), len(want), snake)
+	}
+}
+
+// Released engines before v1.0.0-beta.21 serve formatIdentifiers in every v1
+// view, but name modules by their legacy rules.
+func TestNamesEngineGate(t *testing.T) {
+	schema := introspection("v1.0.0", "formatIdentifiers", "gitRepository")
+	for engine, names := range map[string]bool{
+		"v1.0.0-beta.19":          false,
+		"v1.0.0-beta.20+0da36c8d": false,
+		"v1.0.0-beta.21":          true,
+		"v1.0.0-beta.22":          true,
+		"v1.0.0-dev-0123456789ab": true,
+		"v1.0.0":                  true,
+		"devel":                   true,
+	} {
+		file, _ := generateOn(t, engine, schema)
+		if got := len(file) > 0; got != names {
+			t.Errorf("engine %s: names %v, want %v", engine, got, names)
+		}
+	}
+}
+
+// The pinned dictionary: K8s is a term of its own, however it's written.
+func TestNamesDictionary(t *testing.T) {
+	schema := strings.Replace(introspection("v1.0.0-beta.21", "formatIdentifiers"), "withRemote", "withK8SCluster", 1)
+	file, _ := generate(t, schema)
+	if got := file[SnakeFormat]["withK8SCluster"]; got != "with_k8s_cluster" {
+		t.Errorf("withK8SCluster: got %q", got)
 	}
 }
 

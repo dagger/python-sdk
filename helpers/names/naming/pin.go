@@ -12,5 +12,5 @@ package naming
 // vectors as the engine does.
 const (
 	Source = "https://github.com/dagger/dagger/tree/" + Commit + "/engine/naming"
-	Commit = "198d001192d3179a8215980e97c766026f2dd0c2"
+	Commit = "3bae26f41fbfd1ceb7f65ea515da3f72939e76a2"
 )

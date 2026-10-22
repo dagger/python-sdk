@@ -875,12 +875,14 @@ type NamesHelper {
 
   """
   The names file of every introspection result in a directory, the schemas
-  of one scope, which share a version.
+  of one scope, which share a version. The engine's version goes along:
+  released engines before v1.0.0-beta.21 serve Query.formatIdentifiers but
+  don't name schemas by its rules.
   """
   pub namesFile(schemas: Directory!): File! {
     tool
       .withMountedDirectory("/schemas", schemas)
-      .withExec(["sh", "-c", "names -o /names.json /schemas/*.json"])
+      .withExec(["sh", "-c", "names -engine \"$1\" -o /names.json /schemas/*.json", "names", version])
       .file("/names.json")
   }
 }

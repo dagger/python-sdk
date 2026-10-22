@@ -10,10 +10,14 @@
 // package instead (see naming/pin.go), keyed by the schema's __schemaVersion like
 // formatIdentifiers(version:).
 //
-// The gate is the one formatIdentifiers has: a schema without it gets an empty
-// names file, and the generator keeps its legacy conversion.
+// The gate is the one formatIdentifiers has on engines from v1.0.0-beta.21: a
+// schema without it gets an empty names file, and the generator keeps its
+// legacy conversion. Released engines before that (v1.0.0-beta.19 and
+// beta.20) serve formatIdentifiers in every v1 view but still name modules by
+// their legacy rules, so given the engine's version (-engine), a release
+// before v1.0.0-beta.21 gets an empty file too.
 //
-// usage: names -o <names.json> <introspection.json>...
+// usage: names [-engine <version>] -o <names.json> <introspection.json>...
 package main
 
 import (
@@ -35,6 +39,10 @@ import (
 // doesn't change snake_case.
 const SnakeFormat = "SNAKE:UPPERCASE"
 
+// IdentifierCasingVersion is the first engine release that names schemas by
+// its naming rules, in the views from that version on.
+const IdentifierCasingVersion = "v1.0.0-beta.21"
+
 // CoveredVersion is the newest engine release line whose dictionaries the copy
 // of engine/naming in naming/ is known to hold. A dictionary addition is keyed
 // by the engine version that introduced it, so a schema newer than this may be
@@ -53,11 +61,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("names", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	output := flags.String("o", "", "path to write the names file to")
+	engine := flags.String("engine", "", "version of the engine that served the schemas")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if *output == "" || flags.NArg() == 0 {
-		return fmt.Errorf("usage: names -o <names.json> <introspection.json>...")
+		return fmt.Errorf("usage: names [-engine <version>] -o <names.json> <introspection.json>...")
 	}
 
 	schemas := make([]schema, 0, flags.NArg())
@@ -73,7 +82,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 		schemas = append(schemas, s)
 	}
 
-	file, warnings := namesFile(schemas)
+	file := File{}
+	var warnings []string
+	if namesSchemas(*engine) {
+		file, warnings = namesFile(schemas)
+	}
 	for _, w := range warnings {
 		fmt.Fprintln(stderr, "WARNING:", w)
 	}
@@ -86,6 +99,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "Names written to %s\n", *output)
 	return nil
+}
+
+// namesSchemas reports whether an engine of the given version names schemas
+// by its naming rules where it serves Query.formatIdentifiers: a release from
+// IdentifierCasingVersion on. An unknown or unreadable version leaves the
+// decision to the schemas.
+func namesSchemas(engine string) bool {
+	v := engine
+	if v != "" && !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	if !semver.IsValid(v) {
+		return true
+	}
+	return semver.Compare(v, IdentifierCasingVersion) >= 0
 }
 
 // File is the names file: each CASING:ACRONYMS format to the names in it, by
