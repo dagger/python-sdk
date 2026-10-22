@@ -2156,7 +2156,21 @@ type E2e {
     let own = "# mine\ndang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"v1.0.0-beta.19\"\n"
     let kept = pythonSdk.generateScope(fresh.withNewFile(tomlPath, own), isModule: true, name: "entrypoint-version", clients: [])
     assert(kept.file(tomlPath).contents == own, "generation rewrote the module's dang.toml: " + kept.file(tomlPath).contents)
+
+    # A module the builtin runtime ran keeps a version that already named it
+    # by the engine's rules, and only such a version.
+    let bare = unversioned.withoutDirectory("/" + scope + "/sdk/entrypoint")
+    assertContains(migratedDangToml(bare, scope, "v1.0.0-beta.21"), "dagger = \"v1.0.0-beta.21\"", "a migrated module lost the version that named it")
+    assertContains(migratedDangToml(bare, scope, "v0.21.9"), "dagger = \"v1.0.0-beta.20\"", "a migrated module kept a version older than the entrypoint")
     null
+  }
+
+  let migratedDangToml(ws: Workspace!, scope: String!, declared: String!): String! {
+    let runtime = "name = \"entrypoint-version\"\nengineVersion = \"" + declared + "\"\n\n[runtime]\nsource = \"python\"\n"
+    pythonSdk
+      .generateScope(ws.withNewFile("/" + scope + "/dagger-module.toml", runtime), isModule: true, name: "entrypoint-version", clients: [])
+      .file("/" + scope + "/sdk/entrypoint/dang.toml")
+      .contents
   }
 
   """
