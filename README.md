@@ -411,10 +411,12 @@ dagger call python-sdk mod --path my-module --find-up=false generate
 ## Module clients
 
 Module dependencies are replaced by generated module clients
-(`dagger module client add`). In a module scope the client set becomes the
-module's dependency set: each client is recorded in `dagger-module.toml` and
-its types are part of the generated bindings, and a removed client is dropped
-again.
+(`dagger module client add`). A client is declared on its scope in
+`dagger.toml` and generated as a member of the scope under `clients/<name>/`;
+`dagger-module.toml` lists no clients, and the member of a removed client is
+deleted.
+A client declared by a path within the workspace remains bound by that path
+when the workspace is opened from Git.
 Standalone clients, in a scope without a module, are not generated yet; adding
 one to a Python scope is refused and the workspace is left unchanged.
 
