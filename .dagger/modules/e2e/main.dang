@@ -2782,7 +2782,8 @@ type E2e {
   A Git client is a module of the Git workspace that generates it when it is
   in the workspace's repository, at its commit, and at its selector or in a
   workspace that names none. The cases follow the Go SDK's TestWorkspaceModule
-  (dagger/go-sdk#73, dagger/go-sdk#78).
+  and TestWorkspaceModuleExplicitGitURL (dagger/go-sdk#73, dagger/go-sdk#78,
+  dagger/go-sdk#79).
   """
   pub workspaceRefMatchCheck: Void @check {
     let sha = "419c4afea78603265c40e273c455623a0291922e"
@@ -2801,6 +2802,12 @@ type E2e {
       ["a GitHub address without a scheme", "github.com/o/r@" + sha, sha, github, github + "/app@" + sha, sha, "true"],
       ["another host without a scheme", "gitlab.com/o/r@" + sha, sha, github, github + "/app@" + sha, sha, "false"],
       ["a repository the clone ref is a prefix of", "github.com/o/r2@" + sha, sha, github, github + "2/app@" + sha, sha, "false"],
+      ["the explicit Git URL form at the commit", clone + "@" + sha, sha, clone, clone + "#" + sha + ":app", sha, "true"],
+      ["the explicit Git URL form on GitHub", "github.com/o/r@" + sha, sha, github, github + "#" + sha + ":app", sha, "true"],
+      ["the explicit Git URL form at the repository root", "github.com/o/r@" + sha, sha, github, github + "#" + sha, sha, "true"],
+      ["the explicit Git URL form at a branch", clone + "@main", sha, clone, clone + "#main:app", sha, "true"],
+      ["the explicit Git URL form at another selector", clone + "@main", sha, clone, clone + "#release:app", sha, "false"],
+      ["the explicit Git URL form in another repository", "github.com/o/r@" + sha, sha, github + "-fork", github + "-fork#" + sha + ":app", sha, "false"],
     ].each { row =>
       let name = row[0] ?? ""
       let got = pythonSdk.workspaceRefMatches(row[1] ?? "", row[2] ?? "", row[3] ?? "", row[4] ?? "", row[5] ?? "")

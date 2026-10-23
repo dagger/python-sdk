@@ -205,15 +205,16 @@ type PythonSdk {
   Whether a Git module is a module of the Git workspace that generates its
   client: pin is the workspace commit, ref and the workspace address both
   name the repository at cloneRef, and the address names no selector or the
-  module's. A ref names that repository when it starts with cloneRef,
-  followed by nothing, "/" or "@", both compared without their URL scheme:
-  a GitHub address has none, while its clone ref has https://. The selector
-  is the text after the "@". Selectors are compared as written, so aliased
-  forms, such as HEAD for main or v1 for v1.2.3, keep the Git binding. A
-  workspace without a selector resolves its modules at the default branch,
-  which its address does not name, so any selector at its commit matches.
-  The Go SDK binds its clients by the same rule (dagger/go-sdk#73,
-  dagger/go-sdk#78).
+  module's. Both ref forms are read: the workspace address keeps
+  <clone>/<path>@<version>, while from engine v1.0.0-beta.20 a module of the
+  workspace takes <clone>#<version>[:<subpath>]. Refs are compared without
+  their URL scheme: a GitHub address has none, while its clone ref has
+  https://. A workspace without a selector resolves its modules at the
+  default branch, which its address does not name, so any selector at its
+  commit matches. Selectors are compared as written, so aliased forms, such
+  as HEAD for main or v1 for v1.2.3, keep the Git binding. The Go SDK binds
+  its clients by the same rule (dagger/go-sdk#73, dagger/go-sdk#78,
+  dagger/go-sdk#79).
   """
   pub workspaceRefMatches(address: String!, commit: String!, cloneRef: String!, ref: String!, pin: String!): Boolean! {
     if (cloneRef == "" or pin == "" or pin != commit) {
@@ -237,8 +238,10 @@ type PythonSdk {
     let repo = withoutURLScheme(cloneRef)
     let path = withoutURLScheme(ref)
     let rest = path.trimPrefix(repo)
-    if (path.hasPrefix(repo) == false or (rest != "" and rest.hasPrefix("/") == false and rest.hasPrefix("@") == false)) {
+    if (path.hasPrefix(repo) == false or (rest != "" and rest.hasPrefix("/") == false and rest.hasPrefix("@") == false and rest.hasPrefix("#") == false)) {
       null
+    } else if (rest.hasPrefix("#")) {
+      rest.trimPrefix("#").split(":", limit: 2)[0] ?? ""
     } else {
       rest.split("@", limit: 2)[1] ?? ""
     }
