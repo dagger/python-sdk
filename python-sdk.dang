@@ -195,7 +195,11 @@ type PythonSdk {
         ws: configured,
         entrypointMode: mode,
         migrating: migrating,
-        engineVersion: scopeEngineVersion(initialized, scope),
+        engineVersion: if (mode == generatedMode) {
+          entrypointVersion(initialized, scope, hadConfig == false)
+        } else {
+          scopeEngineVersion(initialized, scope)
+        },
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -392,8 +396,10 @@ type PythonSdk {
   """
   The engine version a module's scope generates against: the one its manifest
   declares, and only while the module keeps a runtime of its own, which runs
-  it on that version. A module on an entrypoint runs on the engine's own
-  version, and so does one this SDK takes over from the builtin runtime. A
+  it on that version. A module on the shared entrypoint runs on the version
+  the engine serves an entrypoint that declares none, which core-schema's
+  view matches, and so does one this SDK takes over from the builtin runtime;
+  one on the entrypoint generated into it runs on entrypointVersion. A
   pre-1.0 manifest's version outlives `dagger module migrate`, and generating
   against that view writes bindings around a core the session does not serve,
   which the generator then refuses beside a client read in the engine's view.
@@ -410,6 +416,77 @@ type PythonSdk {
       ""
     }
   }
+
+  """
+  The engine version a module on the entrypoint generated into it runs on:
+  the `[imports.Dagger] dagger` of the dang.toml beside that entrypoint, which
+  the engine reads for it (dagger/dagger#14812). A dang.toml that is there is
+  the module's, and is kept as it is. A new module declares the engine it is
+  created on, so it gets that engine's API and naming. A module moving onto
+  the entrypoint from a runtime keeps the version its manifest declares when
+  that already named it by the engine's rules. Any other module that already
+  has a config but no such version gets the one the engine serves it
+  without, the last before the engine's naming rules, so generating it again
+  never moves it to them behind the user's back.
+  """
+  let entrypointVersion(ws: Workspace!, scope: String!, fresh: Boolean!): String! {
+    let path = staticEntrypointPath + "/dang.toml"
+    if (scopeHasFile(ws, scope, path)) {
+      let config = tomlConfig(ws.file("/" + scopePath(scope, path)).contents)
+      let declares = config.fields.contains("imports") and
+        config.field(["imports"]).fields.contains("Dagger") and
+        config.field(["imports", "Dagger"]).fields.contains("dagger")
+      # `dagger = true` declares no version either.
+      let declared = if (declares) {
+        config.field(["imports", "Dagger", "dagger"]).asString rescue {
+          err: Error => ""
+        }
+      } else {
+        ""
+      }
+      if (declared == "") { unversionedEntrypointVersion } else { declared }
+    } else if (fresh) {
+      version.split("+")[0] ?? version
+    } else {
+      # A module moving onto the entrypoint from a runtime that already
+      # named it by the engine's rules keeps that version.
+      let declared = declaredEngineVersion(ws, scope)
+      if (declared.containsMatch("^v[0-9]+\\.[0-9]+\\.[0-9]+") and releasePrecedes(declared, identifierCasingVersion) == false) {
+        declared.split("+")[0] ?? declared
+      } else {
+        unversionedEntrypointVersion
+      }
+    }
+  }
+
+  """
+  The engineVersion a scope's module config declares, or empty.
+  """
+  let declaredEngineVersion(ws: Workspace!, scope: String!): String! {
+    if (hasModuleConfig(ws, scope)) {
+      let config = manifestSettings(ws, scope)
+      if (config.fields.contains("engineVersion")) {
+        config.field(["engineVersion"]).asString rescue {
+          err: Error => ""
+        }
+      } else {
+        ""
+      }
+    } else {
+      ""
+    }
+  }
+
+  """
+  The first engine release that names modules by its naming rules.
+  """
+  let identifierCasingVersion: String! = "v1.0.0-beta.21"
+
+  """
+  The version the engine serves an entrypoint that declares none, the last
+  before the engine's naming rules (v1.0.0-beta.21).
+  """
+  let unversionedEntrypointVersion: String! = "v1.0.0-beta.20"
 
   """
   Refuse a manifest that names both a runtime of the user's own and an
@@ -776,12 +853,17 @@ type PythonSdk {
       normalizePath(path)
     }
 
+    let mode = entrypointModeOf(ws, modPath)
     Mod(
       rootPath: modPath,
       ws: ws,
-      entrypointMode: entrypointModeOf(ws, modPath),
+      entrypointMode: mode,
       migrating: migratingModule(ws, modPath),
-      engineVersion: scopeEngineVersion(ws, modPath),
+      engineVersion: if (mode == generatedMode) {
+        entrypointVersion(ws, modPath, false)
+      } else {
+        scopeEngineVersion(ws, modPath)
+      },
       clients: null,
     )
   }

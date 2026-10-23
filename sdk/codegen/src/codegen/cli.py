@@ -2,6 +2,7 @@ import argparse
 import json
 import pathlib
 import sys
+from collections.abc import Mapping
 
 import graphql
 
@@ -21,6 +22,7 @@ def main(argv: list[str] | None = None):
         help="generate a Python client for the API",
     )
     add_introspection_argument(gen_parser)
+    add_names_argument(gen_parser)
     gen_parser.add_argument(
         "-o",
         "--output",
@@ -30,21 +32,27 @@ def main(argv: list[str] | None = None):
             "(defaults to printing it to stdout)"
         ),
     )
-    gen_parser.set_defaults(run=lambda args: codegen(args.introspection, args.output))
+    gen_parser.set_defaults(
+        run=lambda args: codegen(args.introspection, args.output, args.names)
+    )
 
     core_parser = subparsers.add_parser(
         "generate-core",
         help=f"generate the {packages.NAMESPACE}.core package",
     )
     add_introspection_argument(core_parser)
+    add_names_argument(core_parser)
     add_package_output_argument(core_parser)
-    core_parser.set_defaults(run=lambda args: core(args.introspection, args.output))
+    core_parser.set_defaults(
+        run=lambda args: core(args.introspection, args.output, args.names)
+    )
 
     client_parser = subparsers.add_parser(
         "generate-client",
         help=f"generate the {packages.NAMESPACE} package of one client",
     )
     add_introspection_argument(client_parser)
+    add_names_argument(client_parser)
     add_package_output_argument(client_parser)
     client_parser.add_argument(
         "--name",
@@ -83,6 +91,7 @@ def main(argv: list[str] | None = None):
             "repeat it for the schema of each client"
         ),
     )
+    add_names_argument(global_parser)
     global_parser.add_argument(
         "-o",
         "--output",
@@ -91,7 +100,7 @@ def main(argv: list[str] | None = None):
         help=f"directory to write the {packages.GLOBAL} package into",
     )
     global_parser.set_defaults(
-        run=lambda args: global_client(args.introspection, args.output)
+        run=lambda args: global_client(args.introspection, args.output, args.names)
     )
 
     args = parser.parse_args(argv)
@@ -120,6 +129,20 @@ def add_introspection_argument(subparser: argparse.ArgumentParser):
     )
 
 
+def add_names_argument(subparser: argparse.ArgumentParser):
+    subparser.add_argument(
+        "-n",
+        "--names",
+        type=pathlib.Path,
+        help=(
+            "path to a .json file holding the schema's names as the engine "
+            f"formats them, with a {generator.NAMES_FORMAT} map, as "
+            "helpers/names writes it (defaults to converting names locally, "
+            "which is how schemas without Query.formatIdentifiers are named)"
+        ),
+    )
+
+
 def add_package_output_argument(subparser: argparse.ArgumentParser):
     subparser.add_argument(
         "-o",
@@ -137,9 +160,27 @@ def read_schema(introspection: pathlib.Path) -> tuple[graphql.GraphQLSchema, str
     return schema, result.get("__schemaVersion", "")
 
 
-def codegen(introspection: pathlib.Path, output: pathlib.Path | None):
+def load_names(path: pathlib.Path | None) -> Mapping[str, str] | None:
+    """Read the snake_case names from a names file.
+
+    A names file maps each ``CASING:ACRONYMS`` format to the schema's names
+    formatted in it. It has no format for schemas without
+    ``Query.formatIdentifiers``, which then keep the legacy conversion.
+    """
+    if path is None:
+        return None
+    return json.loads(path.read_text()).get(generator.NAMES_FORMAT)
+
+
+def codegen(
+    introspection: pathlib.Path,
+    output: pathlib.Path | None,
+    names: pathlib.Path | None = None,
+):
     schema, schema_version = read_schema(introspection)
-    code = generator.generate(schema, schema_version=schema_version)
+    code = generator.generate(
+        schema, schema_version=schema_version, names=load_names(names)
+    )
 
     if output:
         output.write_text(code)
@@ -148,9 +189,13 @@ def codegen(introspection: pathlib.Path, output: pathlib.Path | None):
         sys.stdout.write(f"{code}\n")
 
 
-def core(introspection: pathlib.Path, output: pathlib.Path):
+def core(
+    introspection: pathlib.Path,
+    output: pathlib.Path,
+    names: pathlib.Path | None = None,
+):
     schema, schema_version = read_schema(introspection)
-    files = packages.core_package(schema, schema_version)
+    files = packages.core_package(schema, schema_version, load_names(names))
     root = packages.write_package(output, partition.CORE, files)
     sys.stdout.write(f"Core generated successfully to {root}\n")
 
@@ -164,18 +209,23 @@ def client(args: argparse.Namespace):
         args.pin,
         core_digest=args.core_digest,
         schema_version=schema_version,
+        names=load_names(args.names),
     )
     root = packages.write_package(args.output, package, files)
     sys.stdout.write(f"Client generated successfully to {root}\n")
 
 
-def global_client(introspections: list[pathlib.Path], output: pathlib.Path):
+def global_client(
+    introspections: list[pathlib.Path],
+    output: pathlib.Path,
+    names: pathlib.Path | None = None,
+):
     schemas, versions = zip(
         *(read_schema(path) for path in introspections), strict=True
     )
     if len(set(versions)) > 1:
         msg = f"the schemas have different versions: {', '.join(sorted(set(versions)))}"
         raise partition.ClientError(msg)
-    files = packages.global_package(schemas, versions[0])
+    files = packages.global_package(schemas, versions[0], load_names(names))
     root = packages.write_global(output, files)
     sys.stdout.write(f"Global client generated successfully to {root}\n")

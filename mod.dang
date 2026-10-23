@@ -27,9 +27,10 @@ type Mod {
 
   """
   The engine version the scope's code is generated against, empty for the
-  engine's own view. Only a module that keeps a runtime of its own runs on a
-  version of its own, and only the caller knows which runtime the manifest
-  names.
+  view core-schema declares. A module that keeps a runtime of its own runs on
+  the version its manifest declares, and one on the entrypoint generated into
+  it on the version the entrypoint's dang.toml declares; only the caller
+  knows which the manifest names.
   """
   let engineVersion: String!
 
@@ -234,6 +235,25 @@ type Mod {
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
       .withNewFile("workspace_reader.py", currentModule.source.file("runtime/workspace_reader.py").contents)
+      .withNewFile("dang.toml", dangToml)
+  }
+
+  """
+  The dang.toml beside the entrypoint, which declares the Dang and the engine
+  version the engine serves it at: the one the module's scope is generated
+  against. A dang.toml the module already has is its own and stays as it is.
+  """
+  let dangToml: String! {
+    let path = rootPathed(vendorDirName + "/" + entrypointDirName + "/dang.toml")
+    if (ws.directory("/", include: [path]).exists(path)) {
+      ws.file("/" + path).contents
+    } else {
+      "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"" + engineVersion + "\"\n"
+    }
+  }
+
+  let rootPathed(rel: String!): String! {
+    if (rootPath == ".") { rel } else { rootPath + "/" + rel }
   }
 
   """
