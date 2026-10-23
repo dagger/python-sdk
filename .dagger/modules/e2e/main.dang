@@ -350,8 +350,8 @@ type E2e {
     let target = with.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents
     assertContainsAll(target, [
       "NAME = \"client-dep\"",
-      "REF = \"" + clientRef(client, clientDepPath) + "\"",
-      "PIN = " + clientPin(client),
+      "REF = \"" + clientRef(clientDepPath) + "\"",
+      "PIN = None",
       "CORE_DIGEST = \"" + coreDigestOf(with, tomlGenerateModulePath) + "\"",
     ])
     assertContains(with.file(member + "/src/dagger_clients/client_dep/__init__.py").contents, "def client_dep(", "the client has no entry function")
@@ -854,8 +854,7 @@ type E2e {
       .withWorkdir(".")
     let generated = pythonSdk.mod(scoped, path: tomlGenerateModulePath).generated
     assertScopeTree(generated, tomlGenerateModulePath)
-    let declared = ws.moduleSource("/" + clientDepPath)
-    assertContains(generated.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents, "REF = \"" + clientRef(declared, clientDepPath) + "\"", "mod generate missed the scope's client")
+    assertContains(generated.file("/" + tomlGenerateModulePath + "/" + clientDepTargetPath).contents, "REF = \"" + clientRef(clientDepPath) + "\"", "mod generate missed the scope's client")
     let viaScope = pythonSdk
       .generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [ws.moduleSource("/" + clientDepPath)])
       .withWorkdir(".")
@@ -1280,24 +1279,19 @@ type E2e {
   }
 
   """
+  The reference a client's descriptor must name, a path from the workspace
+  root: every client of these checks is a module of the workspace, which
+  generation binds by path, with no pin, even when the workspace is loaded
+  from a ref, as it is when these checks run on a commit.
+  """
+  let clientRef(path: String!): String! {
+    "/" + path
+  }
+
+  """
   A manifest on this working tree's runtime and nothing else, so a released
   CLI runs the module on this repository's build, not a published entrypoint.
   """
-  """
-  The reference a client's descriptor must name, which is what the workspace
-  resolved the client to: a path from the workspace root for a client the
-  engine serves out of the workspace, and a Git address for one in a workspace
-  that is itself loaded from a ref, as it is when these checks run on a commit.
-  """
-  let clientRef(client: ModuleSource!, path: String!): String! {
-    if (client.kind == ModuleSourceKind.GIT_SOURCE) { client.asString } else { "/" + path }
-  }
-
-  """The pin that goes with it: a commit for a Git client, nothing for a local one."""
-  let clientPin(client: ModuleSource!): String! {
-    if (client.kind == ModuleSourceKind.GIT_SOURCE) { "\"" + (client.pin ?? "") + "\"" } else { "None" }
-  }
-
   let runtimeOnlyManifest(name: String!): String! {
     "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
   }
@@ -2456,7 +2450,7 @@ type E2e {
     # carry, so the static path takes one like the runtime path.
     let client = ws.moduleSource("/" + clientDepPath)
     let withClient = static.generateScope(scoped, isModule: true, name: name, clients: [client])
-    assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"" + clientRef(client, clientDepPath) + "\"", "a static entrypoint refused a client")
+    assertContains(withClient.file(clientDepTargetPath).contents, "REF = \"" + clientRef(clientDepPath) + "\"", "a static entrypoint refused a client")
     assertContains(withClient.file("dagger-module.toml").contents, "./sdk/entrypoint", "a client took the module off the static path")
 
     let cached = static.generateScope(ws.withNewFile(manifestPath, "disableDefaultFunctionCaching = true\n" + runtimeManifest).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue "raised"
@@ -2785,6 +2779,38 @@ type E2e {
   }
 
   """
+  A Git client is a module of the Git workspace that generates it when it is
+  in the workspace's repository, at its commit, and at its selector or in a
+  workspace that names none. The cases follow the Go SDK's TestWorkspaceModule
+  (dagger/go-sdk#73, dagger/go-sdk#78).
+  """
+  pub workspaceRefMatchCheck: Void @check {
+    let sha = "419c4afea78603265c40e273c455623a0291922e"
+    let other = "0000000000000000000000000000000000000000"
+    let clone = "http://h/r.git"
+    let github = "https://github.com/o/r"
+    [
+      ["the workspace at the commit", clone + "@" + sha, sha, clone, clone + "/app@" + sha, sha, "true"],
+      ["a workspace without a selector", clone, sha, clone, clone + "/app@main", sha, "true"],
+      ["a workspace in a subdirectory", clone + "/ci@main", sha, clone, clone + "/app@main", sha, "true"],
+      ["another selector at the same commit", clone + "@main", sha, clone, clone + "/app@release", sha, "false"],
+      ["another commit", clone + "@main", other, clone, clone + "/app@main", sha, "false"],
+      ["another repository", clone + "-fork@" + sha, sha, clone, clone + "/app@" + sha, sha, "false"],
+      ["an unknown workspace commit", clone + "@" + sha, "", clone, clone + "/app@" + sha, sha, "false"],
+      ["a module without a pin", clone + "@" + sha, sha, clone, clone + "/app@" + sha, "", "false"],
+      ["a GitHub address without a scheme", "github.com/o/r@" + sha, sha, github, github + "/app@" + sha, sha, "true"],
+      ["another host without a scheme", "gitlab.com/o/r@" + sha, sha, github, github + "/app@" + sha, sha, "false"],
+      ["a repository the clone ref is a prefix of", "github.com/o/r2@" + sha, sha, github, github + "2/app@" + sha, sha, "false"],
+    ].each { row =>
+      let name = row[0] ?? ""
+      let got = pythonSdk.workspaceRefMatches(row[1] ?? "", row[2] ?? "", row[3] ?? "", row[4] ?? "", row[5] ?? "")
+      assert(got == (row[6] == "true"), name + ": want " + (row[6] ?? ""))
+    }
+
+    null
+  }
+
+  """
   A workspace opened from a Git ref generates the files its checkout
   generates. There a client declared by a path in the same repository
   resolves as a Git source, at the workspace commit; generation still binds
@@ -2798,7 +2824,7 @@ type E2e {
       "clients = [\"./" + clientDepPath + "\"]\n")
     let generated = cli(playgroundOf(scoped), ["generate", "-y"])
     let target = generated.file(tomlGenerateModulePath + "/" + clientDepTargetPath).contents
-    assertContainsAll(target, ["REF = \"/" + clientDepPath + "\"", "PIN = None"])
+    assertContainsAll(target, ["REF = \"" + clientRef(clientDepPath) + "\"", "PIN = None"])
     assertGeneratesNothing(generated, "", "generating from the checkout")
 
     let server = container
