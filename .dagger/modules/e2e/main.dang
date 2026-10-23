@@ -2784,4 +2784,63 @@ type E2e {
     null
   }
 
+  """
+  A workspace opened from a Git ref generates the files its checkout
+  generates. There a client declared by a path in the same repository
+  resolves as a Git source, at the workspace commit; generation still binds
+  it by path, so a commit of generated files stays clean when generated from
+  that commit, with the ref's selector and without one.
+  """
+  pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check {
+    let tree = playgroundTree(ws)
+    let scoped = tree.withNewFile("dagger.toml", tree.file("dagger.toml").contents +
+      "\n[sdks.python.scopes.\"" + tomlGenerateModulePath + "\"]\nis-module = true\nname = \"toml-generate-app\"\n" +
+      "clients = [\"./" + clientDepPath + "\"]\n")
+    let generated = cli(playgroundOf(scoped), ["generate", "-y"])
+    let target = generated.file(tomlGenerateModulePath + "/" + clientDepTargetPath).contents
+    assertContainsAll(target, ["REF = \"/" + clientDepPath + "\"", "PIN = None"])
+    assertGeneratesNothing(generated, "", "generating from the checkout")
+
+    let server = container
+      .from("alpine:3.22")
+      .withoutEntrypoint
+      .withExec(["apk", "add", "--no-cache", "git", "git-daemon"])
+      .withDirectory("/srv/repo", generated.directory(playgroundRoot), exclude: [".git"])
+      .withWorkdir("/srv/repo")
+      .withExec(["git", "init", "-q", "-b", "main"])
+      .withExec(["git", "add", "-A"])
+      .withExec(["git", "-c", "user.name=e2e", "-c", "user.email=e2e@example.com", "commit", "-q", "-m", "generated scope"])
+      .withExec(["git", "clone", "-q", "--bare", ".", "/srv/repo.git"])
+      .withExposedPort(9418)
+      .withDefaultArgs(["git", "daemon", "--export-all", "--base-path=/srv", "/srv"])
+      .asService
+    # The engine takes a Git ref whose host has no dot for a Go import path
+    # and refuses it, so the ref names the server by its full name, in the
+    # session domain that resolv.conf searches last.
+    let repo = "git://" + server.hostname + ".$(awk '/^search/ {print $NF}' /etc/resolv.conf)/repo.git"
+    let served = generated.withServiceBinding(server.hostname, server)
+    assertGeneratesNothing(served, "-W \"" + repo + "@main\"", "generating from the Git ref at main")
+    assertGeneratesNothing(served, "-W \"" + repo + "\"", "generating from the Git ref without a selector")
+    null
+  }
+
+  """
+  The CLI reports an empty changeset in a log line, which plain progress
+  prints. It prints a changeset it does not apply as a summary near the end
+  of its output, so the tail is enough to tell what changed.
+  """
+  let assertGeneratesNothing(ctr: Container!, flags: String!, what: String!): Void {
+    let attempt = ctr.withExec(
+      ["sh", "-c", "dagger --progress=plain " + flags + " generate --no-apply"],
+      experimentalPrivilegedNesting: true,
+      expect: ReturnType.ANY,
+    )
+    let lines = attempt.stderr.split("\n")
+    let skipped = if (lines.length > 80) { lines.length - 80 } else { 0 }
+    assert(
+      attempt.exitCode == 0 and attempt.stderr.contains("no changes to apply") and attempt.stderr.contains("Generated changes were not applied") == false,
+      what + " changed the files generated from the checkout:\n" + lines.dropFirst(skipped).join("\n"),
+    )
+  }
+
 }
