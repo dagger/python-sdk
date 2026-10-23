@@ -369,22 +369,40 @@ type Scope {
   }
 
   """
-  One member per declared client. A local module is loaded by its path from
-  the workspace root; a Git one by its ref, pinned to the commit the engine
-  resolved it to, so a client never loads a commit it was not generated
-  against.
+  One member per declared client. A module of the workspace is loaded by its
+  path from the workspace root, even when the workspace is loaded from Git;
+  another Git module by its ref, pinned to the commit the engine resolved it
+  to, so a client never loads a commit it was not generated against.
   """
   let clientMembers: [ClientMember!]! {
     clients.map { client =>
       let isGit = client.kind == ModuleSourceKind.GIT_SOURCE
+      let local = isGit == false or inWorkspace(client)
       ClientMember(
         name: client.moduleName,
-        ref: if (isGit) { client.asString } else { localRef(client.sourceRootSubpath) },
-        pin: if (isGit and client.pin != "") { client.pin } else { null },
-        local: isGit == false,
+        ref: if (local) { localRef(client.sourceRootSubpath) } else { client.asString },
+        pin: if (local == false and client.pin != "") { client.pin } else { null },
+        local: local,
         source: client,
       )
     }
+  }
+
+  """
+  A workspace loaded from Git resolves its own modules as Git sources at its
+  commit. Bound by that ref, a client would change with every commit and
+  never match what the checkout generates.
+  """
+  let inWorkspace(client: ModuleSource!): Boolean! {
+    PythonSdk().workspaceRefMatches(ws.address, workspaceCommit, client.cloneRef, client.asString, client.pin)
+  }
+
+  """
+  An unknown commit matches no client, so the client keeps its Git binding
+  and its pin.
+  """
+  let workspaceCommit: String! {
+    ws.git.head.commit rescue { err: Error => "" }
   }
 
   """
@@ -712,7 +730,8 @@ type ClientMember {
   pub name: String!
 
   """
-  What the client loads: a path from the workspace root, or a Git ref.
+  What the client loads: the path from the workspace root of a module of the
+  workspace, even when the workspace is loaded from Git, or a Git ref.
   """
   pub ref: String!
 
@@ -722,7 +741,8 @@ type ClientMember {
   pub pin: String
 
   """
-  Whether the client loads a module from the workspace rather than from Git.
+  Whether the client loads a module of the workspace, by path, even when the
+  workspace is loaded from Git.
   """
   pub local: Boolean!
 
