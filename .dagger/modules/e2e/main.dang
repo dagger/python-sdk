@@ -2087,17 +2087,19 @@ type E2e {
   The SDK refuses an engine release older than its floor before it generates
   anything, and names the version it found and what to do: pin the SDK's last
   release before the floor where that release runs, from v1.0.0-beta.14, and
-  only upgrade below it. Every other version passes, a development build and
-  one it cannot read among them, so an unexpected format never blocks a user.
-  On an engine the SDK refuses, generation itself refuses.
+  only upgrade below it. Releases are compared as semver orders them, with
+  the build after a "+" ignored and no word such as "dev" set apart, so a
+  build of dagger's main passes as the release it reports. A version the
+  SDK cannot read passes, so an unexpected format never blocks a user. On
+  an engine the SDK refuses, generation itself refuses.
   """
   pub engineFloorRefusalCheck(ws: Workspace!): Void @check {
     let pin = "dagger module install github.com/dagger/python-sdk@v1.1.1"
-    let pinned = ["v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
-    let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
+    let pinned = ["v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.17+dev", "v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
+    let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-alpha-1"]
     let accepted = [
-      "v1.0.0-beta.18", "v1.0.0-beta.18+249edbd6", "v1.0.0-beta.19", "v1.0.0-rc.1", "v1.0.0",
-      "v1.0.1", "v2.0.0-beta.1", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-dev.3", "devel", "",
+      "v1.0.0-beta.18", "v1.0.0-beta.18+249edbd6", "v1.0.0-beta.18+dev", "1.0.0-beta.18", "v1.0.0-beta.19", "v1.0.0-beta.100",
+      "v1.0.0-beta.1000000000000000000000", "v1.0.0-rc.1", "v1.0.0-rc-1", "v1.0.0", "v1.0.1", "v2.0.0-beta.1", "v1.0.0-dev.3", "devel", "",
     ]
     (pinned + upgradeOnly).each { engine =>
       let refusal = pythonSdk.engineRefusal(engine)
