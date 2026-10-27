@@ -96,12 +96,19 @@ def test_types_golden(mod: Module):
 
 
 def test_main_golden():
-    _assert_golden("main.dang", render_main("main"))
+    _assert_golden("main.dang", render_main("main", "v1.0.0-beta.21"))
 
 
 def test_main_outside_golden():
-    rendered = render_main("main", ["../lib", '../../shared/"text"'])
+    rendered = render_main("main", "v1.0.0-beta.21", ["../lib", '../../shared/"text"'])
     _assert_golden("main_outside.dang", rendered)
+
+
+def test_main_declares_client_version():
+    rendered = render_main("main", 'v1.0.0-beta.21+"commit"')
+    assert 'let clientVersion: String! = "v1.0.0-beta.21+\\"commit\\""' in rendered
+    assert '.withEnvVariable("DAGGER_CLIENT_VERSION", clientVersion)' in rendered
+    assert rendered.index("DAGGER_CLIENT_VERSION") < rendered.index(".withExec(")
 
 
 def test_quoting():
@@ -146,9 +153,13 @@ def test_renders_cache_policy(cache: str, policy: str):
 
 def test_write_entrypoint(mod: Module, tmp_path: pathlib.Path):
     out = tmp_path / "out"
-    write_entrypoint(mod.describe(), name="main", output=out)
+    write_entrypoint(
+        mod.describe(), name="main", client_version="v1.0.0-beta.21", output=out
+    )
     assert (out / "types.dang").read_text().startswith("# Code generated")
-    assert 'let moduleName: String! = "main"' in (out / "main.dang").read_text()
+    main = (out / "main.dang").read_text()
+    assert 'let moduleName: String! = "main"' in main
+    assert 'let clientVersion: String! = "v1.0.0-beta.21"' in main
 
 
 @pytest.mark.parametrize(
@@ -175,6 +186,8 @@ def test_command(tmp_path: pathlib.Path, args: list[str], outside: list[str]):
             "entrypoint",
             "--name",
             "hello",
+            "--client-version",
+            "v1.0.0-beta.21",
             "--output",
             "out",
             *args,
@@ -193,6 +206,7 @@ def test_command(tmp_path: pathlib.Path, args: list[str], outside: list[str]):
     assert 'function("hi", typeDef.withKind(TypeDefKind.STRING_KIND))' in types
     main = (tmp_path / "out" / "main.dang").read_text()
     assert 'let moduleName: String! = "hello"' in main
+    assert '.withEnvVariable("DAGGER_CLIENT_VERSION", clientVersion)' in main
     assert main.count("workspace.directory(") == len(outside) + 1
     for path in outside:
         assert f'workspace.directory("{path}", ' in main

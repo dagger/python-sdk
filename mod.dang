@@ -234,7 +234,7 @@ type Mod {
   let entrypointDir(generated: Workspace!, outside: [String!]!): Directory! {
     pythonSdkRuntime
       .moduleRuntime(modSource: staging(generated, outside).moduleSource("/" + rootPath), introspectionJson: null)
-      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput] +
+      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--client-version", targetVersion, "--output", entrypointOutput] +
         outside.map { pattern => "--outside=" + pattern })
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
