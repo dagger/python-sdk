@@ -98,9 +98,13 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 ## The engine release a module targets
 
 Each release of this SDK targets one engine release, `v1.0.0-beta.21` today.
-Today that release is what the setting below pins, not yet what the SDK
-generates core from:
+Today that release is what the generated entrypoint declares and what the
+setting below pins, not yet what the SDK generates core from:
 
+- The generated entrypoint declares it to the engine: it sets
+  `DAGGER_CLIENT_VERSION` on the exec that starts the module's process, next
+  to `DAGGER_MODULE_CALL_DIGEST`. The engine ignores it today; a later engine
+  serves that release's view to the process.
 - `clients/core`, the global client and the dependency clients are still
   generated from the running engine, so an engine update can still change
   them, and an engine older than the targeted release is not refused: the
@@ -276,7 +280,7 @@ SDK files:
 | File | What it is |
 | --- | --- |
 | `types.dang` | the module's types, as a literal list of `TypeDef` values |
-| `main.dang` | the `ModuleEntrypoint`: returns the types and runs calls in the module's container |
+| `main.dang` | the `ModuleEntrypoint`: returns the types, and runs calls in the module's container, declaring the targeted engine release to the engine |
 | `build.dang` | the container build, copied from `runtime/build.dang` |
 | `workspace_reader.py` | the workspace reader the build runs, copied from `runtime/workspace_reader.py` |
 

@@ -1538,6 +1538,8 @@ type E2e {
     let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "target-cli", "--path", path, "--target-version", target])
     let settings = initialized.file(playgroundRoot + "/dagger.toml").contents
     assertContains(settings, "targetVersion = \"" + target + "\"", "dagger module init did not record the target in the module's scope settings: " + settings)
+    let main = initialized.file(playgroundRoot + "/" + path + "/sdk/entrypoint/main.dang").contents
+    assertContains(main, "let clientVersion: String! = \"" + target + "\"", "the generated entrypoint does not declare the targeted release: " + main)
     let ran = cli(initialized, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
     assert(ran.trimSpace != "", "the module did not run")
     null
@@ -2124,6 +2126,8 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
+      "let clientVersion: String! = \"" + pythonSdk.targetVersionOf("") + "\"",
+      ".withEnvVariable(\"DAGGER_CLIENT_VERSION\", clientVersion)",
       "pub sources(workspace: Workspace!): Directory! {",
       "pub types: [TypeDef!]! {",
       "contextDir: directory.withDirectory(\".\", currentModule.contextDirectory",
