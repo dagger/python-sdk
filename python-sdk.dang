@@ -182,7 +182,7 @@ type PythonSdk {
     # Resolve local client paths from the workspace root.
     let rooted = ws.withWorkdir(".")
     if (isModule == false) {
-      Scope(path: scope, ws: rooted, clients: clients, isModule: false, engineVersion: "", migrating: false).generated.withWorkdir(scope)
+      Scope(path: scope, ws: rooted, clients: clients, isModule: false, engineVersion: "", migrating: false, targetVersion: targetVersionOf(targetVersion)).generated.withWorkdir(scope)
     } else {
       let hadConfig = hasModuleConfig(ws, scope)
       let initialized = if (hadConfig) {

@@ -98,13 +98,19 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 ## The engine release a module targets
 
 Each release of this SDK targets one engine release, `v1.0.0-beta.21` today.
-Today that release is what the generated entrypoint declares and what the
-setting below pins, not yet what the SDK generates core from:
+Today that release is what the SDK announces and what the setting below
+pins, not yet what the SDK generates core from:
 
 - The generated entrypoint declares it to the engine: it sets
   `DAGGER_CLIENT_VERSION` on the exec that starts the module's process, next
   to `DAGGER_MODULE_CALL_DIGEST`. The engine ignores it today; a later engine
   serves that release's view to the process.
+- Outside a module, the library vendored into `sdk/` passes
+  `--version <release>` to the `dagger session` it starts, so the engine
+  serves that release's view to the program, and provisions that release's
+  CLI when none is on the system. A program attached to an existing session,
+  through `DAGGER_SESSION_PORT`, announces nothing: it gets the session's
+  version.
 - `clients/core`, the global client and the dependency clients are still
   generated from the running engine, so an engine update can still change
   them, and an engine older than the targeted release is not refused: the
