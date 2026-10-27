@@ -34,6 +34,11 @@ type Mod {
   let engineVersion: String!
 
   """
+  The engine release this module's generated code is generated for.
+  """
+  let targetVersion: String!
+
+  """
   The module scope's clients, as the engine hands them to generation. Null
   reads them from the workspace config, for a module generated directly.
   """

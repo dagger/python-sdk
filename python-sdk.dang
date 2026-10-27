@@ -38,6 +38,13 @@ type PythonSdk {
   pub legacyRuntime: Boolean! = false
 
   """
+  The engine release to generate for, from this SDK's floor to the release
+  this SDK targets; empty generates for the targeted release. Until core
+  comes from published libraries, only the targeted release is accepted.
+  """
+  pub targetVersion: String! = ""
+
+  """
   Find the Python client root containing the workspace cwd: the directory of
   the nearest pyproject.toml, relative to the workspace root. A generated
   member, marked `[tool.dagger] generated` in its pyproject.toml, belongs to
@@ -171,6 +178,7 @@ type PythonSdk {
     checkEngine
     checkOneRunnerAsked
     let scope = normalizePath(ws.cwd)
+    checkTarget(if (isModule) { "module \"" + name + "\"" } else { "scope " + scope })
     # Resolve local client paths from the workspace root.
     let rooted = ws.withWorkdir(".")
     if (isModule == false) {
@@ -196,6 +204,7 @@ type PythonSdk {
         entrypointMode: mode,
         migrating: migrating,
         engineVersion: scopeEngineVersion(initialized, scope),
+        targetVersion: targetVersionOf(targetVersion),
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -533,6 +542,14 @@ type PythonSdk {
   let engineFloor: String! = "v1.0.0-beta.18"
 
   """
+  The engine release this SDK release targets: the one it generates for,
+  bumped with each SDK release. Core is still generated from the running
+  engine until it comes from a published library, so this is the release
+  the generated entrypoint and the library announce, not yet core's.
+  """
+  let engineTarget: String! = "v1.0.0-beta.21"
+
+  """
   The last release of this SDK that runs on an engine below engineFloor.
   """
   let lastReleaseBelowFloor: String! = "v1.1.1"
@@ -577,6 +594,64 @@ type PythonSdk {
       raise refusal
     }
     null
+  }
+
+  """
+  The engine release a scope generates for: the targetVersion setting as a
+  `v`-prefixed release, or the release this SDK targets when it is empty.
+  """
+  pub targetVersionOf(setting: String!): String! {
+    if (setting == "") { engineTarget } else { Releases().canonical(setting) }
+  }
+
+  """
+  Why generation refuses the targetVersion setting of a module or scope, or
+  the empty string when it generates for it. A release from the floor to the
+  targeted one, other than the targeted one, needs the published core
+  library for it, which does not exist yet.
+  """
+  pub targetRefusal(subject: String!, setting: String!): String! {
+    let releases = Releases()
+    let target = releases.canonical(setting)
+    let pins = subject + " pins targetVersion "
+    let remedy = ": set targetVersion in its dagger.toml settings to " + engineTarget + ", or remove it to generate for " + engineTarget
+    if (setting == "" or target == engineTarget) {
+      ""
+    } else if (releases.isRelease(setting) == false) {
+      pins + "\"" + setting + "\", which is no engine release such as " + engineTarget + remedy
+    } else if (releases.precedes(engineTarget, target)) {
+      pins + target + ", which is later than " + engineTarget + ", the engine release this Python SDK generates for: install the SDK release built for " + target +
+        ", or set targetVersion in its dagger.toml settings to " + engineTarget + ", or remove it"
+    } else if (releases.precedes(target, engineFloor)) {
+      pins + target + ", which is below " + engineFloor + ", the oldest engine this Python SDK runs on" + remedy
+    } else {
+      pins + target + ", which needs the published core library for that release; it does not exist yet, and this Python SDK generates for " + engineTarget + " only" + remedy
+    }
+  }
+
+  let checkTarget(subject: String!): Void {
+    let refusal = targetRefusal(subject, targetVersion)
+    if (refusal != "") {
+      raise refusal
+    }
+    null
+  }
+
+  """
+  A module as a refusal names it: by the name its manifest gives, or by its
+  path when it has none yet.
+  """
+  let moduleSubject(ws: Workspace!, scope: String!): String! {
+    if (hasModuleConfig(ws, scope)) {
+      let config = manifestSettings(ws, scope)
+      if (config.fields.contains("name")) {
+        "module \"" + config.field(["name"]).asString + "\""
+      } else {
+        "the module at " + scope
+      }
+    } else {
+      "the module at " + scope
+    }
   }
 
   """
@@ -715,6 +790,7 @@ type PythonSdk {
     } else {
       normalizePath(path)
     }
+    checkTarget(moduleSubject(ws, modPath))
 
     Mod(
       rootPath: modPath,
@@ -722,6 +798,7 @@ type PythonSdk {
       entrypointMode: entrypointModeOf(ws, modPath),
       migrating: migratingModule(ws, modPath),
       engineVersion: scopeEngineVersion(ws, modPath),
+      targetVersion: targetVersionOf(targetVersion),
       clients: null,
     )
   }
