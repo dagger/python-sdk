@@ -197,7 +197,7 @@ type PythonModuleBuild {
         # In a scope, sync installs the members the project depends on, which
         # --no-install-project leaves in.
         mounted
-          .withExec(["uv", "sync", "--no-dev", "--locked", "--no-editable", "--no-install-project"])
+          .withExec(["uv", "sync", "--no-dev", "--locked", "--no-editable", "--no-install-project"], disableDaggerInDagger: true)
           .withoutMount(inputsPath)
           .withEnvVariable("VIRTUAL_ENV", "$UV_PROJECT_ENVIRONMENT", expand: true)
           .withEnvVariable("PATH", "$VIRTUAL_ENV/bin:$PATH", expand: true)
@@ -209,7 +209,7 @@ type PythonModuleBuild {
           ["-r", projectCfg]
         }
         mounted
-          .withExec(["uv", "pip", "install", "--no-editable"] + localPackages(cfg) + deps)
+          .withExec(["uv", "pip", "install", "--no-editable"] + localPackages(cfg) + deps, disableDaggerInDagger: true)
           .withoutMount(inputsPath)
       }
     }
