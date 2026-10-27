@@ -911,9 +911,9 @@ cannot carry: a dagger-module.toml, or the pre-1.0 dagger.json generation
 converts, as the JSON its file parses to.
 """
 type EntrypointManifest {
-  pub config: JSONValue!
+  let config: JSONValue!
 
-  pub file: String!
+  let file: String!
 
   new(config: JSONValue!, file: String!) {
     self.config = config

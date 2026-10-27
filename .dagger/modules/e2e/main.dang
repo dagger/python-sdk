@@ -2393,22 +2393,23 @@ type E2e {
       assert(pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).entrypointMode == "own", source + ": not read as a module on an entrypoint of its own")
     }
 
+    let manifest = dangEntrypointManifest(name, sharedEntrypointSource)
     [
-      ["\n[clients]\ngo = { path = \"gen\" }\n", "dagger-module.toml has a [clients] table, which this SDK does not generate: a module's clients are its scope's, in dagger.toml; remove the table"],
-      ["disableDefaultFunctionCaching = true\n", "dagger-module.toml sets disableDefaultFunctionCaching, which only a runtime reads: remove it, and pass cache= to the functions that must not be cached"],
-      ["\n[codegen]\nautomaticGitignore = true\n", "dagger-module.toml has a [codegen] table, which only a runtime reads: remove the table"],
+      [manifest + "\n[clients]\ngo = { path = \"gen\" }\n", "dagger-module.toml has a [clients] table, which this SDK does not generate: a module's clients are its scope's, in dagger.toml; remove the table"],
+      ["disableDefaultFunctionCaching = true\n" + manifest, "dagger-module.toml sets disableDefaultFunctionCaching, which only a runtime reads: remove it, and pass cache= to the functions that must not be cached"],
+      [manifest + "\n[codegen]\nautomaticGitignore = true\n", "dagger-module.toml has a [codegen] table, which only a runtime reads: remove the table"],
     ].each { case =>
-      let setting = case[0] ?? ""
+      let config = case[0] ?? ""
       let want = case[1] ?? ""
-      let seeded = ws.withNewFile(manifestPath, dangEntrypointManifest(name, sharedEntrypointSource) + setting)
+      let seeded = ws.withNewFile(manifestPath, config)
       let directRefused = pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).generated.cwd rescue {
         err: Error => err.message
       }
-      assertContains(directRefused, want, "a module generated directly dropped " + setting.trimSpace + " with the manifest it wrote: " + directRefused)
+      assertContains(directRefused, want, "direct generation: expected " + want + "; got " + directRefused)
       let scopeRefused = pythonSdk.generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue {
         err: Error => err.message
       }
-      assertContains(scopeRefused, want, "generation dropped " + setting.trimSpace + " with the manifest it wrote: " + scopeRefused)
+      assertContains(scopeRefused, want, "scope generation: expected " + want + "; got " + scopeRefused)
     }
     null
   }
