@@ -284,7 +284,13 @@ type PythonSdk {
       if (keepsItsRuntime(config)) {
         sdkHelpers.moduleManifest(loadToml: withoutStaleEntrypoint(manifest))
       } else if (legacyRuntime or (needsRuntimeSettings(config) and usersEntrypoint == false)) {
-        onSdkRuntime(sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest)))
+        # Moved onto the runtime this SDK publishes, with the version the
+        # generator reads core in; what only a runtime can honour stays as
+        # written. Inline at each site: sdk-helpers' type names change with its
+        # own declared engineVersion (SdkHelpers… vs SDKHelpers… from the
+        # v1.0.0-beta.22 naming rules), so this module must not spell them.
+        sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest))
+          .withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else if (ours) {
         # This SDK's static entrypoint manifest holds nothing the shared one keeps.
         sdkHelpers.moduleManifest.withDangEntrypoint(source: sharedEntrypointSource)
@@ -307,13 +313,13 @@ type PythonSdk {
       if (keepsItsRuntime(config)) {
         loaded
       } else if (legacyRuntime or needsRuntimeSettings(config)) {
-        onSdkRuntime(loaded)
+        loaded.withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else {
         checkEntrypointOnly(config, "dagger.json")
         loaded.withDangEntrypoint(source: sharedEntrypointSource).withoutLegacyFields
       }
     } else if (legacyRuntime) {
-      onSdkRuntime(sdkHelpers.moduleManifest)
+      sdkHelpers.moduleManifest.withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
     } else {
       sdkHelpers.moduleManifest.withDangEntrypoint(source: sharedEntrypointSource)
     }
@@ -458,15 +464,6 @@ type PythonSdk {
       raise file + " has settings an entrypoint manifest cannot carry (" + refused.join(", ") + "); remove them, or keep the module on a runtime of your own"
     }
     null
-  }
-
-  """
-  The manifest moved onto the runtime this SDK publishes, with the version the
-  generator reads core in. The runtime builds the module itself, so what only
-  a runtime can honour stays as written.
-  """
-  let onSdkRuntime(manifest: SdkHelpersModuleManifest!): SdkHelpersModuleManifest! {
-    manifest.withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
   }
 
   """
