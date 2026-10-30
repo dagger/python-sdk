@@ -51,11 +51,6 @@ def to_pascal_case(s: str) -> str:
     return snake_to_camel(s.replace("-", "_"))
 
 
-def to_camel_case(s: str) -> str:
-    """Convert a string to camelCase."""
-    return snake_to_camel(s.replace("-", "_"), upper=False)
-
-
 def normalize_name(name: str) -> str:
     """Remove the last underscore, used to avoid conflicts with reserved words."""
     if name.endswith("_") and name[-2] != "_" and not name.startswith("_"):
