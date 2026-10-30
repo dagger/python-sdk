@@ -48,13 +48,14 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a path in the module>` | a Dang entrypoint of the user's own, kept as written |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.26` or later: it reads a scope's
+This SDK needs an engine `v1.0.0-beta.26` or later. It reads a scope's
 settings through `WorkspaceSDK.scopeSetting`, which
 [dagger/dagger#15084](https://github.com/dagger/dagger/pull/15084) adds in that
-release. The entrypoint it generates into a module needs an engine
-`v1.0.0-beta.18` or later, the first release that loads a module's files
-through its entrypoint's `sources` member. An entrypoint runs a module on the
-engine's own version, so an entrypoint manifest keeps no `engineVersion`.
+release. It also needs the first release that names identifiers by its naming
+rules and answers for them: generation asks it how to spell the Python names of
+the schema's identifiers, and a module asks it what it named the module's own
+declarations. An entrypoint runs a module on the engine's own version, so an
+entrypoint manifest keeps no `engineVersion`.
 
 On an engine without that field, `dagger module init` and `dagger generate`
 fail while they load the SDK, before they write anything. A
