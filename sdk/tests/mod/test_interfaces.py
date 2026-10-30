@@ -69,7 +69,7 @@ def mod() -> Module:
 @pytest.fixture
 async def duck(mod: Module, engine):
     engine.names = POND_NAMES
-    await mod.load_names()
+    await mod.load_naming()
     r, t = await mod.get_structured_result(
         "Pond",
         {"duck": "123456"},
