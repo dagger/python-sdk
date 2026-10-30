@@ -96,17 +96,17 @@ def test_types_golden(mod: Module):
 
 
 def test_main_golden():
-    _assert_golden("main.dang", render_main("main", "v1.0.0-beta.21"))
+    _assert_golden("main.dang", render_main("main", "v1.0.0-beta.22"))
 
 
 def test_main_outside_golden():
-    rendered = render_main("main", "v1.0.0-beta.21", ["../lib", '../../shared/"text"'])
+    rendered = render_main("main", "v1.0.0-beta.22", ["../lib", '../../shared/"text"'])
     _assert_golden("main_outside.dang", rendered)
 
 
 def test_main_declares_client_version():
-    rendered = render_main("main", 'v1.0.0-beta.21+"commit"')
-    assert 'let clientVersion: String! = "v1.0.0-beta.21+\\"commit\\""' in rendered
+    rendered = render_main("main", 'v1.0.0-beta.22+"commit"')
+    assert 'let clientVersion: String! = "v1.0.0-beta.22+\\"commit\\""' in rendered
     assert '.withEnvVariable("DAGGER_CLIENT_VERSION", clientVersion)' in rendered
     assert rendered.index("DAGGER_CLIENT_VERSION") < rendered.index(".withExec(")
 
@@ -154,12 +154,12 @@ def test_renders_cache_policy(cache: str, policy: str):
 def test_write_entrypoint(mod: Module, tmp_path: pathlib.Path):
     out = tmp_path / "out"
     write_entrypoint(
-        mod.describe(), name="main", client_version="v1.0.0-beta.21", output=out
+        mod.describe(), name="main", client_version="v1.0.0-beta.22", output=out
     )
     assert (out / "types.dang").read_text().startswith("# Code generated")
     main = (out / "main.dang").read_text()
     assert 'let moduleName: String! = "main"' in main
-    assert 'let clientVersion: String! = "v1.0.0-beta.21"' in main
+    assert 'let clientVersion: String! = "v1.0.0-beta.22"' in main
 
 
 @pytest.mark.parametrize(
@@ -187,7 +187,7 @@ def test_command(tmp_path: pathlib.Path, args: list[str], outside: list[str]):
             "--name",
             "hello",
             "--client-version",
-            "v1.0.0-beta.21",
+            "v1.0.0-beta.22",
             "--output",
             "out",
             *args,

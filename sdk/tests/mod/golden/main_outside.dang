@@ -3,7 +3,7 @@
 # Needs Dagger v1.0.0-beta.18 or later; older engines report a missing "workspace" argument.
 type Entrypoint implements ModuleEntrypoint {
   let moduleName: String! = "main"
-  let clientVersion: String! = "v1.0.0-beta.21"
+  let clientVersion: String! = "v1.0.0-beta.22"
 
   pub sources(workspace: Workspace!): Directory! {
     directory
