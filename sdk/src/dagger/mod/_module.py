@@ -36,12 +36,13 @@ from dagger.mod._exceptions import (
     InvalidInputError,
     InvalidResultError,
     ModuleError,
+    ModuleLoadError,
     ObjectNotFoundError,
     RegistrationError,
     log_exception_only,
     transform_error,
 )
-from dagger.mod._naming import ModuleNames, module_names
+from dagger.mod._naming import ModuleNames, ask_naming, source_id
 from dagger.mod._resolver import (
     Constructor,
     Field,
@@ -110,28 +111,61 @@ class Module:
         """The engine's names for the module's interfaces and enums.
 
         Calls through the module's own interfaces select them. Asked for by
-        ``load_names``, before anything is invoked.
+        ``load_naming``, before anything is invoked.
         """
         if self._names is None:
             msg = "The module's schema names were not asked for before the call"
             raise ModuleError(msg)
         return self._names
 
-    async def load_names(self) -> None:
-        """Ask the engine how it names the module, before anything is invoked.
+    def set_main(self, name: str) -> None:
+        """Make the object of that class name the module's main object."""
+        self._main_name = name
+        self._main = self._objects.get(name)
 
-        A module without interfaces makes no call by the engine's names of its
-        own declarations, so it asks nothing.
+    async def load_naming(self, *, names: bool = True) -> None:
+        """Ask the engine how it names the module, once its code is imported.
+
+        One query, for what the module doesn't know yet:
+
+        - which class is the main object, the one the engine finds by the
+          module's name, unless the module was given its name;
+        - with ``names``, the engine's names for the module's interfaces and
+          enums, which the calls through its own interfaces select. A module
+          without interfaces makes no such call, so it asks nothing for them.
         """
-        if self._names is not None:
+        candidates = None
+        if not self._main_name:
+            candidates = [
+                name for name, obj in self._objects.items() if not obj.interface
+            ]
+        interfaces = []
+        if names and self._names is None:
+            interfaces = [obj for obj in self._objects.values() if obj.interface]
+            if not interfaces:
+                self._names = ModuleNames()
+        if candidates is None and not interfaces:
             return
-        interfaces = [obj for obj in self._objects.values() if obj.interface]
-        if not interfaces:
-            self._names = ModuleNames()
-            return
-        self._names = await module_names(interfaces, self._enums.values())
-        # Bindings are built with the names they have when first used.
-        to_interface_impl.cache_clear()
+        naming = await ask_naming(
+            candidates=candidates,
+            interfaces=interfaces,
+            enums=self._enums.values(),
+            source_id=source_id(),
+        )
+        if candidates is not None:
+            if naming.main_object is None:
+                msg = (
+                    f"The engine takes none of the module's object types "
+                    f"({', '.join(candidates) or 'there are none'}) for the main "
+                    f"object of module {MODULE_NAME!r}: name a class decorated "
+                    "with @dagger.object_type after the module"
+                )
+                raise ModuleLoadError(msg)
+            self.set_main(naming.main_object)
+        if interfaces:
+            self._names = naming.names
+            # Bindings are built with the names they have when first used.
+            to_interface_impl.cache_clear()
 
     def is_own_enum(self, cls: Any) -> bool:
         """Whether a class is one of the enums this module declares."""
@@ -178,21 +212,23 @@ class Module:
         await anyio.Path(TYPE_DEF_FILE).write_text(output)
 
     async def _typedefs(self) -> str:
+        await self.load_naming(names=False)
         return await _module_from(self.describe()).id()
 
     def describe(self) -> ModuleDescription:
         """Describe the registered types as plain data."""
         if not self._main_name:
-            msg = "Main object name can't be empty"
+            msg = (
+                "The module's main object isn't known: ask the engine for it "
+                "(Module.load_naming) before describing the module"
+            )
             raise ValueError(msg)
         try:
             self.get_object(self._main_name)
         except ObjectNotFoundError as e:
             msg = (
                 f"Main object with name '{self._main_name}' not found or class not "
-                "decorated with '@dagger.object_type'\n"
-                f"If you believe the module name '{MODULE_NAME}' is incorrectly "
-                "being converted into PascalCase, please file a bug report."
+                "decorated with '@dagger.object_type'"
             )
             raise ObjectNotFoundError(msg, extra=e.extra) from None
 
@@ -269,7 +305,7 @@ class Module:
                 },
             )
 
-        await self.load_names()
+        await self.load_naming()
 
         result = await self.get_result(
             parent_name,
@@ -298,7 +334,7 @@ class Module:
         except ValueError as e:
             msg = "Unable to decode the call request"
             raise InvalidInputError(msg, extra={"request": request}) from e
-        await self.load_names()
+        await self.load_naming()
         return await self.get_result(
             request["receiverType"],
             parent_state or {},

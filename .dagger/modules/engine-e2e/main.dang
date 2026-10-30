@@ -209,7 +209,7 @@ type EngineE2e {
 
   pub entrypointClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-client-call-check") }
 
-  pub runtimeNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-naming-check") }
+  pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check { onFloor(ws, "shared-entrypoint-build-check") }
 
   pub sdkTestCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-check") }
 
