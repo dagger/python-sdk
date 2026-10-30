@@ -286,8 +286,8 @@ type PythonSdk {
         # Moved onto the runtime this SDK publishes, with the version the
         # generator reads core in; what only a runtime can honour stays as
         # written. Inline at each site: sdk-helpers' type names change with its
-        # own declared engineVersion (SdkHelpers… vs SDKHelpers… from the
-        # v1.0.0-beta.22 naming rules), so this module must not spell them.
+        # own declared engineVersion (SdkHelpers… vs SDKHelpers… past the
+        # identifier-casing cut), so this module must not spell them.
         sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest))
           .withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else if (ours) {
@@ -520,8 +520,9 @@ type PythonSdk {
 
   """
   The engine release this SDK release targets: the one a generated entrypoint
-  declares, bumped with each SDK release. Core is read in helpers/core-schema's version, which gets the same
-  API view; moving this past the view's cut must move that version too.
+  declares, bumped with each SDK release. Core is read in helpers/core-schema's
+  version, which shares this release's API view. Moving past that view must
+  move that version too.
   """
   let engineTarget: String! = "v1.0.0-beta.21"
 

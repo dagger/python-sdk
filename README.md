@@ -100,14 +100,11 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 ## The engine release a module targets
 
 Each release of this SDK targets one engine release, `v1.0.0-beta.21` today.
-Today that release is what the generated entrypoint declares (see "The Dagger
-version of a generated entrypoint") and what the setting below pins, not yet
-what the SDK generates core from:
-
-- `clients/core`, the global client and the dependency clients are still
-  generated from the running engine, so an engine update can still change
-  them, and an engine older than the targeted release is not refused: the
-  first call to a function it lacks fails.
+That release is what the generated entrypoint declares (see "The Dagger version
+of a generated entrypoint") and what the setting below pins, but not yet what the
+SDK generates core from: `clients/core`, the global client and the dependency
+clients are still generated from the running engine, so an engine update can
+still change them, and an engine older than the targeted release is not refused.
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
@@ -115,7 +112,8 @@ release, from this SDK's floor to the targeted release;
 `dagger module init python --target-version <release>` writes it. Until core
 comes from a published library, only the targeted release is accepted: any
 other value stops generation before it writes anything, with a message that
-names the module and says why.
+names the module and says why. A scope without a module has its setting checked
+the same way, and generates nothing from it.
 
 Once the `dagger-clients-core` library is published for each release, core
 will come from it for the targeted or pinned release: `dagger generate` will
@@ -220,17 +218,20 @@ dang = "2.1"
 The generated `main.dang` also sets `DAGGER_CLIENT_VERSION` to the same version
 on the exec that starts the module's process.
 
-The two declarations reach an engine in different ways, and neither has effect
-on a released engine:
+The two declarations reach an engine in different ways:
 
 - `dang.toml`: [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902),
   not merged, makes an engine read the file and take the module's version from
   it, for the entrypoint and for a module process that declares no version.
-  An engine without it, every release up to v1.0.0-beta.21 among them, loads
-  only the `.dang` files of an entrypoint.
+  Without it, an engine loads only the `.dang` files of an entrypoint: no release
+  so far reads this file, v1.0.0-beta.22 included.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
-  merged after v1.0.0-beta.21 and in no release yet, makes an engine serve that
-  version's view to the process. Engines up to v1.0.0-beta.21 do not read it.
+  first released in v1.0.0-beta.22, makes an engine serve that version's view to
+  the process. Engines up to v1.0.0-beta.21 do not read it.
+
+v1.0.0-beta.20 and v1.0.0-beta.21 share one API view, and v1.0.0-beta.21 is the
+last release in it; v1.0.0-beta.22 is the first with a view of its own. The
+identifier-casing cut comes later, and its release is not decided.
 
 A module needs to be generated again to get both. Standalone Dang tooling older
 than v2.2.0 refuses the file's import.
@@ -257,8 +258,8 @@ their directories being replaced, whatever runs the module: a
 `sdk/entrypoint/dang.toml` with your settings stays when the module moves to a
 runtime or an entrypoint of its own, and is read again once the manifest names
 neither. A module stays on a runtime, the one this SDK publishes included, until
-its manifest stops naming it. One that only says what generation writes goes with
-the entrypoint.
+its manifest stops naming it. One that only says what this release's generation
+writes goes with the entrypoint.
 
 An entrypoint of your own stays where it is, even inside a directory generation
 replaces: `sdk/`, `clients/core/` or a client it generates. An entrypoint at a
