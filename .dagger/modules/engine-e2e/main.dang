@@ -1,6 +1,7 @@
 """
 The e2e checks of the Python SDK on engines built from pinned dagger/dagger
-commits, so a run proves the floor whatever engine runs it. Keep each commit
+commits, so a run proves the floor whatever engine runs it. Each e2e check
+runs on the floor as a check of its own, under its own name. Keep each commit
 aligned with its engine-dev dependency in dagger-module.toml.
 """
 type EngineE2e {
@@ -55,16 +56,171 @@ type EngineE2e {
   }
 
   """
-  Every e2e check, on the floor release's engine, which they first confirm
-  is the one they reach.
+  A client of the floor release's engine that has confirmed it reaches that
+  release. Every check below starts from this one client.
   """
-  pub floorCheck(ws: Workspace!): Void @check {
+  let floorClient(ws: Workspace!): Container! {
     sdkClient(ws, engineDev(ws: daggerSource(floorCommit)).installClient(client: clientBase))
       .withExec(withoutOuterSession(["call", "-m", ".dagger/modules/e2e", "assert-floor-engine"]))
-      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e"]))
+  }
+
+  """
+  One e2e check, by its exact name, on the floor release's engine, so its
+  result shows as a check of its own. floorCoverageCheck holds these names to
+  the checks the e2e module has.
+  """
+  let onFloor(ws: Workspace!, check: String!): Void {
+    floorClient(ws)
+      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", check]))
       .sync
     null
   }
+
+  let count(values: [String!]!, want: String!): Int! {
+    values.filter { value => value == want }.length
+  }
+
+  """
+  The e2e checks the floor release's CLI lists are the ones the checks below
+  run, each by one of them. A check the e2e module gains without one here
+  never runs, and a name here that lists nothing runs nothing.
+  """
+  pub floorCoverageCheck(ws: Workspace!): Void @check {
+    let listed = floorClient(ws)
+      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", "-l", "--format", "link"]))
+      .stdout
+      .split("\n")
+      .filter { line => line.trimSpace != "" }
+      .map { link => link.trimSpace.replaceMatches("^.*[?&]check=", "").replaceMatches("[?&].*$", "").replaceMatches("^.*[/:]", "") }
+    let wrapped = ws.file("/.dagger/modules/engine-e2e/main.dang").contents
+      .split("onFloor(")
+      .filter { chunk => chunk.match("^\\s*ws,\\s*\"") != null }
+      .map { chunk => chunk.replaceMatches("^\\s*ws,\\s*\"", "").replaceMatches("(?s)\".*$", "") }
+    let missing = listed.filter { name => count(wrapped, name) == 0 }
+    let unlisted = wrapped.filter { name => count(listed, name) == 0 }
+    let repeated = wrapped.filter { name => count(wrapped, name) > 1 }
+    assert(listed.length > 0, "the floor release's CLI lists no e2e check")
+    assert(missing.length == 0, "e2e checks no check here runs: " + missing.join(", "))
+    assert(unlisted.length == 0, "checks here whose e2e check the floor release's CLI does not list: " + unlisted.join(", "))
+    assert(repeated.length == 0, "e2e checks more than one check here runs: " + repeated.join(", "))
+    null
+  }
+
+  pub moduleLookupCheck(ws: Workspace!): Void @check { onFloor(ws, "module-lookup-check") }
+
+  pub unmanagedLookupCheck(ws: Workspace!): Void @check { onFloor(ws, "unmanaged-lookup-check") }
+
+  pub mixedConfigLookupCheck(ws: Workspace!): Void @check { onFloor(ws, "mixed-config-lookup-check") }
+
+  pub findClientRootCheck(ws: Workspace!): Void @check { onFloor(ws, "find-client-root-check") }
+
+  pub generateScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-init-check") }
+
+  pub generateScopeExistingCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-existing-check") }
+
+  pub generateScopeClientsCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-clients-check") }
+
+  pub generateScopeStaleTargetCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-stale-target-check") }
+
+  pub generateScopePinsCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-pins-check") }
+
+  pub generateScopeViewCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-view-check") }
+
+  pub generateScopeGlobalClientCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-global-client-check") }
+
+  pub manifestRuntimeSettingsCheck(ws: Workspace!): Void @check { onFloor(ws, "manifest-runtime-settings-check") }
+
+  pub generateScopeSharedPathCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-shared-path-check") }
+
+  pub clientTargetManifestCheck(ws: Workspace!): Void @check { onFloor(ws, "client-target-manifest-check") }
+
+  pub generateScopeGlobalClientFlagCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-global-client-flag-check") }
+
+  pub generateScopePlainCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-plain-check") }
+
+  pub generateScopeUserContentCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-user-content-check") }
+
+  pub modGenerateClientsCheck(ws: Workspace!): Void @check { onFloor(ws, "mod-generate-clients-check") }
+
+  pub generateSkipsExistingFilesCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-skips-existing-files-check") }
+
+  pub generateCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-check") }
+
+  pub tomlGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "toml-generate-check") }
+
+  pub pythonFloorRefusalCheck(ws: Workspace!): Void @check { onFloor(ws, "python-floor-refusal-check") }
+
+  pub runtimeCallCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-call-check") }
+
+  pub runtimeRequiresGeneratedFilesCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-requires-generated-files-check") }
+
+  pub runtimeScopeInstallCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-scope-install-check") }
+
+  pub runtimePathSourceInstallCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-path-source-install-check") }
+
+  pub runtimePathSourceSettingsCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-path-source-settings-check") }
+
+  pub runtimeClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-client-call-check") }
+
+  pub runtimeGlobalClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-global-client-call-check") }
+
+  pub entrypointManifestCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-manifest-check") }
+
+  pub cliSdkCheck(ws: Workspace!): Void @check { onFloor(ws, "cli-sdk-check") }
+
+  pub cliModuleNameCheck(ws: Workspace!): Void @check { onFloor(ws, "cli-module-name-check") }
+
+  pub entrypointClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-client-call-check") }
+
+  pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check { onFloor(ws, "shared-entrypoint-build-check") }
+
+  pub runtimeNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-naming-check") }
+
+  pub sdkTestCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-check") }
+
+  pub sdkTestOldestPythonCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-oldest-python-check") }
+
+  pub sdkTestNewestPythonCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-newest-python-check") }
+
+  pub sdkBindingsCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-bindings-check") }
+
+  pub configCheck(ws: Workspace!): Void @check { onFloor(ws, "config-check") }
+
+  pub staticScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "static-scope-init-check") }
+
+  pub engineFloorRefusalCheck(ws: Workspace!): Void @check { onFloor(ws, "engine-floor-refusal-check") }
+
+  pub collectionsCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-check") }
+
+  pub collectionsClientCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-client-check") }
+
+  pub collectionsOlderSdkCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-older-sdk-check") }
+
+  pub collectionKindsCheck(ws: Workspace!): Void @check { onFloor(ws, "collection-kinds-check") }
+
+  pub entrypointKindCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-kind-check") }
+
+  pub legacyRuntimeCheck(ws: Workspace!): Void @check { onFloor(ws, "legacy-runtime-check") }
+
+  pub remoteEntrypointCheck(ws: Workspace!): Void @check { onFloor(ws, "remote-entrypoint-check") }
+
+  pub staticScopeRefusalsCheck(ws: Workspace!): Void @check { onFloor(ws, "static-scope-refusals-check") }
+
+  pub staticTypesLoadCheck(ws: Workspace!): Void @check { onFloor(ws, "static-types-load-check") }
+
+  pub resourcesGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "resources-generate-check") }
+
+  pub resourcesNoneCheck(ws: Workspace!): Void @check { onFloor(ws, "resources-none-check") }
+
+  pub resourcesRefusalsCheck(ws: Workspace!): Void @check { onFloor(ws, "resources-refusals-check") }
+
+  pub resourcesCallCheck(ws: Workspace!): Void @check { onFloor(ws, "resources-call-check") }
+
+  pub resourcesGitCallCheck(ws: Workspace!): Void @check { onFloor(ws, "resources-git-call-check") }
+
+  pub workspaceRefMatchCheck(ws: Workspace!): Void @check { onFloor(ws, "workspace-ref-match-check") }
+
+  pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "git-workspace-generate-check") }
 
   """
   The release below the floor is refused: on its engine, generation names the
