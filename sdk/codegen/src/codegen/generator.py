@@ -49,13 +49,11 @@ from graphql import (
     get_named_type,
     is_leaf_type,
 )
-from graphql.pyutils import camel_to_snake, snake_to_camel
+from graphql.pyutils import snake_to_camel
 from graphql.type.schema import TypeMap
 
+from codegen.naming import snake
 from codegen.partition import own_fields
-
-ACRONYM_RE = re.compile(r"([A-Z\d]+)(?=[A-Z\d]|$)")
-"""Pattern for grouping initialisms."""
 
 DEPRECATION_RE = re.compile(r"`([a-zA-Z\d_]+)`")
 """Pattern for extracting replaced references in deprecations."""
@@ -501,10 +499,13 @@ def rewrite_notice(reason: str | None, prefix='"', suffix='"') -> str | None:
 
 
 def format_name(s: str) -> str:
-    """Format a GraphQL field or argument name into Python."""
-    # rewrite acronyms, initialisms and abbreviations
-    s = ACRONYM_RE.sub(lambda m: m.group(0).title(), s)
-    s = camel_to_snake(s)
+    """Format a GraphQL field or argument name into Python.
+
+    The engine spells it in snake_case (see codegen.naming); a name that
+    would shadow a keyword or a builtin the bindings use gets a trailing
+    underscore.
+    """
+    s = snake(s)
     if iskeyword(s) or s in _reserved_builtins:
         s += "_"
     return s

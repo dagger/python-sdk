@@ -473,7 +473,7 @@ type Scope {
     let names = if (members.length == 0) { [coreDirName] } else { members.map { member => member.dir } }
     let inputs = names.reduce([] :: [String!]!) { args, name => args + ["-i", schemasPath + "/" + name + ".json"] }
     mounted
-      .withExec([codegenPython, "-m", "codegen", "generate-global"] + inputs + ["-o", outputPath])
+      .withExec([codegenPython, "-m", "codegen", "generate-global"] + inputs + ["-o", outputPath], experimentalPrivilegedNesting: true)
       .directory(outputPath + "/" + globalPackage)
   }
 
@@ -491,7 +491,7 @@ type Scope {
   let coreSource: Directory! {
     codegenEnv
       .withMountedFile(schemaPath, coreSchema)
-      .withExec([codegenPython, "-m", "codegen", "generate-core", "-i", schemaPath, "-o", outputPath])
+      .withExec([codegenPython, "-m", "codegen", "generate-core", "-i", schemaPath, "-o", outputPath], experimentalPrivilegedNesting: true)
       .directory(outputPath)
   }
 
@@ -606,7 +606,7 @@ type Scope {
         codegenPython, "-m", "codegen", "generate-client",
         "-i", schemaPath, "-o", outputPath,
         "--name", member.name, "--ref", member.ref, "--core-digest", coreDigest,
-      ] + pin)
+      ] + pin, experimentalPrivilegedNesting: true)
       .directory(outputPath)
   }
 
@@ -678,7 +678,10 @@ type Scope {
 
   """
   The code generator's environment, synced once per SDK version and shared by
-  every scope that generates.
+  every scope that generates. The generator runs as a nested client of the
+  session (experimentalPrivilegedNesting), because the engine spells the
+  Python names of the schema's identifiers (formatIdentifiers, see
+  sdk/codegen/src/codegen/naming.py).
   """
   let codegenEnv: Container! {
     codegenBase.withExec(["uv", "sync", "--frozen", "--no-dev", "--package", "codegen"])
