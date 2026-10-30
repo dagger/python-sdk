@@ -265,6 +265,8 @@ type EngineE2e {
 
   pub targetVersionCliOnTargetCheck(ws: Workspace!): Void @check { onTarget(ws, "target-version-cli-check") }
 
+  pub namingCheck(ws: Workspace!): Void @check { onFloor(ws, "naming-check") }
+
   """
   The release below the floor is refused: on its engine, generation names the
   floor and the release to pin instead.
