@@ -24,6 +24,19 @@ class Enum(enum.Enum):
         return str(self.value)
 
 
+class ValueEnum(Enum):
+    """Enumeration whose values are the API's enum values.
+
+    Generated for schemas the engine names by its naming rules (from
+    v1.0.0-beta.21): members follow Python's convention (``PER_SESSION``), so
+    unlike :py:class:`Enum`, a member is sent over the wire by its value
+    rather than its name. Values the API writes another way are kept as
+    aliases, so a value the API returns is found by name too.
+    """
+
+    __slots__ = ()
+
+
 class Object:
     """Base for object types."""
 

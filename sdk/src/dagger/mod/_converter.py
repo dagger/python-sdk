@@ -9,6 +9,7 @@ from dagger.client._guards import is_id_type, is_id_type_subclass
 from dagger.client.base import Interface, Scalar, Type
 from dagger.mod import _api
 from dagger.mod._describe import TypeRef, describe_type
+from dagger.mod._naming import SchemaNames
 from dagger.mod._resolver import Function
 from dagger.mod._utils import (
     get_module,
@@ -18,7 +19,6 @@ from dagger.mod._utils import (
     list_of,
     strip_annotations,
     syncify,
-    to_camel_case,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,19 +80,27 @@ def to_interface_impl(proto: type) -> type[Interface]:
         msg = f"Unexpected interface type '{proto}'"
         raise TypeError(msg)
 
+    names = mod.schema_names
     methods = {
-        func.original_name: make_method(name, func, proto)
+        func.original_name: make_method(name, func, proto, names)
         for name, func in typ.functions.items()
     }
 
+    # The class name is the interface's schema name: it's what the client
+    # selects the type by (see `Type._graphql_name`).
     return type(
-        mod.main_cls.__name__ + proto.__name__,
+        names.interface_name(mod.main_cls.__name__, proto),
         (Interface,),
         {"_declaration": proto, **methods},
     )
 
 
-def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # noqa: C901
+def make_method(  # noqa: C901
+    name: str,
+    func: Function,
+    proto: type,
+    names: SchemaNames | None = None,
+) -> typing.Callable:
     """Generate method for interface client binding."""
     ret_type = func.return_type
     _is_self = ret_type is proto
@@ -101,16 +109,19 @@ def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # n
         ret_type = to_interface_impl(ret_type)
 
     # Need to convert names to GraphQL convention for query builder
-    gql_name = to_camel_case(name)
+    if names is None:
+        names = SchemaNames()
+    gql_name = names.field_name(name)
     gql_arg_names = {
-        param.name: to_camel_case(param.name) for param in func.parameters.values()
+        py_name: names.field_name(param.name)
+        for py_name, param in func.parameters.items()
     }
 
     # Generate query builder selection based on inputs
     def select(obj: Interface, *args, **kwargs):
         bound = func.signature.bind(obj, *args, **kwargs)
         args = [
-            Arg(name=gql_arg_names[arg_name], value=arg_value)
+            Arg(name=gql_arg_names[arg_name], value=names.enum_value(arg_value))
             for arg_name, arg_value in bound.arguments.items()
             if arg_name != "self"
         ]
@@ -136,7 +147,12 @@ def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # n
     # Anything else triggers execution (async)
     async def exec_method(self, *args, **kwargs):
         _ctx = select(self, *args, **kwargs)
+        # The module's own enums come back by the names the engine gave them.
+        if read := names.enum_reader(ret_type):
+            return read(await _ctx.execute(str))
         if cls := list_of(ret_type):
+            if read := names.enum_reader(cls):
+                return [read(v) for v in await _ctx.execute(list[str])]
             if cls is proto:
                 cls = type(self)
             elif is_dagger_interface_type(cls):
