@@ -100,37 +100,37 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 ## The engine release a module targets
 
 Each release of this SDK targets one engine release, `v1.0.0-beta.22` today.
-Today that release is what the SDK announces and what the setting below
-pins, not yet what the SDK generates core from:
+That release, or the one the setting below pins, is what the SDK generates
+for and announces:
 
 - The generated entrypoint declares it to the engine: it sets
   `DAGGER_CLIENT_VERSION` on the exec that starts the module's process, next
-  to `DAGGER_MODULE_CALL_DIGEST`. The engine ignores it today; a later engine
-  serves that release's view to the process.
+  to `DAGGER_MODULE_CALL_DIGEST`. From `v1.0.0-beta.22`, the engine serves that
+  release's view to the process.
 - Outside a module, the library vendored into `sdk/` passes
   `--version <release>` to the `dagger session` it starts, so the engine
   serves that release's view to the program, and provisions that release's
   CLI when none is on the system. A program attached to an existing session,
   through `DAGGER_SESSION_PORT`, announces nothing: it gets the session's
   version.
-- `clients/core`, the global client and the dependency clients are still
-  generated from the running engine, so an engine update can still change
-  them, and an engine older than the targeted release is not refused: the
-  first call to a function it lacks fails.
+- `clients/core`, the global client and the dependency clients are read from
+  the running engine in that release's view. An engine older than the release
+  serves its own view instead, and is not refused: the first call to a function
+  it lacks fails. A module that keeps a runtime of its own uses the version its
+  manifest declares.
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
 release, from this SDK's floor to the targeted release;
-`dagger module init python --target-version <release>` writes it. Until core
-comes from a published library, only the targeted release is accepted: any
-other value stops generation before it writes anything, with a message that
-names the module and says why.
+`dagger module init python --target-version <release>` writes it. Any other
+value stops generation before it writes anything, with a message that names
+the module and says why.
 
 Once the `dagger-clients-core` library is published for each release, core
 will come from it for the targeted or pinned release: `dagger generate` will
-write the same core whatever engine runs it, an SDK update will change the
-targeted release and the core, and older pins will be accepted. Dependency
-clients still come from loading the modules they name.
+write the same core whatever engine runs it, and an SDK update will change the
+targeted release and the core. Dependency clients still come from loading the
+modules they name.
 
 ## Migrate a module
 

@@ -33,8 +33,7 @@ type PythonSdk {
 
   """
   The engine release to generate for, from this SDK's floor to the release
-  this SDK targets; empty generates for the targeted release. Until core
-  comes from published libraries, only the targeted release is accepted.
+  this SDK targets; empty generates for the targeted release.
   """
   pub targetVersion: String! = ""
 
@@ -525,9 +524,8 @@ type PythonSdk {
 
   """
   The engine release this SDK release targets: the one it generates for,
-  bumped with each SDK release. Core is still generated from the running
-  engine until it comes from a published library, so this is the release
-  the generated entrypoint and the library announce, not yet core's.
+  bumped with each SDK release. Core is read from the running engine in that
+  release's view, and the generated entrypoint and the library announce it.
   """
   let engineTarget: String! = "v1.0.0-beta.22"
 
@@ -588,9 +586,8 @@ type PythonSdk {
 
   """
   Why generation refuses the targetVersion setting of a module or scope, or
-  the empty string when it generates for it. A release from the floor to the
-  targeted one, other than the targeted one, needs the published core
-  library for it, which does not exist yet.
+  the empty string when it generates for it: any release from the floor to
+  the targeted one.
   """
   pub targetRefusal(subject: String!, setting: String!): String! {
     let releases = Releases()
@@ -607,7 +604,7 @@ type PythonSdk {
     } else if (releases.precedes(target, engineFloor)) {
       pins + target + ", which is below " + engineFloor + ", the oldest engine this Python SDK runs on" + remedy
     } else {
-      pins + target + ", which needs the published core library for that release; it does not exist yet, and this Python SDK generates for " + engineTarget + " only" + remedy
+      ""
     }
   }
 
