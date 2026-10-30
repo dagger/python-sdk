@@ -168,6 +168,8 @@ type EngineE2e {
 
   pub cliSdkCheck(ws: Workspace!): Void @check { onFloor(ws, "cli-sdk-check") }
 
+  pub dangConfigCheck(ws: Workspace!): Void @check { onFloor(ws, "dang-config-check") }
+
   pub cliModuleNameCheck(ws: Workspace!): Void @check { onFloor(ws, "cli-module-name-check") }
 
   pub entrypointClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-client-call-check") }

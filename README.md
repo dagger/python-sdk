@@ -175,6 +175,46 @@ header), or its manifest does (a pre-1.0 `dagger.json`, or `[runtime] source =
 off. The global client is temporary: move the code to
 `from dagger_clients.core import ...` and turn the flag off.
 
+## The Dagger version of a generated entrypoint
+
+Generating a module with an entrypoint in `sdk/entrypoint` also writes
+`sdk/entrypoint/dang.toml`, with the Dang language version and the Dagger
+version this SDK release targets:
+
+```toml
+dang = "2.1"
+
+[imports]
+  [imports.Dagger]
+    dagger = "v1.0.0-beta.21"
+```
+
+An engine that reads this file serves the entrypoint and the module's process
+the API view of that Dagger version, or its own when that is older, and names
+the module's types by that version's rules. A module needs to be generated again to
+get the file. Engines up to v1.0.0-beta.21 ignore it and serve their own view,
+and standalone Dang tooling older than v2.2.0 refuses its import.
+
+The Dagger version belongs to this SDK. Generation replaces `dagger = true` or
+another version on the `Dagger` import, and keeps the file's other settings and
+imports. The file is written again from those settings, so its comments and
+formatting are lost.
+
+Generation refuses, without writing anything, a `dang.toml` it cannot keep the
+meaning of:
+
+- A language version other than `2.1`.
+- A `path` or a non-empty `endpoint` on the `Dagger` import.
+- Another import that declares a different Dagger version.
+- With no `sdk/entrypoint/dang.toml` yet, a `dang.toml` in `sdk/` or the module
+  directory that sets anything the generated file would not, or another Dagger
+  version: the generated file would take its place. Files above the module
+  directory do not govern an entrypoint, and no `dang.toml` outside
+  `sdk/entrypoint` is ever changed.
+
+An entrypoint of your own, a shared or remote entrypoint, and a module on a
+runtime get no `dang.toml` from generation, and a file they have stays as it is.
+
 ## Shared entrypoint
 
 `entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every

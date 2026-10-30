@@ -34,6 +34,12 @@ type Mod {
   let engineVersion: String!
 
   """
+  The engine release a generated entrypoint declares in its dang.toml, which
+  an engine that reads the file serves the entrypoint and the module's process.
+  """
+  let targetVersion: String!
+
+  """
   The module scope's clients, as the engine hands them to generation. Null
   reads them from the workspace config, for a module generated directly.
   """
@@ -88,6 +94,9 @@ type Mod {
         .directory(rootPath))
     } else {
       checkPython
+      if (entrypointMode == "generated") {
+        checkDangConfig
+      }
       let scope = Scope(
         path: rootPath,
         ws: ws,
@@ -104,7 +113,9 @@ type Mod {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)
         let entrypointPath = vendorDirName + "/" + entrypointDirName
-        entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside))), entrypointPath)
+        let withEntrypoint = scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside)))
+        let entrypointDirectory = modulePath(entrypointPath)
+        entrypointManifest(dangConfigWritten(entrypointDirectory, withEntrypoint, entrypointDirectory).withWorkdir("."), entrypointPath)
       } else if (entrypointMode == "remote") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
@@ -112,6 +123,86 @@ type Mod {
         scoped
       }
     }
+  }
+
+  """
+  Refuse a dang.toml generation cannot keep the meaning of, before anything is
+  written. The generated entrypoint's own file is the SDK's to update. Without
+  one, the nearest file up to the module directory governs the entrypoint, and
+  the file written next to the entrypoint would silently take its place.
+  """
+  let checkDangConfig: Void {
+    let entrypointDirectory = modulePath(vendorDirName + "/" + entrypointDirName)
+    if (hasDangConfig(entrypointDirectory)) {
+      checkDangConfigAt(entrypointDirectory, true)
+    } else {
+      let governing = [modulePath(vendorDirName), rootPath].filter { dir => hasDangConfig(dir) }
+      if (governing.length > 0) {
+        let dir = governing[0] ?? ""
+        checkDangConfigAt(dir, false)
+        if (dangConfigContents(dir) != dangConfigContents(entrypointDirectory)) {
+          raise dangConfigPath(dir) + " has settings a dang.toml generated in " + entrypointDirectory + " would take the place of: move them to that file, or remove them"
+        }
+      }
+    }
+    null
+  }
+
+  """
+  Refuse what writing the target would change the meaning of. `owned` allows
+  the Dagger import to move to the target.
+  """
+  let checkDangConfigAt(dir: String!, owned: Boolean!): Void {
+    let path = dangConfigPath(dir)
+    let config = json.withContents((JSON.encode(TOML.decode(ws.file("/" + path).contents)) :: Dagger.JSON!))
+    if (config.fields.contains("dang") and config.field(["dang"]).asString != dangLanguageVersion) {
+      raise path + " declares Dang " + config.field(["dang"]).asString + ", and a generated entrypoint is written in Dang " + dangLanguageVersion + ": set dang = \"" + dangLanguageVersion + "\", or remove it"
+    }
+    if (config.fields.contains("imports") and config.field(["imports"]).fields.contains("Dagger") and config.field(["imports", "Dagger"]).fields.contains("path")) {
+      raise path + " imports Dagger from a path, and a generated entrypoint imports the engine: remove path from [imports.Dagger]"
+    }
+    let disagreeing = sdkHelpers.loadDangConfig(ws.withWorkdir(dir)).daggerImports.{{name, version}}
+      .filter { entry => (owned == false or entry.name != "Dagger") and (entry.version ?? targetVersion) != targetVersion }
+      .map { entry => entry.name + " (" + (entry.version ?? "") + ")" }
+    if (disagreeing.length > 0) {
+      raise path + " declares another Dagger version than the generated entrypoint's " + targetVersion + ": " + disagreeing.join(", ")
+    }
+    null
+  }
+
+  """
+  The workspace with dang.toml written into the directory `into`, from the
+  settings of the directory `from` in the workspace generation started from:
+  the scope writes sdk/ whole, so only that workspace still holds them. It
+  names no sdk-helpers type, whose name depends on the engine's naming rules.
+  """
+  let dangConfigWritten(from: String!, target: Workspace!, into: String!): Workspace! {
+    let loaded = if (hasDangConfig(from)) {
+      sdkHelpers.loadDangConfig(ws.withWorkdir(from))
+    } else {
+      sdkHelpers.dangConfig
+    }
+    loaded
+      .withVersion(dangLanguageVersion)
+      .withDaggerImport(name: "Dagger", version: targetVersion)
+      .generate(target.withWorkdir(into))
+  }
+
+  let dangConfigContents(from: String!): String! {
+    dangConfigWritten(from, ws, rootPath).file("/" + dangConfigPath(rootPath)).contents
+  }
+
+  let hasDangConfig(dir: String!): Boolean! {
+    let path = dangConfigPath(dir)
+    ws.directory("/", include: [path]).exists(path)
+  }
+
+  let dangConfigPath(dir: String!): String! {
+    if (dir == ".") { "dang.toml" } else { dir + "/dang.toml" }
+  }
+
+  let modulePath(path: String!): String! {
+    if (rootPath == ".") { path } else { rootPath + "/" + path }
   }
 
   """
@@ -326,4 +417,5 @@ type Mod {
   let vendorDirName: String! = "sdk"
   let entrypointDirName: String! = "entrypoint"
   let entrypointOutput: String! = "/dagger/entrypoint"
+  let dangLanguageVersion: String! = "2.1"
 }

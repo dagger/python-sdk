@@ -1481,6 +1481,88 @@ type E2e {
   }
 
   """
+  A generated entrypoint declares its Dagger version in dang.toml, however the
+  module is generated, and nothing else carries that version.
+  """
+  pub dangConfigCheck(ws: Workspace!): Void @check {
+    let root = tomlGenerateModulePath
+    let configPath = "/" + root + "/sdk/entrypoint/dang.toml"
+    let target = "v1.0.0-beta.21"
+
+    let generated = dangConfigGenerate(ws)
+    assert(generated.cwd == ws.withWorkdir(root).cwd, "generation moved the caller's directory: " + generated.cwd)
+    let written = generated.file(configPath).contents
+    assertContainsAll(written, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + target + "\""])
+    assertNotContains(generated.file("/" + root + "/sdk/entrypoint/main.dang").contents, "DAGGER_CLIENT_VERSION", "the entrypoint declares a version outside dang.toml")
+    assert(dangConfigDirect(ws).file(configPath).contents == written, "a module generated directly got another dang.toml")
+    assert(dangConfigGenerate(generated).withWorkdir(".").changes(generated.withWorkdir(".")).isEmpty, "a second generation changed the module")
+
+    let owned = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = OWNED\n\n[imports.Lib]\npath = \"./lib\"\n\n[imports.Also]\ndagger = true\n"
+    ["true", "\"v1.0.0-beta.20\""].each { dagger =>
+      let seeded = generated.withNewFile(configPath, owned.replace("OWNED", dagger))
+      [dangConfigGenerate(seeded), dangConfigDirect(seeded)].each { kept =>
+        let contents = kept.file(configPath).contents
+        assertContainsAll(contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\"", "[imports.Also]", "dagger = true"])
+        assertNotContains(contents, "v1.0.0-beta.20", "generation kept an older version: " + contents)
+      }
+    }
+
+    [
+      ["dang = \"2.0\"\n", "declares Dang 2.0"],
+      ["[imports.Dagger]\npath = \"./schema\"\n", "imports Dagger from a path"],
+      ["[imports.Dagger]\nendpoint = \"http://example\"\n", "has an endpoint"],
+      ["[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n", "another Dagger version"],
+    ].each { case =>
+      let seeded = generated.withNewFile(configPath, case[0] ?? "")
+      let want = case[1] ?? ""
+      let scopeRefused = dangConfigGenerate(seeded).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(scopeRefused, want, "scope generation did not refuse: " + want)
+      let directRefused = dangConfigDirect(seeded).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(directRefused, want, "direct generation did not refuse: " + want)
+    }
+
+    let ancestorPath = "/" + root + "/dang.toml"
+    [
+      ["[imports.Lib]\npath = \"./lib\"\n", "would take the place of"],
+      ["[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n", "another Dagger version"],
+    ].each { case =>
+      let refused = dangConfigGenerate(ws.withNewFile(ancestorPath, case[0] ?? "")).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(refused, case[1] ?? "", "a dang.toml in the module directory was silently replaced: " + refused)
+    }
+    let matching = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"" + target + "\"\n"
+    let beside = dangConfigGenerate(ws.withNewFile(ancestorPath, matching))
+    assert(beside.file(ancestorPath).contents == matching, "generation changed a dang.toml in the module directory")
+    assert(beside.file(configPath).contents == written, "a dang.toml in the module directory changed the generated one")
+    let ancestorSettings = "[imports.Lib]\npath = \"./lib\"\n"
+    let governed = generated.withNewFile(ancestorPath, ancestorSettings)
+    assert(dangConfigGenerate(governed).file(ancestorPath).contents == ancestorSettings, "generation changed a file the entrypoint's own dang.toml governs over")
+
+    let custom = "# the user's own\n"
+    let own = ws
+      .withNewFile("/" + root + "/dagger-module.toml", "name = \"toml-generate-app\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./custom\"\n")
+      .withNewFile("/" + root + "/custom/main.dang", "# a Dang entrypoint of the user's own\n")
+      .withNewFile("/" + root + "/custom/dang.toml", custom)
+    let keptOwn = dangConfigGenerate(own)
+    assert(keptOwn.file("/" + root + "/custom/dang.toml").contents == custom, "generation changed the dang.toml of an entrypoint of the user's own")
+    assert(keptOwn.directory("/" + root).exists("sdk/entrypoint") == false, "a module on its own entrypoint got a generated one")
+    null
+  }
+
+  let dangConfigGenerate(seeded: Workspace!): Workspace! {
+    pythonSdk.generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+  }
+
+  let dangConfigDirect(seeded: Workspace!): Workspace! {
+    pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).generated
+  }
+
+  """
   A module named with a digit or a capital runs: `dagger module init` puts its
   package where uv_build and the runtime look for it, in the shared and the
   static form, and the module still runs after `dagger generate`.

@@ -196,6 +196,7 @@ type PythonSdk {
         entrypointMode: mode,
         migrating: migrating,
         engineVersion: scopeEngineVersion(initialized, scope),
+        targetVersion: engineTarget,
         clients: clients,
       ).generated.withWorkdir(scope)
     }
@@ -527,6 +528,13 @@ type PythonSdk {
   let staticEntrypointPath: String! = vendorDirName + "/entrypoint"
 
   """
+  The engine release a generated entrypoint declares, bumped with each SDK
+  release. Core is read in helpers/core-schema's version, which gets the same
+  API view; moving this past the view's cut must move that version too.
+  """
+  let engineTarget: String! = "v1.0.0-beta.21"
+
+  """
   The first engine release this SDK runs on: the first that loads a
   module's files through its entrypoint's sources member.
   """
@@ -782,6 +790,7 @@ type PythonSdk {
       entrypointMode: entrypointModeOf(ws, modPath),
       migrating: migratingModule(ws, modPath),
       engineVersion: scopeEngineVersion(ws, modPath),
+      targetVersion: engineTarget,
       clients: null,
     )
   }
