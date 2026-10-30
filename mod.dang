@@ -115,7 +115,7 @@ type Mod {
       # The scope writes sdk/ whole, so an entrypoint from an earlier static
       # generation is gone unless it is written again. It also relocks
       # uv.lock, which the derived resources are checked against.
-      let scoped = scope.generated
+      let scoped = scope.generated.withDirectory("/", retainedDangConfigs)
       if (entrypointMode == "generated") {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)
@@ -147,7 +147,7 @@ type Mod {
       if (governing.length > 0) {
         let dir = governing[0] ?? ""
         checkDangConfigAt(dir, false)
-        if (dangConfigContents(dir) != dangConfigContents(entrypointDirectory)) {
+        if (dangConfigContents(dir) != dangConfigContents("")) {
           raise dangConfigPath(dir) + " has settings a dang.toml generated in " + entrypointDirectory + " would take the place of: move them to that file, or remove them"
         }
       }
@@ -178,13 +178,26 @@ type Mod {
   }
 
   """
+  The dang.toml files of sdk/, as generation found them: the scope writes sdk/
+  whole, and they are the user's in every mode. A leaf that only says what
+  generation writes is the SDK's own, and goes with an inactive entrypoint.
+  """
+  let retainedDangConfigs: Directory! {
+    let entrypointDirectory = modulePath(vendorDirName + "/" + entrypointDirName)
+    let leaf = dangConfigPath(entrypointDirectory)
+    let inactive = entrypointMode != "generated" and hasDangConfig(entrypointDirectory) and ws.file("/" + leaf).contents == dangConfigContents("")
+    let exclude = if (inactive) { ["**/.venv", leaf] } else { ["**/.venv"] }
+    ws.directory("/", include: [modulePath(vendorDirName + "/**/dang.toml")], exclude: exclude)
+  }
+
+  """
   The workspace with dang.toml written into the directory `into`, from the
-  settings of the directory `from` in the workspace generation started from:
-  the scope writes sdk/ whole, so only that workspace still holds them. It
-  names no sdk-helpers type, whose name depends on the engine's naming rules.
+  settings of the directory `from`, or from none when it is empty, in the
+  workspace generation started from. It names no sdk-helpers type, whose name
+  depends on the engine's naming rules.
   """
   let dangConfigWritten(from: String!, target: Workspace!, into: String!): Workspace! {
-    let loaded = if (hasDangConfig(from)) {
+    let loaded = if (from != "" and hasDangConfig(from)) {
       sdkHelpers.loadDangConfig(ws.withWorkdir(from))
     } else {
       sdkHelpers.dangConfig

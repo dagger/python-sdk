@@ -1504,6 +1504,9 @@ type E2e {
     ])
     assert(dangConfigDirect(ws).file(configPath).contents == written, "a module generated directly got another dang.toml")
     assert(dangConfigGenerate(generated).withWorkdir(".").changes(generated.withWorkdir(".")).isEmpty, "a second generation changed the module")
+    let generatedDirectly = dangConfigDirect(ws)
+    assert(generatedDirectly.cwd == ws.withWorkdir(".").cwd, "direct generation moved the workspace's directory: " + generatedDirectly.cwd)
+    assert(dangConfigDirect(generatedDirectly).changes(generatedDirectly).isEmpty, "a second direct generation changed the module")
 
     let owned = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = OWNED\n\n[imports.Lib]\npath = \"./lib\"\n\n[imports.Also]\ndagger = true\n"
     ["true", "\"v1.0.0-beta.20\""].each { dagger =>
@@ -1544,9 +1547,21 @@ type E2e {
       assertContains(refused, case[1] ?? "", "a dang.toml in the module directory was silently replaced: " + refused)
     }
     let matching = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"" + target + "\"\n"
+    let sdkPath = "/" + root + "/sdk/dang.toml"
+    let sdkRefused = dangConfigGenerate(ws.withNewFile(sdkPath, "[imports.Lib]\npath = \"./lib\"\n")).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(sdkRefused, "would take the place of", "a dang.toml in sdk/ was silently replaced: " + sdkRefused)
+    assert(dangConfigGenerate(generated.withoutFile(configPath).withNewFile(sdkPath, "[imports.Dagger]\ndagger = true\n")).file(sdkPath).contents == "[imports.Dagger]\ndagger = true\n", "a dang.toml in sdk/ did not survive the directory being replaced")
+    assert(dangConfigGenerate(generated.withNewFile(sdkPath, "[imports.Lib]\npath = \"./lib\"\n")).file(sdkPath).contents == "[imports.Lib]\npath = \"./lib\"\n", "a dang.toml in sdk/ above the entrypoint's own did not survive")
+    let aboveModule = "/" + fixtureRoot + "/toml-generate/dang.toml"
+    let above = dangConfigGenerate(ws.withNewFile(aboveModule, "dang = \"2.0\"\n"))
+    assert(above.file(aboveModule).contents == "dang = \"2.0\"\n", "generation changed a dang.toml above the module")
+    assert(above.file(configPath).contents == written, "a dang.toml above the module changed the generated one")
     let beside = dangConfigGenerate(ws.withNewFile(ancestorPath, matching))
     assert(beside.file(ancestorPath).contents == matching, "generation changed a dang.toml in the module directory")
     assert(beside.file(configPath).contents == written, "a dang.toml in the module directory changed the generated one")
+    assert(dangConfigGenerate(ws.withNewFile(ancestorPath, "[imports.Dagger]\ndagger = true\n")).file(configPath).contents == written, "a dang.toml in the module directory that adds nothing was refused")
     let ancestorSettings = "[imports.Lib]\npath = \"./lib\"\n"
     let governed = generated.withNewFile(ancestorPath, ancestorSettings)
     assert(dangConfigGenerate(governed).file(ancestorPath).contents == ancestorSettings, "generation changed a file the entrypoint's own dang.toml governs over")
@@ -1558,6 +1573,23 @@ type E2e {
     assertContains(moved.file("/" + root + "/dagger-module.toml").contents, "source = \"./sdk/entrypoint\"", "the module stayed on the remote entrypoint")
     assertContainsAll(moved.file(configPath).contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\""])
     assertContains(moved.file("/" + root + "/sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"" + target + "\"", "the moved module declares another version")
+
+    let customized = generated.withNewFile(configPath, owned.replace("OWNED", "true"))
+    let onRuntime = pythonSdk(legacyRuntime: true).generateScope(customized.withWorkdir(root), isModule: true, name: "toml-generate-app", clients: [])
+    assert(onRuntime.file(configPath).contents == owned.replace("OWNED", "true"), "moving onto the runtime lost a customized dang.toml")
+    assert(onRuntime.directory("/" + root).exists("sdk/entrypoint/main.dang") == false, "moving onto the runtime kept the entrypoint")
+    assert(dangConfigGenerate(onRuntime).file(configPath).contents == owned.replace("OWNED", "true"), "generating a module on the runtime changed its dang.toml")
+    let returned = dangConfigGenerate(onRuntime.withNewFile("/" + root + "/dagger-module.toml", "name = \"toml-generate-app\"\n"))
+    assertContains(returned.file("/" + root + "/dagger-module.toml").contents, "source = \"./sdk/entrypoint\"", "a manifest that names no runtime did not return the module to a generated entrypoint")
+    assertContainsAll(returned.file(configPath).contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\""])
+    let plainOnRuntime = pythonSdk(legacyRuntime: true).generateScope(generated.withWorkdir(root), isModule: true, name: "toml-generate-app", clients: [])
+    assert(plainOnRuntime.directory("/" + root).exists("sdk/entrypoint") == false, "moving onto the runtime kept a dang.toml with nothing of the user's")
+    let ownRuntime = customized.withNewFile("/" + root + "/dagger-module.toml", "name = \"toml-generate-app\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n")
+    assert(dangConfigGenerate(ownRuntime).file(configPath).contents == owned.replace("OWNED", "true"), "a module on its own runtime lost a dang.toml in sdk/")
+    let ownEntrypoint = customized
+      .withNewFile("/" + root + "/dagger-module.toml", dangEntrypointManifest("toml-generate-app", "./custom"))
+      .withNewFile("/" + root + "/custom/main.dang", "# a Dang entrypoint of the user's own\n")
+    assert(dangConfigGenerate(ownEntrypoint).file(configPath).contents == owned.replace("OWNED", "true"), "a module on its own entrypoint lost a dang.toml in sdk/")
 
     let custom = "# the user's own\n"
     let own = ws
