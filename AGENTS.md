@@ -24,7 +24,6 @@ build engines from dagger/dagger commits. CI runs them:
 ```sh
 dagger check engine-e2e:runtime-call-check
 dagger check engine-e2e:floor-coverage-check
-dagger check engine-e2e:below-floor-check
 ```
 
 Each e2e check has an `engine-e2e` check of the same name, which runs it on the

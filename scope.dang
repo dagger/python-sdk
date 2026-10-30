@@ -502,7 +502,7 @@ type Scope {
   let coreSchema: File! {
     codegenBase
       .withFile(coreOnlyScriptPath, currentModule.source.file("helpers/core-schema/core_only.py"))
-      .withMountedFile(schemaPath, coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJSON)
+      .withMountedFile(schemaPath, coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJson)
       .withExec(["python", coreOnlyScriptPath, schemaPath, coreOnlyPath])
       .file(coreOnlyPath)
   }
@@ -552,7 +552,7 @@ type Scope {
   not serve it by.
   """
   let clientSchema(member: ClientMember!): File! {
-    let schema = member.source.clientSchemaIntrospectionJSON(clientVersion: view)
+    let schema = member.source.clientSchemaIntrospectionJson(clientVersion: view)
     checkClientLoads(member, schema)
     schema
   }

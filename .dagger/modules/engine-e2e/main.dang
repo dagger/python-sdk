@@ -12,11 +12,6 @@ type EngineE2e {
   """
   let floorCommit: String! = "017633c9d125b973a0ae1401073ee3b4c37c2829"
 
-  """
-  Commit of v1.0.0-beta.21, the last release below the floor.
-  """
-  let belowFloorCommit: String! = "a7a2e64e853be92728f05aad9dc07bebe63c7448"
-
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
       raise message
@@ -188,8 +183,6 @@ type EngineE2e {
 
   pub staticScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "static-scope-init-check") }
 
-  pub engineFloorRefusalCheck(ws: Workspace!): Void @check { onFloor(ws, "engine-floor-refusal-check") }
-
   pub collectionsCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-check") }
 
   pub collectionsClientCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-client-check") }
@@ -223,17 +216,4 @@ type EngineE2e {
   pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "git-workspace-generate-check") }
 
   pub namingCheck(ws: Workspace!): Void @check { onFloor(ws, "naming-check") }
-
-  """
-  The release below the floor is refused: on its engine, generation names the
-  floor and the release to pin instead.
-  """
-  pub belowFloorCheck(ws: Workspace!): Void @check {
-    let checked = sdkClient(ws, belowFloorEngineDev(ws: daggerSource(belowFloorCommit)).installClient(client: clientBase))
-      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", "engine-floor-refusal-check"]))
-    # A pattern that matches no check passes too.
-    let said = checked.stdout + checked.stderr
-    assert(said.contains("1 passed"), "engine-floor-refusal-check did not run on the engine below the floor:\n" + said)
-    null
-  }
 }

@@ -168,7 +168,6 @@ type PythonSdk {
   entrypoint or a runtime of its own, which generation keeps.
   """
   pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
-    checkEngine
     checkOneRunnerAsked
     let scope = normalizePath(ws.cwd)
     # Resolve local client paths from the workspace root.
@@ -527,120 +526,6 @@ type PythonSdk {
   let staticEntrypointPath: String! = vendorDirName + "/entrypoint"
 
   """
-  The first engine release this SDK runs on: the first that names identifiers
-  by its naming rules and answers for them, which generation (formatIdentifiers)
-  and the module runtime (CurrentModule.naming) both ask.
-  """
-  let engineFloor: String! = "v1.0.0-beta.22"
-
-  """
-  The last release of this SDK that runs on an engine below engineFloor.
-  """
-  let lastReleaseBelowFloor: String! = "v1.3.0"
-
-  """
-  The first engine release lastReleaseBelowFloor runs on, as its manifest
-  declares.
-  """
-  let lastReleaseEngineFloor: String! = "v1.0.0-beta.18"
-
-  """
-  Why this SDK refuses an engine of the given version, or the empty string
-  when it runs on it. Only a release older than the floor is refused: a
-  version this cannot read, a development build among them, passes, so an
-  unexpected format never blocks a user. The engine's own gate cannot do this:
-  it treats every prerelease of v1.0.0 as v1.0.0. The refusal offers the last
-  release below the floor only to an engine that release runs on.
-  """
-  pub engineRefusal(engineVersion: String!): String! {
-    if (releasePrecedes(engineVersion, engineFloor) == false) {
-      ""
-    } else {
-      let needs = "this Python SDK needs Dagger engine " + engineFloor + " or later, and this engine is " +
-        engineVersion + ". "
-      if (releasePrecedes(engineVersion, lastReleaseEngineFloor)) {
-        needs + "Upgrade the engine."
-      } else {
-        needs + "Upgrade the engine, or pin the last release of this SDK that runs on it: " +
-          "dagger module install github.com/dagger/python-sdk@" + lastReleaseBelowFloor
-      }
-    }
-  }
-
-  """
-  Refuse an engine older than the floor before generation reads or writes
-  anything, so the user reads why instead of an unknown field later.
-  """
-  let checkEngine: Void {
-    let refusal = engineRefusal(version)
-    if (refusal != "") {
-      raise refusal
-    }
-    null
-  }
-
-  """
-  Whether release `a` comes before release `b` in semver precedence. False
-  when either is not a plain `vX.Y.Z[-pre][+build]` or is a development build.
-  """
-  let releasePrecedes(a: String!, b: String!): Boolean! {
-    let pattern = Regexp("^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:-([0-9A-Za-z.]+))?(?:\\+[0-9A-Za-z.-]+)?$")
-    let ma = a.match(pattern)
-    let mb = b.match(pattern)
-    if (ma == null) {
-      false
-    } else if (mb == null) {
-      false
-    } else if (a.contains("dev") or b.contains("dev")) {
-      false
-    } else {
-      let ca = ma.captures
-      let cb = mb.captures
-      let coreA = [ca[0] ?? "", ca[1] ?? "", ca[2] ?? ""]
-      let coreB = [cb[0] ?? "", cb[1] ?? "", cb[2] ?? ""]
-      let preA = ca[3] ?? ""
-      let preB = cb[3] ?? ""
-      if (identifiersPrecede(coreA, coreB, 0)) {
-        true
-      } else if (identifiersPrecede(coreB, coreA, 0)) {
-        false
-      } else if (preA == "") {
-        false
-      } else if (preB == "") {
-        true
-      } else {
-        identifiersPrecede(preA.split("."), preB.split("."), 0)
-      }
-    }
-  }
-
-  """
-  Semver precedence of dot-separated identifiers from index `i`: numbers by
-  value and before words, words by ASCII, and a shorter list first when one
-  is a prefix of the other.
-  """
-  let identifiersPrecede(a: [String!]!, b: [String!]!, i: Int!): Boolean! {
-    if (i >= a.length) {
-      i < b.length
-    } else if (i >= b.length) {
-      false
-    } else {
-      let x = a[i] ?? ""
-      let y = b[i] ?? ""
-      let xNumber = x.containsMatch("^[0-9]+$")
-      let yNumber = y.containsMatch("^[0-9]+$")
-      if (x == y) {
-        identifiersPrecede(a, b, i + 1)
-      } else if (xNumber and yNumber) {
-        # Space sorts before every digit, so padding to one width orders by value.
-        x.padLeft(20) < y.padLeft(20)
-      } else {
-        xNumber or (yNumber == false and x < y)
-      }
-    }
-  }
-
-  """
   Refuse the two flags together: an entrypoint and a runtime are two ways to
   run a module, and a manifest names one of them.
   """
@@ -770,7 +655,6 @@ type PythonSdk {
   as given, without asking whether this SDK manages it.
   """
   pub mod(ws: Workspace!, path: String! = ".", findUp: Boolean! = true): Mod! {
-    checkEngine
     let modPath = if (findUp) {
       managedModuleAtOrAbove(ws, path)
     } else {

@@ -50,17 +50,12 @@ asks it what it named the module's own declarations. An
 entrypoint runs a module on the engine's own version, so an entrypoint
 manifest keeps no `engineVersion`.
 
-On an older engine, `dagger module init` and `dagger generate` stop before
-they write anything, with a message that names the engine's version. The
-shared entrypoint cannot say why: Dang rejects its file before any code runs,
-so a module on it fails to load on v1.0.0-beta.14 with `field
-"withCollection" not found in Dagger.TypeDef`. A generated entrypoint fails to
-load on an older engine with `field "types": missing argument "workspace"
-required by interface`. To stay on an engine from
-v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
-there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
-`dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint. An engine
-older than v1.0.0-beta.14 runs neither release, and needs an upgrade.
+The SDK's modules declare `engineVersion` v1.0.0-beta.22. Engines compare
+only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.21
+still loads them, and fails wherever the SDK uses what it lacks. To stay on
+such an engine, pin `v1.3.0`, the last release that runs there:
+`dagger module install github.com/dagger/python-sdk@v1.3.0`, and
+`dagger.io/sdk/python/entrypoint@v1.3.0` for the shared entrypoint.
 
 Generating a module that has a manifest already keeps the kind it names:
 
@@ -430,7 +425,6 @@ dagger check
 
 Each e2e check runs as an `engine-e-2-e` check of the same name, on the engine
 of the floor release built from its dagger/dagger commit;
-`engine-e-2-e/floor-coverage-check` checks that every e2e check runs this way,
-and `engine-e-2-e/below-floor-check` checks that the release below the floor
-is refused. AGENTS.md has the commands that run the e2e checks on the local
+`engine-e-2-e/floor-coverage-check` checks that every e2e check runs this way.
+AGENTS.md has the commands that run the e2e checks on the local
 engine.

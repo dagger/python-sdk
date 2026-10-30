@@ -2060,54 +2060,6 @@ type E2e {
   }
 
   """
-  The SDK refuses an engine release older than its floor before it generates
-  anything, and names the version it found and what to do: pin the SDK's last
-  release before the floor where that release runs, from v1.0.0-beta.18, and
-  only upgrade below it. Every other version passes, a development build and
-  one it cannot read among them, so an unexpected format never blocks a user.
-  On an engine the SDK refuses, generation itself refuses.
-  """
-  pub engineFloorRefusalCheck(ws: Workspace!): Void @check {
-    let pin = "dagger module install github.com/dagger/python-sdk@v1.3.0"
-    let pinned = [
-      "v1.0.0-beta.21", "v1.0.0-beta.21+a7a2e64e", "v1.0.0-beta.20", "v1.0.0-beta.19",
-      "v1.0.0-beta.18", "v1.0.0-beta.18+249edbd6",
-    ]
-    let upgradeOnly = ["v1.0.0-beta.17", "v1.0.0-beta.14", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
-    let accepted = [
-      "v1.0.0-beta.22", "v1.0.0-beta.22+017633c9", "v1.0.0-beta.23", "v1.0.0-rc.1", "v1.0.0",
-      "v1.0.1", "v2.0.0-beta.1", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-dev.3", "devel", "",
-    ]
-    (pinned + upgradeOnly).each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      let wants = ["needs Dagger engine v" + floorVersion + " or later", "this engine is " + engine + ".", "Upgrade the engine"]
-      wants.each { want =>
-        assertContains(refusal, want, "engine \"" + engine + "\": the refusal does not say \"" + want + "\": " + refusal)
-      }
-    }
-    pinned.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assertContains(refusal, pin, "engine \"" + engine + "\": the refusal does not offer the last release that runs on it: " + refusal)
-    }
-    upgradeOnly.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assertNotContains(refusal, "pin", "engine \"" + engine + "\": the refusal offers a release that does not run on it either: " + refusal)
-    }
-    accepted.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assert(refusal == "", "the SDK refused engine \"" + engine + "\": " + refusal)
-    }
-    let refusal = pythonSdk.engineRefusal(version)
-    if (refusal != "") {
-      let said = pythonSdk.generateScope(ws.withNewDirectory("/floor-probe", directory).withWorkdir("floor-probe"), isModule: true, name: "floor-probe", clients: []).cwd rescue {
-        err: Error => err.message
-      }
-      assert(said.contains(refusal), "generation on engine " + version + ", which the SDK refuses, said: " + said)
-    }
-    null
-  }
-
-  """
   A module declares a collection, on this checkout's shared entrypoint, on
   the one generated into it, and on this checkout's runtime, which registers
   the types itself. The engine serves keys, list, get, subset and batch on it,
@@ -2500,11 +2452,11 @@ type E2e {
     ws.withNewFile("/" + resourcesAppPath + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
   }
 
-  let resourcesGenerated(sdk: PythonSdk!, ws: Workspace!): Workspace! {
+  let resourcesGenerated(sdk: PythonSDK!, ws: Workspace!): Workspace! {
     sdk.generateScope(ws.withWorkdir(resourcesAppPath), isModule: true, name: "resources-app", clients: []).withWorkdir(".")
   }
 
-  let resourcesAttempt(sdk: PythonSdk!, ws: Workspace!): String! {
+  let resourcesAttempt(sdk: PythonSDK!, ws: Workspace!): String! {
     resourcesGenerated(sdk, ws).file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents rescue {
       err: Error => err.message
     }
