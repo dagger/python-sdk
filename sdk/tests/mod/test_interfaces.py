@@ -15,6 +15,20 @@ pytestmark = [
     pytest.mark.anyio,
 ]
 
+# What the engine names the module's declarations.
+POND_NAMES = {
+    "typeNames": {"Duck": "PondDuck", "Goose": "PondGoose"},
+    "fieldNames": {
+        "speak": "speak",
+        "quack": "quack",
+        "get_self": "getSelf",
+        "get_mob": "getMob",
+        "with_origin": "withOrigin",
+        "from": "from",
+        "destination": "destination",
+    },
+}
+
 
 @pytest.fixture
 def mod() -> Module:
@@ -53,7 +67,9 @@ def mod() -> Module:
 
 
 @pytest.fixture
-async def duck(mod: Module):
+async def duck(mod: Module, engine):
+    engine.names = POND_NAMES
+    await mod.load_names()
     r, t = await mod.get_structured_result(
         "Pond",
         {"duck": "123456"},
