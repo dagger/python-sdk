@@ -1296,6 +1296,10 @@ type E2e {
     "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
   }
 
+  """
+  The entrypoint this repository used to serve to every module, frozen:
+  generation replaces it with the one it generates into the module.
+  """
   let sharedEntrypointSource: String! = "dagger.io/sdk/python/entrypoint@v1"
 
   let sdkRuntimeSource: String! = "dagger.io/sdk/python/runtime@v1"
@@ -1321,12 +1325,13 @@ type E2e {
 
   """
   A module runs on a Dang entrypoint and on nothing else: generation names
-  the shared entrypoint and no runtime. The builtin runtime this SDK wrote
-  before goes, with the engine version only a runtime reads.
+  the entrypoint it generates and no runtime. The builtin runtime this SDK
+  wrote before goes, with the engine version only a runtime reads.
 
   A stale module-kind entrypoint is replaced, because the engine rejects the
-  kind. A Dang entrypoint the user wrote is kept: a pinned version, or a fork.
-  A runtime of the user's own is kept as it is, with no entrypoint put in
+  kind, and so is a Dang entrypoint served from elsewhere: a pinned version
+  of the shared one, or a fork. A Dang entrypoint in the user's files is
+  kept. A runtime of the user's own is kept as it is, with no entrypoint put in
   front of it for the engine to follow instead, and refused beside one. A
   manifest that says what only a runtime can honour, which files the module
   is and where its source sits, keeps its runtime for the same reason, rather
@@ -1355,9 +1360,8 @@ type E2e {
     let pinned = manifestOf(ws.withNewFile(manifestPath, head + "\n" + runtimeTable + "\n" +
       "[entrypoint]\n# source first, and a bracket [here] in a comment\n" +
       "source = \"" + fork + "\"\nkind = \"dang\"\n"))
-    assertContainsAll(pinned, ["kind = \"dang\"", "source = \"" + fork + "\""])
-    assertContainsNone(pinned, noRuntime)
-    assertNotContains(pinned, sharedEntrypointSource + "\"", "a Dang entrypoint the user wrote was overwritten")
+    assertContainsAll(pinned, ["kind = \"dang\"", "source = \"./sdk/entrypoint\""])
+    assertContainsNone(pinned, noRuntime + [fork])
 
     let ownRuntime = head + "\n[runtime]\nsource = \"../../../../../../runtime\"\n"
     let own = manifestOf(ws.withNewFile(manifestPath, ownRuntime))
@@ -1401,18 +1405,19 @@ type E2e {
       "name = \"" + name + "\"\n\n[ entrypoint ]\nsource = './sdk/entrypoint'\nkind = \"dang\"\n")
     assert(pythonSdk.mod(static, path: tomlGenerateModulePath, findUp: false).entrypointMode == "generated", "a static entrypoint written source-first was not recognised")
     let shared = ws.withNewFile(manifestPath, head + "\n[entrypoint]\nkind = \"dang\"\nsource = \"" + sharedEntrypointSource + "\"\n")
-    assert(pythonSdk.mod(shared, path: tomlGenerateModulePath, findUp: false).entrypointMode == "remote", "the shared entrypoint was taken for a static one")
+    assert(pythonSdk.mod(shared, path: tomlGenerateModulePath, findUp: false).entrypointMode == "generated", "the shared entrypoint was not read as one to replace")
 
-    # An entrypoint this SDK did not write is the user's, and is kept as
-    # written: a path of their own in the module, and a fork quoted their way.
+    # An entrypoint in the user's files is theirs, and is kept as written: a
+    # path of their own in the module. A fork quoted their way is read all
+    # the same, and replaced like any entrypoint served from elsewhere.
     let ownPath = head + "\n[entrypoint]\nkind = \"dang\"\nsource = \"./my-entrypoint\"\n"
     let ownManifest = manifestOf(ws.withNewFile(manifestPath, ownPath))
     assertContains(ownManifest, "source = \"./my-entrypoint\"", "a Dang entrypoint of the user's own was replaced: " + ownManifest)
-    assertNotContains(ownManifest, sharedEntrypointSource, "a Dang entrypoint of the user's own was replaced: " + ownManifest)
-    assert(pythonSdk.mod(ws.withNewFile(manifestPath, ownPath), path: tomlGenerateModulePath, findUp: false).entrypointMode == "remote", "an entrypoint of the user's own was taken for the static one")
+    assertNotContains(ownManifest, "./sdk/entrypoint", "a Dang entrypoint of the user's own was replaced: " + ownManifest)
+    assert(pythonSdk.mod(ws.withNewFile(manifestPath, ownPath), path: tomlGenerateModulePath, findUp: false).entrypointMode == "own", "an entrypoint of the user's own was not read as one")
     let quoted = manifestOf(ws.withNewFile(manifestPath, head + runtimeTable + "\n[entrypoint]\nkind = 'dang'\nsource = '" + fork + "'\n"))
-    assertContains(quoted, fork, "a single-quoted Dang entrypoint was replaced: " + quoted)
-    assertNotContains(quoted, sharedEntrypointSource, "a single-quoted Dang entrypoint was replaced: " + quoted)
+    assertContains(quoted, "source = \"./sdk/entrypoint\"", "a single-quoted fork was not replaced: " + quoted)
+    assertNotContains(quoted, fork, "a single-quoted fork was not replaced: " + quoted)
     assertContainsNone(quoted, noRuntime)
 
     # A local client loads through serveModule under any entrypoint, so an
@@ -1422,7 +1427,7 @@ type E2e {
     assertContains(ownWithClient, "source = \"./my-entrypoint\"", "an entrypoint of the user's own was refused or replaced with a local client: " + ownWithClient)
     let pinnedShared = "dagger.io/sdk/python/entrypoint@v1.0.0"
     let pinnedWithClient = manifestWithClients(ws.withNewFile(manifestPath, head + "\n[entrypoint]\nkind = \"dang\"\nsource = \"" + pinnedShared + "\"\n"), local)
-    assertContains(pinnedWithClient, "source = \"" + pinnedShared + "\"", "a pinned shared entrypoint was refused or replaced with a local client: " + pinnedWithClient)
+    assertContains(pinnedWithClient, "source = \"./sdk/entrypoint\"", "a pinned shared entrypoint was refused or kept with a local client: " + pinnedWithClient)
     let ownWritten = manifestWithClients(ws.withNewFile(manifestPath, plain), local)
     assertContains(ownWritten, "source = \"./sdk/entrypoint\"", "the entrypoint this SDK writes was refused with a local client: " + ownWritten)
 
@@ -1546,6 +1551,14 @@ type E2e {
     let governed = generated.withNewFile(ancestorPath, ancestorSettings)
     assert(dangConfigGenerate(governed).file(ancestorPath).contents == ancestorSettings, "generation changed a file the entrypoint's own dang.toml governs over")
 
+    let remote = generated
+      .withNewFile("/" + root + "/dagger-module.toml", dangEntrypointManifest("toml-generate-app", "github.com/someone/python-sdk/entrypoint@entrypoint/v1"))
+      .withNewFile(configPath, owned.replace("OWNED", "true"))
+    let moved = dangConfigGenerate(remote)
+    assertContains(moved.file("/" + root + "/dagger-module.toml").contents, "source = \"./sdk/entrypoint\"", "the module stayed on the remote entrypoint")
+    assertContainsAll(moved.file(configPath).contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\""])
+    assertContains(moved.file("/" + root + "/sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"" + target + "\"", "the moved module declares another version")
+
     let custom = "# the user's own\n"
     let own = ws
       .withNewFile("/" + root + "/dagger-module.toml", "name = \"toml-generate-app\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./custom\"\n")
@@ -1567,28 +1580,25 @@ type E2e {
 
   """
   A module named with a digit or a capital runs: `dagger module init` puts its
-  package where uv_build and the runtime look for it, in the shared and the
-  static form, and the module still runs after `dagger generate`.
+  package where uv_build and the runtime look for it, and the module still
+  runs after `dagger generate`.
   """
   pub cliModuleNameCheck(ws: Workspace!): Void @check {
-    cliModuleName(ws, "module3", "module3", false)
-    cliModuleName(ws, "module3", "module3", true)
-    cliModuleName(ws, "MyModule", "mymodule", true)
+    cliModuleName(ws, "module3", "module3")
+    cliModuleName(ws, "MyModule", "mymodule")
     null
   }
 
-  let cliModuleName(ws: Workspace!, name: String!, pkg: String!, static: Boolean!): Void {
-    let form = if (static) { "static" } else { "shared" }
-    let path = ".dagger/modules/" + form + "-" + name
+  let cliModuleName(ws: Workspace!, name: String!, pkg: String!): Void {
+    let path = ".dagger/modules/static-" + name
     let generated = cli(
       cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", name, "--path", path]),
       ["generate", "-y"],
     )
-    let runnable = if (static) { generated } else { onCheckoutEntrypoint(generated, ws, path, name) }
-    let ran = cli(runnable, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
-    assert(ran.stdout.trimSpace != "", "the " + form + " module " + name + " did not run")
+    let ran = cli(generated, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
+    assert(ran.stdout.trimSpace != "", "the module " + name + " did not run")
     ran.withExec(["test", "-f", path + "/src/" + pkg + "/__init__.py"]).sync
-    if (static) { editedBodyRuns(ran, path, pkg) } else { null }
+    editedBodyRuns(ran, path, pkg)
     null
   }
 
@@ -1610,10 +1620,9 @@ type E2e {
   }
 
   """
-  A module on an entrypoint calls a local client whose module is on an
-  entrypoint too, in both forms: this checkout's shared entrypoint, and the
-  one generated into the module. The released CLI drives
-  it from `dagger module init` to `dagger call`.
+  A module on the entrypoint generated into it calls a local client whose
+  module is on one too. The released CLI drives it from `dagger module init`
+  to `dagger call`.
 
   Under an entrypoint a module's code is not the module to the engine, and
   its own workspace is its container's: the engine serves the client's
@@ -1627,63 +1636,52 @@ type E2e {
   the caller's, because the caller passes it.
   """
   pub entrypointClientCallCheck(ws: Workspace!): Void @check {
-    entrypointClientCall(ws, "shared", "Shared")
-    entrypointClientCall(ws, "static", "Static")
-    null
-  }
-
-  let entrypointClientCall(ws: Workspace!, form: String!, title: String!): Void {
-    let target = "ep-target-" + form
-    let caller = "ep-caller-" + form
+    let target = "ep-target"
+    let caller = "ep-caller"
     let targetPath = ".dagger/modules/" + target
     let callerPath = ".dagger/modules/" + caller
-    let greeting = "hello from the " + form + " target"
+    let greeting = "hello from the target"
     let targetSource =
       "from dagger import function, object_type\n\n\n" +
       "@object_type\n" +
-      "class EpTarget" + title + ":\n" +
+      "class EpTarget:\n" +
       "    @function\n" +
       "    def greeting(self) -> str:\n" +
       "        return \"" + greeting + "\"\n"
     let callerSource =
       "from dagger import function, object_type\n" +
       "from dagger_clients.core import Workspace\n" +
-      "from dagger_clients.ep_target_" + form + " import ep_target_" + form + "\n\n" +
+      "from dagger_clients.ep_target import ep_target\n\n" +
       "from .reach import reach\n\n\n" +
       "@object_type\n" +
-      "class EpCaller" + title + ":\n" +
+      "class EpCaller:\n" +
       "    @function\n" +
       "    async def greeting(self) -> str:\n" +
-      "        return await ep_target_" + form + "().greeting()\n\n" +
+      "        return await ep_target().greeting()\n\n" +
       "    @function\n" +
       "    async def reach(self) -> str:\n" +
-      "        await ep_target_" + form + "().greeting()\n" +
+      "        await ep_target().greeting()\n" +
       "        return await reach(\"" + callerSecretPath + "\")\n\n" +
       "    @function\n" +
       "    async def declared(self, ws: Workspace) -> str:\n" +
       "        return await ws.file(\"/" + callerSecretPath + "\").contents()\n"
 
     let withTarget = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", target, "--path", targetPath])
-      .withNewFile(targetPath + "/src/ep_target_" + form + "/__init__.py", targetSource)
+      .withNewFile(targetPath + "/src/ep_target/__init__.py", targetSource)
     # A static entrypoint bakes the module's types, so the source is in place
     # before generation.
-    let targetReady = if (form == "static") {
-      cli(withTarget, ["-y", "call", "python-sdk", "mod", "--path", targetPath, "generate"])
-    } else {
-      onCheckoutEntrypoint(withTarget, ws, targetPath, target)
-    }
+    let targetReady = cli(withTarget, ["-y", "call", "python-sdk", "mod", "--path", targetPath, "generate"])
     # The caller's code is in place before its client is added, so the static
     # entrypoint generated with the client describes it.
     let withClient = cli(targetReady, ["module", "init", "python", "--auto-apply", "--name", caller, "--path", callerPath])
-      .withNewFile(callerPath + "/src/ep_caller_" + form + "/__init__.py", callerSource)
-      .withFile(callerPath + "/src/ep_caller_" + form + "/reach.py", ws.file("/" + fixtureRoot + "/reach/reach.py"))
+      .withNewFile(callerPath + "/src/ep_caller/__init__.py", callerSource)
+      .withFile(callerPath + "/src/ep_caller/reach.py", ws.file("/" + fixtureRoot + "/reach/reach.py"))
       .withWorkdir(callerPath)
-    let added = cli(withClient, ["module", "client", "add", "../" + target, "--sdk", "python", "--auto-apply"])
+    let callerReady = cli(withClient, ["module", "client", "add", "../" + target, "--sdk", "python", "--auto-apply"])
       .withWorkdir(playgroundRoot)
-    let callerReady = if (form == "static") { added } else { onCheckoutEntrypoint(added, ws, callerPath, caller) }
     let manifest = callerReady.file(playgroundRoot + "/" + callerPath + "/dagger-module.toml").contents
-    assertContains(manifest, "[entrypoint]", form + ": the caller is not on an entrypoint: " + manifest)
-    assertNotContains(manifest, "[runtime]", form + ": the caller names a runtime: " + manifest)
+    assertContains(manifest, "[entrypoint]", "the caller is not on an entrypoint: " + manifest)
+    assertNotContains(manifest, "[runtime]", "the caller names a runtime: " + manifest)
 
     # The first call is the capability probe: an engine that resolves a local
     # client in the caller's workspace, rather than in the tree the module was
@@ -1694,26 +1692,26 @@ type E2e {
       .withExec(["dagger", "-m", callerPath, "call", "greeting"], experimentalPrivilegedNesting: true, expect: ReturnType.ANY)
     let called = attempt.stdout + attempt.stderr
     if (called.contains(ownTreeRefusal)) {
-      note(callerReady, form + ": skipped, this engine resolves a local client in the caller's " +
+      note(callerReady, "skipped, this engine resolves a local client in the caller's " +
         "workspace instead of the module's own tree (dagger/dagger#14490), so a module cannot " +
         "serve the client it was generated against")
     } else {
-      assert(attempt.exitCode == 0, form + ": the module's call failed: " + called)
-      assertContains(called, greeting, form + ": the module did not call its client: " + called)
+      assert(attempt.exitCode == 0, "the module's call failed: " + called)
+      assertContains(called, greeting, "the module did not call its client: " + called)
 
-      let secret = "only in the caller's workspace, " + form
+      let secret = "only in the caller's workspace"
       let withSecret = callerReady.withNewFile(callerSecretPath, secret)
       let reached = cli(withSecret, ["-m", callerPath, "call", "reach"]).stdout
-      assertContains(reached, "reads=[]", form + ": module code read a caller file: " + reached)
-      assertNotContains(reached, secret, form + ": module code read a caller file: " + reached)
+      assertContains(reached, "reads=[]", "module code read a caller file: " + reached)
+      assertNotContains(reached, secret, "module code read a caller file: " + reached)
       # The probe proves something only if it held an ID to try, exercised many
       # routes, and hit no unknown field: an absent route errored for the wrong
       # reason and is no evidence of safety (fixtures/reach/reach.py).
-      assertNotContains(reached, "held=0 ", form + ": the module held nothing to try, so this proves nothing: " + reached)
-      assertContains(reached, "absent=0 ", form + ": a probe route hit an unknown field, so it proves nothing: " + reached)
-      assertNotContains(reached, "routes=0 ", form + ": the probe ran no routes: " + reached)
+      assertNotContains(reached, "held=0 ", "the module held nothing to try, so this proves nothing: " + reached)
+      assertContains(reached, "absent=0 ", "a probe route hit an unknown field, so it proves nothing: " + reached)
+      assertNotContains(reached, "routes=0 ", "the probe ran no routes: " + reached)
       let declared = cli(withSecret, ["-m", callerPath, "call", "declared"]).stdout
-      assertContains(declared, secret, form + ": a declared Workspace parameter did not reach the caller's workspace: " + declared)
+      assertContains(declared, secret, "a declared Workspace parameter did not reach the caller's workspace: " + declared)
     }
     null
   }
@@ -1834,82 +1832,6 @@ type E2e {
 
   let cli(ctr: Container!, args: [String!]!): Container! {
     ctr.withExec(["dagger"] + args, experimentalPrivilegedNesting: true)
-  }
-
-  """
-  A module in the playground on this checkout's shared entrypoint, not the
-  published one its manifest names, which predates this layout. The copy sits
-  inside the module: the engine takes an entrypoint only from a git ref or a
-  path in the module.
-  """
-  let onCheckoutEntrypoint(ctr: Container!, ws: Workspace!, path: String!, name: String!): Container! {
-    ctr
-      .withDirectory(path + "/checkout-entrypoint", ws.directory("/entrypoint"))
-      .withNewFile(path + "/dagger-module.toml", "name = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./checkout-entrypoint\"\n")
-  }
-
-  """
-  runtime/build.dang as the shared entrypoint carries it.
-
-  `currentModule` inside an entrypoint is the module it serves, so the
-  externals block that reads the pinned Dockerfiles is written out here
-  instead, the same way a generated per-module entrypoint carries it. The
-  workspace reader is read from the copy beside the build, in the directory
-  the served module names as its entrypoint.
-  """
-  pub sharedEntrypointBuild(ws: Workspace!): File! {
-    let pins = "let defaultBaseImage: String! = \"" + imageFrom(ws, "runtime/images/base/Dockerfile") + "\"\n" +
-      "  let defaultUvImage: String! = \"" + imageFrom(ws, "runtime/images/uv/Dockerfile") + "\"\n" +
-      "  let workspaceReader: String! { EntrypointFiles().directory.file(\"workspace_reader.py\").contents }"
-    let inlined = ws.file("/runtime/build.dang").contents
-      .replaceMatches("(?s)#<externals>.*?#</externals>", pins)
-    if (inlined.contains("currentModule")) {
-      raise "runtime/build.dang reads currentModule outside its externals block"
-    } else {
-      directory
-        .withNewFile(sharedEntrypointBuildPath, sharedEntrypointHeader + inlined)
-        .file(sharedEntrypointBuildPath)
-    }
-  }
-
-  let sharedEntrypointBuildPath: String! = "entrypoint/build.dang"
-
-  let sharedEntrypointHeader: String! =
-    "# Generated from runtime/build.dang by the e2e module. DO NOT EDIT.\n" +
-    "#\n" +
-    "# Refresh with:\n" +
-    "#   dagger call -m .dagger/modules/e2e shared-entrypoint-build \\\n" +
-    "#     export --path " + "entrypoint/build.dang" + "\n" +
-    "\n"
-
-  let imageFrom(ws: Workspace!, path: String!): String! {
-    let line = ws.file("/" + path).contents.match("(?m)^FROM\\s+(\\S+)")
-    if (line == null) {
-      raise "no FROM line in " + path
-    } else {
-      line.captures[0] ?? ""
-    }
-  }
-
-  """
-  The committed copies of the build and the workspace reader in the shared
-  entrypoint match the runtime module's, so a Dependabot bump to a pinned
-  image or a change to the reader reaches both. The build reads the reader
-  from its file and does not inline it.
-  """
-  pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check {
-    let want = sharedEntrypointBuild(ws).contents
-    let got = ws.file("/" + sharedEntrypointBuildPath).contents
-    assert(
-      got == want,
-      sharedEntrypointBuildPath + " is stale; refresh it with `dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path " + sharedEntrypointBuildPath + "`",
-    )
-    assertNotContains(got, "import glob, os, re, sys, tomllib", sharedEntrypointBuildPath + " inlines the workspace reader")
-    assert(
-      ws.file("/entrypoint/workspace_reader.py").contents == ws.file("/runtime/workspace_reader.py").contents,
-      "entrypoint/workspace_reader.py is stale; refresh it with `cp runtime/workspace_reader.py entrypoint/`",
-    )
-    null
   }
 
   """
@@ -2234,7 +2156,6 @@ type E2e {
   of its own. Without that state a changed copy reads as unchanged.
   """
   pub collectionsCheck(ws: Workspace!): Void @check {
-    collections(ws, "shared")
     collections(ws, "static")
     collections(ws, "runtime")
     null
@@ -2280,11 +2201,9 @@ type E2e {
     # before generation.
     let ready = if (form == "static") {
       cli(initialized, ["generate", "-y"])
-    } else if (form == "runtime") {
+    } else {
       initialized.withNewFile(path + "/dagger-module.toml",
         "name = \"shelf\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../runtime\"\n")
-    } else {
-      onCheckoutEntrypoint(initialized, ws, path, "shelf")
     }
 
     let queried = ready
@@ -2301,37 +2220,6 @@ type E2e {
     assert(batch.trimSpace == "b\nc", form + ": repeated selectors did not reach the batch with b and c: " + batch)
     null
   }
-
-  """
-  A module still loads on this checkout's shared entrypoint when its SDK
-  predates collections. The module keeps the SDK it was generated with while
-  the shared entrypoint moves with its tag, so the description it reads can
-  lack every collection key: the check strips them from the module's own
-  description, as that older SDK writes it.
-  """
-  pub collectionsOlderSdkCheck(ws: Workspace!): Void @check {
-    let path = ".dagger/modules/older-sdk"
-    let describe = path + "/sdk/src/dagger/mod/_describe.py"
-    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "older-sdk", "--path", path])
-    let source = initialized.file(playgroundRoot + "/" + describe).contents
-    let older = source.replace(describeJSONReturn, olderDescribeJSONReturn)
-    assert(older != source, "the SDK has no describe_json return to rewrite")
-    let ready = onCheckoutEntrypoint(initialized.withNewFile(describe, older), ws, path, "older-sdk")
-    let ran = cli(ready, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
-    assert(ran.trimSpace != "", "a module on an SDK older than collections did not run on the shared entrypoint")
-    null
-  }
-
-  let describeJSONReturn: String! = "    return json.dumps(dataclasses.asdict(desc))\n"
-
-  let olderDescribeJSONReturn: String! = "    def older(value):\n" +
-    "        if isinstance(value, dict):\n" +
-    "            return {k: older(v) for k, v in value.items() if not k.startswith(\"collection\")}\n" +
-    "        if isinstance(value, (list, tuple)):\n" +
-    "            return [older(v) for v in value]\n" +
-    "        return value\n" +
-    "\n" +
-    "    return json.dumps(older(dataclasses.asdict(desc)))\n"
 
   let collectionQuery: String! = "{ items {\n" +
     "  keys\n" +
@@ -2354,7 +2242,6 @@ type E2e {
     "\"subset\":{\"batch\":{\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]},\"keys\":[\"b\",\"c\"]}" +
     "}}"
 
-
   """
   Collections of every key type the engine takes, in one module: Int, Float,
   Boolean, an enum and a core scalar. The delta names a removed key as text,
@@ -2366,7 +2253,7 @@ type E2e {
     let path = ".dagger/modules/kinds"
     let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "kinds", "--path", path])
       .withFile(path + "/src/kinds/__init__.py", ws.file("/" + fixtureRoot + "/collections/kinds.py"))
-    let ready = onCheckoutEntrypoint(initialized, ws, path, "kinds")
+    let ready = cli(initialized, ["generate", "-y"])
 
     let queried = ready
       .withExec(["dagger", "-m", path, "query"], stdin: kindsQuery, experimentalPrivilegedNesting: true)
@@ -2402,10 +2289,9 @@ type E2e {
     "}"
 
   """
-  A module keeps the kind of entrypoint its manifest names when it is
-  generated again: one written into it stays written into it, and a Dang
-  entrypoint of another kind, a fork say, is left as it is. A second
-  generation changes nothing either way.
+  A module keeps the entrypoint written into it when it is generated again,
+  and a second generation changes nothing. A Dang entrypoint served from
+  elsewhere, a fork say, is replaced by one written into the module.
   """
   pub entrypointKindCheck(ws: Workspace!): Void @check {
     let manifestPath = tomlGenerateModulePath + "/dagger-module.toml"
@@ -2430,14 +2316,13 @@ type E2e {
     let again = pythonSdk.generateScope(generated.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     assert(again.changes(generated).isEmpty, "a second generation changed a module with its own entrypoint")
 
-    # A Dang entrypoint of another kind is the user's: it stays, and nothing
-    # is written into the module for it.
     let fork = "github.com/dagger/python-sdk/entrypoint@v1.2.3"
     let forked = ws.withNewFile("/" + manifestPath, "name = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"" + fork + "\"\n")
-    let keptFork = pythonSdk.generateScope(forked.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
-    let forkManifest = keptFork.file("/" + manifestPath).contents
-    assertContains(forkManifest, fork, "a Dang entrypoint of the user's own was replaced: " + forkManifest)
-    assert(keptFork.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "a module on another entrypoint got one written into it")
+    let movedFork = pythonSdk.generateScope(forked.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+    let forkManifest = movedFork.file("/" + manifestPath).contents
+    assertContains(forkManifest, "source = \"./sdk/entrypoint\"", "a fork served from elsewhere was kept: " + forkManifest)
+    assertNotContains(forkManifest, fork, "a fork served from elsewhere was kept: " + forkManifest)
+    assert(movedFork.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint"), "a module moved off a fork got no entrypoint written into it")
 
     null
   }
@@ -2446,8 +2331,7 @@ type E2e {
   `--legacy-runtime` runs a module on the runtime this SDK publishes instead of
   an entrypoint: a new module names it, a module that carries an entrypoint of
   its own moves onto it and the entrypoint goes, and a module on a runtime of
-  the user's own keeps theirs. The flag cannot be combined with
-  `--remote-entrypoint`. The module runs, which the check proves through this
+  the user's own keeps theirs. The module runs, which the check proves through this
   checkout's runtime: the published reference the SDK writes resolves to a tag,
   and that tag moves only with a release.
   """
@@ -2480,14 +2364,6 @@ type E2e {
       .withWorkdir(".")
     assertContains(kept.file(manifestPath).contents, "source = \"../../../../../../runtime\"", "the flag took a runtime of the user's own away")
 
-    # The two flags ask for two runners.
-    let both = pythonSdk(legacyRuntime: true, remoteEntrypoint: true)
-      .generateScope(scoped, isModule: true, name: name, clients: [])
-      .cwd rescue {
-        err: Error => err.message
-      }
-    assertContainsAll(both, ["--remote-entrypoint", "--legacy-runtime", "cannot be set together"])
-
     # It runs: the same scope, with this checkout's runtime in place of the
     # published reference, called through the floor release's CLI.
     let onCheckout = fresh.withNewFile(manifestPath, runtimeOnlyManifest(name))
@@ -2498,35 +2374,74 @@ type E2e {
   }
 
   """
-  `--remote-entrypoint` puts a module on the entrypoint this SDK publishes:
-  a new module names it instead of one of its own, a module that has one of
-  its own moves onto it and the files go, and a module on a runtime of its own
-  keeps the runtime.
+  An entrypoint served from elsewhere is replaced by the one generated into
+  the module: the shared entrypoint this repository used to serve, a pin of
+  it, or a fork, told from a Dang entrypoint in the module's own files as
+  the engine's classifySource tells them. A source that starts with "." or
+  "/" is a path, one with "://" or ":" is a reference, one with no "." is a
+  path, and one that could be either is a path only when the module holds
+  it. A module on an entrypoint of its own keeps it, and gets no
+  sdk/entrypoint, whether the path exists or not. A module generated
+  directly refuses what the written manifest cannot carry, a [clients]
+  table, disableDefaultFunctionCaching or a [codegen] table, as the scope
+  path does, rather than dropping it. The move needs the engine floor,
+  v1.0.0-beta.18, which generation already requires.
   """
-  pub remoteEntrypointCheck(ws: Workspace!): Void @check {
+  pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check {
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
     let name = "toml-generate-app"
-    let remote = pythonSdk(remoteEntrypoint: true)
+    [
+      sharedEntrypointSource,
+      "dagger.io/sdk/python/entrypoint@v1.0.0",
+      "github.com/someone/python-sdk/entrypoint@entrypoint/v1",
+      "git@github.com:someone/python-sdk.git#main:entrypoint",
+      "host:path",
+      "https://github.com/someone/python-sdk.git#main:entrypoint",
+      "example.com/repo",
+    ].each { source =>
+      let seeded = ws.withNewFile(manifestPath, dangEntrypointManifest(name, source))
+      let moved = pythonSdk.generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+      let manifest = moved.file(manifestPath).contents
+      assertContains(manifest, "source = \"./sdk/entrypoint\"", source + ": the module was not moved to the generated entrypoint: " + manifest)
+      assertNotContains(manifest, source, source + ": the manifest still names the entrypoint served from elsewhere: " + manifest)
+      assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint/main.dang"), source + ": no entrypoint was generated into the module")
+      assert(pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).entrypointMode == "generated", source + ": not read as a module to generate an entrypoint into")
+    }
+    ["./custom", "/custom", ".custom", "custom", "held", "example.com/repo"].each { source =>
+      let seeded = ws
+        .withNewFile(manifestPath, dangEntrypointManifest(name, source))
+        .withNewFile("/" + tomlGenerateModulePath + "/held/main.dang", "# a Dang entrypoint of the user's own\n")
+        .withNewFile("/" + tomlGenerateModulePath + "/example.com/repo/main.dang", "# a Dang entrypoint of the user's own, at a path that could be a reference\n")
+      let kept = pythonSdk.generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
+      let manifest = kept.file(manifestPath).contents
+      assertContains(manifest, "source = \"" + source + "\"", source + ": an entrypoint of the user's own was replaced: " + manifest)
+      assert(kept.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, source + ": a module on an entrypoint of its own got one generated into it")
+      assert(pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).entrypointMode == "own", source + ": not read as a module on an entrypoint of its own")
+    }
 
-    let fresh = remote.generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
-    assertContains(fresh.file(manifestPath).contents, "source = \"" + sharedEntrypointSource + "\"", "a module did not name the published entrypoint")
-    assert(fresh.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "a module on the published entrypoint got one of its own")
-
-    let generated = pythonSdk.generateScope(ws.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
-    assert(generated.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint"), "a module was not given an entrypoint of its own")
-    let moved = remote.generateScope(generated.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
-    assertContains(moved.file(manifestPath).contents, "source = \"" + sharedEntrypointSource + "\"", "the flag did not move the module onto the published entrypoint")
-    assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "moving onto the published entrypoint left the files behind")
-    assert(moved.changes(fresh).isEmpty, "a module moved onto the published entrypoint differs from one generated on it")
-
-    # A runtime of the user's own is theirs to remove, so the flag leaves it.
-    let ownRuntime = "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
-    let kept = remote.generateScope(ws.withNewFile(manifestPath, ownRuntime).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
-    let keptManifest = kept.file(manifestPath).contents
-    assertContains(keptManifest, "source = \"../../../../../../runtime\"", "the flag took a runtime of the user's own away: " + keptManifest)
-    assertNotContains(keptManifest, "[entrypoint]", "the flag put an entrypoint in front of the user's own runtime")
-
+    let manifest = dangEntrypointManifest(name, sharedEntrypointSource)
+    [
+      [manifest + "\n[clients]\ngo = { path = \"gen\" }\n", "dagger-module.toml has a [clients] table, which this SDK does not generate: a module's clients are its scope's, in dagger.toml; remove the table"],
+      ["disableDefaultFunctionCaching = true\n" + manifest, "dagger-module.toml sets disableDefaultFunctionCaching, which only a runtime reads: remove it, and pass cache= to the functions that must not be cached"],
+      [manifest + "\n[codegen]\nautomaticGitignore = true\n", "dagger-module.toml has a [codegen] table, which only a runtime reads: remove the table"],
+    ].each { case =>
+      let config = case[0] ?? ""
+      let want = case[1] ?? ""
+      let seeded = ws.withNewFile(manifestPath, config)
+      let directRefused = pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).generated.cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(directRefused, want, "direct generation: expected " + want + "; got " + directRefused)
+      let scopeRefused = pythonSdk.generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(scopeRefused, want, "scope generation: expected " + want + "; got " + scopeRefused)
+    }
     null
+  }
+
+  let dangEntrypointManifest(name: String!, source: String!): String! {
+    "name = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"" + source + "\"\n"
   }
 
   """
@@ -2756,7 +2671,8 @@ type E2e {
     assertResourcesRefused(ws, "greet = { path = \"../../../../../../../../../../greet\" }",
       "[tool.uv.sources] greet path \"../../../../../../../../../../greet\" leaves the workspace root")
 
-    let remote = resourcesAttempt(pythonSdk(remoteEntrypoint: true), ws)
+    let ownEntrypoint = ws.withNewFile("/" + resourcesAppPath + "/dagger-module.toml", dangEntrypointManifest("resources-app", "./custom"))
+    let remote = resourcesAttempt(pythonSdk, ownEntrypoint)
     assertContainsAll(remote, [
       "builds with files outside its directory (../../libs/greet, ../../libs/text)",
       "only the entrypoint this SDK generates into a module loads",

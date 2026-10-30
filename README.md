@@ -19,7 +19,7 @@ It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
 | `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `findClientRoot`, `generateScope`, `mod` (generate, config), templates |
 | `sdk/` | the `dagger-io` client library and code generator |
 | `runtime/` | the container build both entrypoints share, and a module runtime for a manifest that names it |
-| `entrypoint/` | the shared Dang `ModuleEntrypoint`, served from this repository to any module that names it |
+| `entrypoint/` | the shared Dang `ModuleEntrypoint` this repository used to serve, frozen; see "Shared entrypoint" |
 
 Code generation happens at `dagger generate`, which calls `generateScope` for
 every recorded scope. It runs the code generator in `sdk/` and vendors the
@@ -40,7 +40,7 @@ There are three answers, and a new module gets the first:
 | `dagger-module.toml` | What runs the module |
 | --- | --- |
 | `[entrypoint] source = "./sdk/entrypoint"` | the entrypoint generated into it, with its types baked |
-| `[entrypoint] source = <a ref>` | an entrypoint served from elsewhere, the shared one below among them |
+| `[entrypoint] source = <a path in the module>` | a Dang entrypoint of the user's own, kept as written |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
 This SDK needs an engine `v1.0.0-beta.18` or later, the first release that
@@ -49,16 +49,20 @@ entrypoint runs a module on the engine's own version, so an entrypoint
 manifest keeps no `engineVersion`.
 
 On an older engine, `dagger module init` and `dagger generate` stop before
-they write anything, with a message that names the engine's version. The
-shared entrypoint cannot say why: Dang rejects its file before any code runs,
-so a module on it fails to load on v1.0.0-beta.14 with `field
-"withCollection" not found in Dagger.TypeDef`. A generated entrypoint fails to
-load on an older engine with `field "types": missing argument "workspace"
-required by interface`. To stay on an engine from
+they write anything, with a message that names the engine's version. A
+generated entrypoint fails to load on an older engine with `field "types":
+missing argument "workspace" required by interface`. To stay on an engine from
 v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
 there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
-`dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint. An engine
-older than v1.0.0-beta.14 runs neither release, and needs an upgrade.
+`dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint of that
+release. An engine older than v1.0.0-beta.14 runs neither release, and needs
+an upgrade.
+
+An entrypoint served from elsewhere, such as the shared one this repository
+used to serve as `dagger.io/sdk/python/entrypoint@v1`, a pin of it or a fork,
+is replaced by the generated entrypoint at the module's next
+`dagger generate`. A module moved this way needs an engine `v1.0.0-beta.18` or
+later, which generation already requires.
 
 Generating a module that has a manifest already keeps the kind it names:
 
@@ -80,10 +84,8 @@ Generating a module that has a manifest already keeps the kind it names:
   any module. A module on the generated entrypoint gets the libraries outside
   its directory that its `pyproject.toml` names as path sources (see "Files
   outside the module").
-- An entrypoint of another kind, a pin of the shared one or a fork, is kept as
-  written. `--remote-entrypoint` asks for the shared one instead.
-- `--legacy-runtime` and `--remote-entrypoint` cannot be set together: each asks
-  for a different way to run the module, and a manifest names one.
+- A Dang entrypoint in the module's own files, named by a path, is kept as
+  written. One served from elsewhere is replaced by the generated entrypoint.
 - `[entrypoint]` and `[runtime]` together are refused, naming both: only one
   thing can run the module.
 - `disableDefaultFunctionCaching` and `[codegen]` are refused one at a time:
@@ -217,66 +219,25 @@ meaning of:
   directory do not govern an entrypoint, and no `dang.toml` outside
   `sdk/entrypoint` is ever changed.
 
-An entrypoint of your own, a shared or remote entrypoint, and a module on a
-runtime get no `dang.toml` from generation, and a file they have stays as it is.
+An entrypoint of your own and a module on a runtime get no `dang.toml` from
+generation, and a file they have stays as it is. A module that names an
+entrypoint served from elsewhere moves to a generated one, and to the Dagger
+version above. A `dang.toml` of that remote entrypoint is not copied: its
+settings describe files that the module no longer uses.
 
 ## Shared entrypoint
 
-`entrypoint/` is one `ModuleEntrypoint`, written in Dang, that backs every
-Python module at once, with nothing generated into the module. A module whose
-manifest names it keeps it:
-
-```toml
-# <module>/dagger-module.toml
-name = "my-module"
-
-[entrypoint]
-kind = "dang"
-source = "dagger.io/sdk/python/entrypoint@v1"
-```
-
-A Dang entrypoint already in the manifest is kept as written, so a module can
-pin a version of the shared entrypoint, point at a fork, or name one of its
-own. Generation replaces only the static entrypoint it writes itself, told by
-its source, `./sdk/entrypoint`. The manifest is read with a TOML parser, so
-quoting and key order are the user's.
-
-Inside an entrypoint `currentModule` is the module it serves, so the
-entrypoint builds that module's container from `currentModule.source`, with
-the same build the runtime uses, however the module was loaded. It asks the
-module to describe itself (`python -m dagger.mod describe`) or to run one call
-(`python -m dagger.mod call`). The types it returns are rebuilt from that
-description in the engine's own session.
-
-The module's code runs in an exec the entrypoint starts, and loads a client
-with `serveModule`, as a plain program does. The engine resolves a local
-client's path in the tree the module was loaded from: its git repository at
-the pinned commit, the directory it was built from, or on the host its git
-repository, or its own directory outside one. An engine without that resolves the path in the caller's
-workspace instead, and can serve the wrong module.
-
-| File | What it is |
-| --- | --- |
-| `main.dang` | the `ModuleEntrypoint`: `types` and `call` |
-| `build.dang` | the container build, generated from `runtime/build.dang` |
-| `workspace_reader.py` | the workspace reader the build runs, copied from `runtime/workspace_reader.py` |
-
-`build.dang` is generated, not hand-edited: `currentModule` inside an
-entrypoint is the module it serves, so the externals block that reads
-`runtime/images/` is written out into the copy. The engine evaluates only the
-`.dang` files at the top of an entrypoint directory and hands the program no
-other file. The build therefore resolves the served module's
-`[entrypoint] source` the way the engine does, and reads `workspace_reader.py`
-from that directory. `dagger check -m .dagger/modules/e2e` fails when either
-copy drifts; refresh them with
-`dagger call -m .dagger/modules/e2e shared-entrypoint-build export --path entrypoint/build.dang`
-and `cp runtime/workspace_reader.py entrypoint/`.
-
-The address above only resolves once `entrypoint/` is on this repository's
-default branch and a `v1` release is tagged: `@v1` selects the greatest
-`entrypoint/v1.*` tag, then the greatest plain `v1.*` tag. The Python process the entrypoint starts belongs to no module
-on the engine's side: the core API works in it, and `dag.current_module()`
-fails with "no current module". The static entrypoint has the same limit.
+`entrypoint/` is the `ModuleEntrypoint`, written in Dang, that this repository
+used to serve to every Python module as `dagger.io/sdk/python/entrypoint@v1`,
+before each module got one generated into it. It is frozen: generation no
+longer writes a manifest that names it, a module whose manifest names it, a
+pin of it or a fork moves to the generated entrypoint at its next
+`dagger generate`, and its copies of `runtime/build.dang` and
+`runtime/workspace_reader.py` no longer follow the runtime's. It stays in the
+repository, with the tags that serve it, so a module pinned to it in git
+still loads: `@v1` selects the greatest `entrypoint/v1.*` tag, then the
+greatest plain `v1.*` tag. The Python process it starts belongs to no module
+on the engine's side, as with the static entrypoint.
 
 ## Static entrypoint
 
@@ -314,12 +275,10 @@ manifest says which files it is, or names a runtime, keeps that runtime
 instead. There is no `debug` terminal on this path, and a function error
 reaches the caller as the exec failure with the process's stderr.
 
-A module keeps the kind of entrypoint its manifest names: generation writes
-one into a module that has none, and leaves a Dang entrypoint of another kind
-alone, so a module on the shared entrypoint or on a fork stays there.
-`--remote-entrypoint` asks for the shared one instead, for a new module or for
-one that has an entrypoint of its own, and then `sdk/entrypoint/` goes. A
-module that names a runtime of its own keeps it, with or without the flag. See
+Generation writes an entrypoint into a module that has none, or whose manifest
+names one served from elsewhere, and leaves a Dang entrypoint in the module's
+own files alone, so a module on an entrypoint of its own stays there. A module
+that names a runtime of its own keeps it. See
 [`future/done/static-module-entrypoint.md`](./future/done/static-module-entrypoint.md)
 for the design.
 
@@ -395,15 +354,14 @@ are persisted on the scope:
 ```sh
 dagger module init python --name my-module --template empty
 dagger module init python --name my-module --legacy-runtime
-dagger module init python --name my-module --remote-entrypoint
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
     --base-image python:3.13-slim
 ```
 
-`--legacy-runtime` and `--remote-entrypoint` pick what runs the module, as
-"How a module runs" describes; without either, a new module gets an entrypoint
+`--legacy-runtime` puts the module on the runtime this SDK publishes, as "How
+a module runs" describes; without it, a new module gets an entrypoint
 generated into it.
 
 `--template` picks a starter template: `default` (a small working module) when

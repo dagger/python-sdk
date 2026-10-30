@@ -170,11 +170,11 @@ type EngineE2e {
 
   pub dangConfigCheck(ws: Workspace!): Void @check { onFloor(ws, "dang-config-check") }
 
+  pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check { onFloor(ws, "remote-entrypoint-replaced-check") }
+
   pub cliModuleNameCheck(ws: Workspace!): Void @check { onFloor(ws, "cli-module-name-check") }
 
   pub entrypointClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-client-call-check") }
-
-  pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check { onFloor(ws, "shared-entrypoint-build-check") }
 
   pub runtimeNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-naming-check") }
 
@@ -196,15 +196,11 @@ type EngineE2e {
 
   pub collectionsClientCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-client-check") }
 
-  pub collectionsOlderSdkCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-older-sdk-check") }
-
   pub collectionKindsCheck(ws: Workspace!): Void @check { onFloor(ws, "collection-kinds-check") }
 
   pub entrypointKindCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-kind-check") }
 
   pub legacyRuntimeCheck(ws: Workspace!): Void @check { onFloor(ws, "legacy-runtime-check") }
-
-  pub remoteEntrypointCheck(ws: Workspace!): Void @check { onFloor(ws, "remote-entrypoint-check") }
 
   pub staticScopeRefusalsCheck(ws: Workspace!): Void @check { onFloor(ws, "static-scope-refusals-check") }
 

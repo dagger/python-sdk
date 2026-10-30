@@ -14,8 +14,9 @@ type Mod {
 
   """
   How the engine runs this module: "generated" for an entrypoint written into
-  it, "remote" for the one this SDK publishes, "runtime" for a runtime the
-  manifest names. A module keeps the kind its manifest has.
+  it, "own" for a Dang entrypoint of the user's own in its files, "runtime"
+  for a runtime the manifest names. A module keeps the kind its manifest has,
+  but for an entrypoint served from elsewhere, which generation replaces.
   """
   pub entrypointMode: String!
 
@@ -93,6 +94,12 @@ type Mod {
         .generatedContextDirectory
         .directory(rootPath))
     } else {
+      # A module generated directly gets no manifest rewrite from generateScope,
+      # so what that rewrite refuses is refused here before the entrypoint
+      # manifest replaces the module's.
+      if (entrypointMode == "generated") {
+        EntrypointManifest(manifestConfig, "dagger-module.toml").checkGenerated
+      }
       checkPython
       if (entrypointMode == "generated") {
         checkDangConfig
@@ -116,7 +123,7 @@ type Mod {
         let withEntrypoint = scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside)))
         let entrypointDirectory = modulePath(entrypointPath)
         entrypointManifest(dangConfigWritten(entrypointDirectory, withEntrypoint, entrypointDirectory).withWorkdir("."), entrypointPath)
-      } else if (entrypointMode == "remote") {
+      } else if (entrypointMode == "own") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
       } else {
