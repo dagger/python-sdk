@@ -57,21 +57,19 @@ the schema's identifiers, and a module asks it what it named the module's own
 declarations. An entrypoint runs a module on the engine's own version, so an
 entrypoint manifest keeps no `engineVersion`.
 
-On an engine without that field, `dagger module init` and `dagger generate`
-fail while they load the SDK, before they write anything. A
-generated entrypoint fails to load on an older engine with `field "types":
-missing argument "workspace" required by interface`. To stay on an engine from
-v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
-there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
-`dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint of that
-release. An engine older than v1.0.0-beta.14 runs neither release, and needs
-an upgrade.
+The SDK's modules declare `engineVersion` v1.0.0-beta.26. Engines compare
+only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.25 does
+not refuse them for it: `dagger module init` and `dagger generate` fail while
+they load the SDK, before they write anything. To stay on such an engine, pin a
+release from before this floor, such as `v1.8.0`:
+`dagger module install github.com/dagger/python-sdk@v1.8.0`. To stay on an
+engine from v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release
+that runs there.
 
 An entrypoint served from elsewhere, such as the shared one this repository
 used to serve as `dagger.io/sdk/python/entrypoint@v1`, a pin of it or a fork,
 is replaced by the generated entrypoint at the module's next
-`dagger generate`. A module moved this way needs an engine `v1.0.0-beta.18` or
-later to run, and generating it needs `v1.0.0-beta.26` or later.
+`dagger generate`.
 
 Generating a module that has a manifest already keeps the kind it names:
 
@@ -132,7 +130,7 @@ for and announces:
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
-release, from `v1.0.0-beta.18` to the targeted release;
+release, from `v1.0.0-beta.26` to the targeted release;
 `dagger module init python --target-version <release>` writes it. Any other
 value stops generation before it writes anything, with a message that names
 the module and says why.

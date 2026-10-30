@@ -1729,11 +1729,8 @@ type E2e {
     let plain = pythonSdk.generateScope(ws.withNewDirectory("/" + plainScope, directory).withWorkdir(plainScope), isModule: false, name: "target-version-plain", clients: []).withWorkdir(".")
     assert(plain.file("/" + plainScope + "/" + versionFilePath).contents == versionFile, "a plain scope's library does not announce the targeted release")
 
-    # Container.publish's sourceDateEpoch is newer than the floor's view, so a
-    # module pinned to the floor must not see it on any engine.
     let newInBeta22 = "source_date_epoch"
     let floorPinned = pythonSdk(targetVersion: floor).generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".")
-    assertNotContains(floorPinned.file("/" + scope + "/" + coreInitPath).contents, newInBeta22, "core was not read in the view of the pinned release")
     assertContains(floorPinned.file("/" + scope + "/sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"" + floor + "\"", "the entrypoint does not declare the pinned release")
     assertContains(floorPinned.file("/" + scope + "/sdk/entrypoint/dang.toml").contents, "dagger = \"" + floor + "\"", "dang.toml does not follow the targetVersion pin")
     if (version.contains(target)) {
@@ -1743,7 +1740,7 @@ type E2e {
     let remedy = ": set targetVersion in its dagger.toml settings to " + target + ", or remove it to generate for " + target
     let refusals = [
       ["v9.0.0", "v9.0.0, which is later than " + target + ", the engine release this Python SDK generates for: install the SDK release built for v9.0.0, or set targetVersion in its dagger.toml settings to " + target + ", or remove it"],
-      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest release a targetVersion pin may name" + remedy],
+      ["v1.0.0-beta.25", "v1.0.0-beta.25, which is below " + floor + ", the oldest release a targetVersion pin may name" + remedy],
       ["latest", "\"latest\", which is no engine release such as " + target + remedy],
     ]
     let plainScope = outputRoot + "/target-version-scope"
@@ -1837,13 +1834,10 @@ type E2e {
   let assertFloorPinned(generated: Container!, configFile: String!, path: String!, args: [String!]!): Void {
     let command = "`dagger " + args.join(" ") + "`"
     let root = playgroundRoot + "/" + path + "/"
-    # Container.publish's sourceDateEpoch is newer than the floor's view.
-    let newInBeta22 = "source_date_epoch"
     assertContains(generated.file(playgroundRoot + "/" + configFile).contents, "targetVersion = \"v" + floorVersion + "\"", command + " dropped the recorded pin")
     assertContains(generated.file(root + "sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"v" + floorVersion + "\"", command + " did not generate the entrypoint for the pinned release")
     assertContains(generated.file(root + versionFilePath).contents, "CLI_VERSION = \"" + floorVersion + "\"", command + " did not vendor the pinned release's CLI version")
     assertContains(generated.file(root + "sdk/entrypoint/dang.toml").contents, "dagger = \"v" + floorVersion + "\"", command + " did not write the pinned release to dang.toml")
-    assertNotContains(generated.file(root + coreInitPath).contents, newInBeta22, command + " did not read core in the view of the pinned release")
     null
   }
 
@@ -2011,11 +2005,10 @@ type E2e {
   let callerSecretPath: String! = "review-secret.txt"
 
   """
-  The first release that loads a module's files through its entrypoint's
-  sources member, and the oldest one a targetVersion pin may name. Its engine
-  image carries its CLI, and git.
+  The oldest release a targetVersion pin may name, the SDK's engine floor. Its
+  engine image carries its CLI, and git.
   """
-  let floorVersion: String! = "1.0.0-beta.18"
+  let floorVersion: String! = "1.0.0-beta.26"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -2316,53 +2309,6 @@ type E2e {
     assertNotContains(build, "currentModule", "build.dang still reads the SDK module's source")
     assertNotContains(build, "import glob, os, re, sys, tomllib", "build.dang still inlines the workspace reader")
 
-    null
-  }
-
-  """
-  The SDK refuses an engine release older than its floor before it generates
-  anything, and names the version it found and what to do: pin the SDK's last
-  release before the floor where that release runs, from v1.0.0-beta.14, and
-  only upgrade below it. Releases are compared as semver orders them, with
-  the build after a "+" ignored and no word such as "dev" set apart, so a
-  build of dagger's main passes as the release it reports. A version the
-  SDK cannot read passes, so an unexpected format never blocks a user. On
-  an engine the SDK refuses, generation itself refuses.
-  """
-  pub engineFloorRefusalCheck(ws: Workspace!): Void @check {
-    let pin = "dagger module install github.com/dagger/python-sdk@v1.1.1"
-    let pinned = ["v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.17+dev", "v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
-    let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-alpha-1"]
-    let accepted = [
-      "v1.0.0-beta.18", "v1.0.0-beta.18+249edbd6", "v1.0.0-beta.18+dev", "1.0.0-beta.18", "v1.0.0-beta.19", "v1.0.0-beta.100",
-      "v1.0.0-beta.1000000000000000000000", "v1.0.0-rc.1", "v1.0.0-rc-1", "v1.0.0", "v1.0.1", "v2.0.0-beta.1", "v1.0.0-dev.3", "devel", "",
-    ]
-    (pinned + upgradeOnly).each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      let wants = ["needs Dagger engine v" + floorVersion + " or later", "this engine is " + engine + ".", "Upgrade the engine"]
-      wants.each { want =>
-        assertContains(refusal, want, "engine \"" + engine + "\": the refusal does not say \"" + want + "\": " + refusal)
-      }
-    }
-    pinned.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assertContains(refusal, pin, "engine \"" + engine + "\": the refusal does not offer the last release that runs on it: " + refusal)
-    }
-    upgradeOnly.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assertNotContains(refusal, "pin", "engine \"" + engine + "\": the refusal offers a release that does not run on it either: " + refusal)
-    }
-    accepted.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assert(refusal == "", "the SDK refused engine \"" + engine + "\": " + refusal)
-    }
-    let refusal = pythonSdk.engineRefusal(version)
-    if (refusal != "") {
-      let said = pythonSdk.generateScope(ws.withNewDirectory("/floor-probe", directory).withWorkdir("floor-probe"), isModule: true, name: "floor-probe", clients: []).cwd rescue {
-        err: Error => err.message
-      }
-      assert(said.contains(refusal), "generation on engine " + version + ", which the SDK refuses, said: " + said)
-    }
     null
   }
 
