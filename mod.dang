@@ -14,8 +14,9 @@ type Mod {
 
   """
   How the engine runs this module: "generated" for an entrypoint written into
-  it, "remote" for the one this SDK publishes, "runtime" for a runtime the
-  manifest names. A module keeps the kind its manifest has.
+  it, "own" for a Dang entrypoint of the user's own in its files, "runtime"
+  for a runtime the manifest names. A module keeps the kind its manifest has,
+  but for an entrypoint served from elsewhere, which generation replaces.
   """
   pub entrypointMode: String!
 
@@ -32,6 +33,11 @@ type Mod {
   names.
   """
   let engineVersion: String!
+
+  """
+  The engine release this module's generated code is generated for.
+  """
+  let targetVersion: String!
 
   """
   The module scope's clients, as the engine hands them to generation. Null
@@ -87,6 +93,12 @@ type Mod {
         .generatedContextDirectory
         .directory(rootPath))
     } else {
+      # A module generated directly gets no manifest rewrite from generateScope,
+      # so what that rewrite refuses is refused here before the entrypoint
+      # manifest replaces the module's.
+      if (entrypointMode == "generated") {
+        EntrypointManifest(manifestConfig, "dagger-module.toml").checkGenerated
+      }
       checkPython
       let scope = Scope(
         path: rootPath,
@@ -95,6 +107,7 @@ type Mod {
         isModule: true,
         engineVersion: engineVersion,
         migrating: migrating,
+        targetVersion: targetVersion,
       )
       # The scope writes sdk/ whole, so an entrypoint from an earlier static
       # generation is gone unless it is written again. It also relocks
@@ -105,7 +118,7 @@ type Mod {
         checkResourcesLoad(scoped, outside)
         let entrypointPath = vendorDirName + "/" + entrypointDirName
         entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside))), entrypointPath)
-      } else if (entrypointMode == "remote") {
+      } else if (entrypointMode == "own") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
       } else {
@@ -229,7 +242,7 @@ type Mod {
   let entrypointDir(generated: Workspace!, outside: [String!]!): Directory! {
     pythonSdkRuntime
       .moduleRuntime(modSource: staging(generated, outside).moduleSource("/" + rootPath), introspectionJson: null)
-      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput] +
+      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--client-version", targetVersion, "--output", entrypointOutput] +
         outside.map { pattern => "--outside=" + pattern })
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
