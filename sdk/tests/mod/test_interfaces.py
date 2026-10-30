@@ -36,6 +36,13 @@ def mod() -> Module:
         @m.function
         def get_mob(self) -> list[Self]: ...
 
+        @m.function
+        def with_origin(
+            self,
+            from_: str,
+            to: typing.Annotated[str, dagger.Name("destination")],
+        ) -> Self: ...
+
         def get_private(self) -> bool: ...
 
     @m.object_type
@@ -77,3 +84,10 @@ async def test_generated_implementation(duck):
 async def test_interface_object_chain(duck):
     r, _ = duck
     assert type(r.get_self()) is type(r)
+
+
+async def test_interface_call_arguments(duck):
+    """Arguments are bound by Python name and sent by their schema name."""
+    r, _ = duck
+    query = r.with_origin(from_="a", to="b")._ctx.build()
+    assert 'withOrigin(from: "a", destination: "b")' in query

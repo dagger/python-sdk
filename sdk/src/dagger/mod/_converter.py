@@ -102,8 +102,10 @@ def make_method(name: str, func: Function, proto: type) -> typing.Callable:  # n
 
     # Need to convert names to GraphQL convention for query builder
     gql_name = to_camel_case(name)
+    # Keyed by Python name, which is what the call binds.
     gql_arg_names = {
-        param.name: to_camel_case(param.name) for param in func.parameters.values()
+        py_name: to_camel_case(param.name)
+        for py_name, param in func.parameters.items()
     }
 
     # Generate query builder selection based on inputs
