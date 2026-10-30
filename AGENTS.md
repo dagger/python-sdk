@@ -2,7 +2,7 @@
 
 ## Run the checks locally
 
-The checks need an engine at this SDK's floor, v1.0.0-beta.18, or later. The
+The checks need an engine at this SDK's floor, v1.0.0-beta.22, or later. The
 CLI runs on the engine it ships with; `--engine` or `DAGGER_ENGINE` selects
 another (`dagger help engine`):
 
@@ -33,7 +33,7 @@ check has no such check. To run e2e checks on the floor's released engine
 instead:
 
 ```sh
-dagger check --engine=image://registry.dagger.io/engine:v1.0.0-beta.18 \
+dagger check --engine=image://registry.dagger.io/engine:v1.0.0-beta.22 \
   -m .dagger/modules/e2e runtime-call-check
 ```
 
