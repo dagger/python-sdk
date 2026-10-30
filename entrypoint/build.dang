@@ -24,10 +24,16 @@ type PythonModuleBuild {
 
   pub moduleName: String!
 
-  new(contextDir: Directory! = directory, subPath: String! = ".", moduleName: String! = "") {
+  """
+  How the engine names the module, which says which class is its main object.
+  """
+  pub naming: ModuleNaming
+
+  new(contextDir: Directory! = directory, subPath: String! = ".", moduleName: String! = "", naming: ModuleNaming = null) {
     self.contextDir = contextDir
     self.subPath = subPath
     self.moduleName = moduleName
+    self.naming = naming
     self
   }
 
@@ -85,8 +91,61 @@ type PythonModuleBuild {
         .withEnvVariable("DAGGER_DEFAULT_PYTHON_PACKAGE", packageName)
 
       install(built, source, cfg)
+        .withEnvVariable("DAGGER_MAIN_OBJECT", mainObject)
     }
   }
+
+  """
+  The class name of the module's main object: of the classes its code
+  decorates with @object_type, the one the engine takes.
+  """
+  let mainObject: String! {
+    if (naming == null) {
+      raise "module \"" + moduleName + "\" is built without the engine's naming of it"
+    } else {
+      let candidates = objectTypes
+      let main = naming.mainObject(candidates: candidates)
+      if (main == null) {
+        raise "module \"" + moduleName + "\": the engine takes none of its object types (" +
+          (if (candidates.length == 0) { "there are none" } else { candidates.join(", ") }) +
+          ") for its main object; name a class decorated with @object_type after the module"
+      } else {
+        main
+      }
+    }
+  }
+
+  """
+  The classes the module's own code decorates with @object_type, read from
+  its source with Python's ast rather than by importing it, so that it reads
+  the same whichever SDK version the module installs.
+  """
+  let objectTypes: [String!]! {
+    container
+      .from(defaultBaseImage)
+      .withMountedDirectory("/module", filesOf(
+        source,
+        include: ["src/**/*.py", "*.py"],
+        exclude: ["**/.venv", "**/__pycache__"],
+      ))
+      .withExec(["python", "-c", objectTypesScript, "/module"])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
+  }
+
+  let objectTypesScript: String! = [
+    "import ast, pathlib, sys",
+    "def name(d):",
+    "    d = d.func if isinstance(d, ast.Call) else d",
+    "    return getattr(d, 'attr', getattr(d, 'id', ''))",
+    "found = set()",
+    "for path in pathlib.Path(sys.argv[1]).rglob('*.py'):",
+    "    for node in ast.walk(ast.parse(path.read_bytes(), str(path))):",
+    "        if isinstance(node, ast.ClassDef) and any(name(d) == 'object_type' for d in node.decorator_list):",
+    "            found.add(node.name)",
+    "print('\\n'.join(sorted(found)))",
+  ].join("\n")
 
   """
   The workspace members of a scope's pyproject.toml, read as the build does.

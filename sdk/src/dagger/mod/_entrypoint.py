@@ -240,6 +240,7 @@ type Entrypoint implements ModuleEntrypoint {{
       contextDir: directory.withDirectory(".", currentModule.contextDirectory, exclude: ["**/.venv", "**/__pycache__"]),
       subPath: currentModule.sourceSubpath,
       moduleName: moduleName,
+      naming: currentModule.naming,
     ).installed
   }}
 }}
