@@ -1,4 +1,4 @@
-"""How the runtime asks the engine how it names the module."""
+"""How the runtime gets the schema names of the module's declarations."""
 
 import enum
 import typing
@@ -7,8 +7,8 @@ import pytest
 
 import dagger
 from dagger.mod import Module
-from dagger.mod._exceptions import ModuleError, ModuleLoadError
-from dagger.mod._naming import SOURCE_ID_ENV, ModuleNames, ask_naming
+from dagger.mod._exceptions import ModuleError
+from dagger.mod._naming import ModuleNames, module_names
 
 pytestmark = [
     pytest.mark.anyio,
@@ -71,19 +71,16 @@ async def fetcher(mod: Module):
 
 async def test_one_query(mod: Module, engine):
     engine.names = NAMES
-    await mod.load_naming()
-    await mod.load_naming()
+    await mod.load_names()
+    await mod.load_names()
     assert len(engine.naming_queries) == 1
     query = engine.naming_queries[0]
-    assert "currentModule {" in query
     assert 'typeNames(names: ["HttpFetcher"])' in query
     assert (
         'fieldNames(names: ["also", "arch", "arches", "e2e_test", "with_arch"])'
         in query
     )
     assert 'enumMemberNames(names: ["AMD64", "arm64"])' in query
-    # Given its main object's name, the module doesn't ask for it.
-    assert "mainObject" not in query
 
 
 async def test_no_interfaces_asks_nothing(engine):
@@ -93,93 +90,13 @@ async def test_no_interfaces_asks_nothing(engine):
     class Plain:
         pass
 
-    await m.load_naming()
+    await m.load_names()
     assert engine.queries == []
-
-
-async def test_main_object_by_the_engine(engine):
-    m = Module("")
-
-    @m.object_type
-    class Helper:
-        pass
-
-    @m.object_type
-    class K8STools:
-        pass
-
-    engine.main_object = "K8STools"
-    await m.load_naming()
-    assert len(engine.naming_queries) == 1
-    assert 'mainObject(candidates: ["Helper", "K8STools"])' in engine.queries[0]
-    assert m.main_cls is K8STools
-    assert m.describe().main_object == "K8STools"
-
-
-async def test_main_object_with_the_names_in_one_query(engine):
-    m = Module("")
-
-    @m.interface
-    class Fetcher(typing.Protocol):
-        @m.function
-        async def get(self) -> str: ...
-
-    @m.object_type
-    class Tools:
-        pass
-
-    engine.names = {
-        "typeNames": {"Fetcher": "ToolsFetcher"},
-        "fieldNames": {"get": "get"},
-    }
-    engine.main_object = "Tools"
-    await m.load_naming()
-    assert len(engine.queries) == 1
-    assert "mainObject" in engine.queries[0]
-    assert "typeNames" in engine.queries[0]
-    assert m.names.type_name("Fetcher") == "ToolsFetcher"
-
-
-@pytest.mark.usefixtures("engine")
-async def test_no_main_object_fails():
-    m = Module("")
-
-    @m.object_type
-    class Helper:
-        pass
-
-    with pytest.raises(ModuleLoadError, match="Helper"):
-        await m.load_naming()
-
-
-def test_describe_needs_the_main_object():
-    m = Module("")
-
-    @m.object_type
-    class Helper:
-        pass
-
-    with pytest.raises(ValueError, match="main object isn't known"):
-        m.describe()
-
-
-async def test_naming_of_a_given_module_source(engine, monkeypatch):
-    monkeypatch.setenv(SOURCE_ID_ENV, "source-id")
-    m = Module("")
-
-    @m.object_type
-    class Tools:
-        pass
-
-    engine.main_object = "Tools"
-    await m.load_naming(names=False)
-    assert 'node(id: "source-id") { ... on ModuleSource {' in engine.queries[0]
-    assert m.main_cls is Tools
 
 
 async def test_calls_by_the_engines_names(mod: Module, engine):
     engine.names = NAMES
-    await mod.load_naming()
+    await mod.load_names()
     r = await fetcher(mod)
     arch = mod._enums["Arch"]
 
@@ -195,7 +112,7 @@ async def test_calls_by_the_engines_names(mod: Module, engine):
 
 async def test_enum_results(mod: Module, engine):
     engine.names = NAMES
-    await mod.load_naming()
+    await mod.load_names()
     r = await fetcher(mod)
     arch = mod._enums["Arch"]
 
@@ -226,4 +143,4 @@ async def test_engine_answer_mismatch(mod: Module):
 
     interfaces = [o for o in mod._objects.values() if o.interface]
     with pytest.raises(ModuleError, match="typeNames"):
-        await ask_naming(interfaces=interfaces, execute=execute)
+        await module_names(interfaces, (), execute)
