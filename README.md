@@ -252,11 +252,26 @@ meaning of:
   directory do not govern an entrypoint.
 
 Generation changes no `dang.toml` other than `sdk/entrypoint/dang.toml` of a
-module on a generated entrypoint. Those it finds in `sdk/` survive the directory
-being replaced, whatever runs the module: a `sdk/entrypoint/dang.toml` with your
-settings stays when the module moves to a runtime or an entrypoint of its own,
-and is read again if it moves back. One that only says what generation writes
-goes with the entrypoint.
+module on a generated entrypoint. Those it finds in `sdk/` and `clients/` survive
+their directories being replaced, whatever runs the module: a
+`sdk/entrypoint/dang.toml` with your settings stays when the module moves to a
+runtime or an entrypoint of its own, and is read again once the manifest names
+neither. A module stays on a runtime, the one this SDK publishes included, until
+its manifest stops naming it. One that only says what generation writes goes with
+the entrypoint.
+
+An entrypoint of your own stays where it is, even inside a directory generation
+replaces: `sdk/`, `clients/core/` or a client it generates. An entrypoint at a
+path that generation also writes is refused: move it out, and name the new path
+in `dagger-module.toml`. Moving a module onto a runtime with its entrypoint in
+one of those directories is refused too: the manifest would stop naming it, and
+the next generation would delete it. Generation leaves any other directory under
+`clients/` alone.
+
+A `dang.toml` in the directory of a client that is no longer declared stays
+there, alone, when generation deletes the rest of that directory. Move or remove
+it before declaring a client of that name again: generation refuses a directory
+it did not write.
 
 A module that names an entrypoint served from elsewhere moves to a generated
 one, and to the Dagger version above. A `dang.toml` of that remote entrypoint

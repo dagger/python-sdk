@@ -2531,6 +2531,107 @@ type E2e {
     null
   }
 
+  """
+  An entrypoint of the user's own inside a directory generation writes whole
+  stays, with its dang.toml, while the rest of that directory is replaced. One
+  at a path generation also writes is refused, and so is moving one that is in a
+  directory generation replaces onto a runtime, whose next generation would
+  delete it. A dang.toml outlives a client directory generation deletes.
+  """
+  pub ownEntrypointKeptCheck(ws: Workspace!): Void @check {
+    let root = tomlGenerateModulePath
+    let name = "toml-generate-app"
+    let manifestPath = "/" + root + "/dagger-module.toml"
+    let main = "# a Dang entrypoint of the user's own\n"
+    let config = "[imports.Lib]\npath = \"./lib\"\n"
+    let generated = pythonSdk.generateScope(ws.withWorkdir(root), isModule: true, name: name, clients: [])
+    ["sdk/custom", "sdk/entrypoint/custom", "clients/core/custom", "clients/custom"].each { path =>
+      let seeded = generated
+        .withNewFile(manifestPath, dangEntrypointManifest(name, "./" + path))
+        .withNewFile("/" + root + "/" + path + "/main.dang", main)
+        .withNewFile("/" + root + "/" + path + "/lib/helper.dang", main)
+        .withNewFile("/" + root + "/" + path + "/dang.toml", config)
+        .withNewFile("/" + root + "/sdk/stale.txt", "not a file the SDK writes\n")
+      let scoped = pythonSdk.generateScope(seeded.withWorkdir(root), isModule: true, name: name, clients: [])
+      let direct = pythonSdk.mod(seeded, path: root, findUp: false).generated
+      [scoped, direct].each { kept =>
+        assertContains(kept.file(manifestPath).contents, "source = \"./" + path + "\"", path + ": the manifest no longer names the entrypoint")
+        assert(kept.file("/" + root + "/" + path + "/main.dang").contents == main, path + ": the entrypoint did not survive")
+        assert(kept.file("/" + root + "/" + path + "/lib/helper.dang").contents == main, path + ": a file of the entrypoint did not survive")
+        assert(kept.file("/" + root + "/" + path + "/dang.toml").contents == config, path + ": the entrypoint's dang.toml did not survive")
+        assert(kept.directory("/" + root).exists("sdk/stale.txt") == false, path + ": the rest of sdk/ was not replaced")
+        assert(kept.directory("/" + root).exists(sdkMemberFile), path + ": sdk/ was not written")
+        assert(kept.directory("/" + root).exists("sdk/entrypoint/main.dang") == false, path + ": a generated entrypoint was written")
+      }
+      assert(pythonSdk.generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".").changes(scoped.withWorkdir(".")).isEmpty, path + ": a second generation changed the module")
+    }
+
+    let leafAbove = generated
+      .withNewFile(manifestPath, dangEntrypointManifest(name, "./sdk/entrypoint/custom"))
+      .withNewFile("/" + root + "/sdk/entrypoint/custom/main.dang", main)
+    let kept = pythonSdk.generateScope(leafAbove.withWorkdir(root), isModule: true, name: name, clients: [])
+    assert(kept.file("/" + root + "/sdk/entrypoint/dang.toml").contents == generated.file("/" + root + "/sdk/entrypoint/dang.toml").contents, "the dang.toml above an entrypoint of the user's own was pruned")
+
+    let staleClient = "/" + root + "/clients/old"
+    let withStale = generated
+      .withNewFile(staleClient + "/pyproject.toml", "[project]\nname = \"old\"\n\n[tool.dagger]\ngenerated = \"client\"\n")
+      .withNewFile(staleClient + "/dang.toml", config)
+    let withoutStale = pythonSdk.generateScope(withStale.withWorkdir(root), isModule: true, name: name, clients: [])
+    assert(withoutStale.file(staleClient + "/dang.toml").contents == config, "a dang.toml did not outlive its deleted client directory")
+    assert(withoutStale.directory("/" + root).exists("clients/old/pyproject.toml") == false, "a client no longer declared was not deleted")
+    assert(pythonSdk.generateScope(withoutStale, isModule: true, name: name, clients: []).withWorkdir(".").changes(withoutStale.withWorkdir(".")).isEmpty, "a second generation changed a module with a kept dang.toml")
+
+    [["sdk/custom", "sdk/dang.toml"], ["clients/core/custom", "clients/core/dang.toml"]].each { case =>
+      let path = case[0] ?? ""
+      let governingPath = "/" + root + "/" + (case[1] ?? "")
+      let governed = generated
+        .withNewFile(manifestPath, dangEntrypointManifest(name, "./" + path))
+        .withNewFile("/" + root + "/" + path + "/main.dang", main)
+        .withNewFile(governingPath, config)
+      let governedScoped = pythonSdk.generateScope(governed.withWorkdir(root), isModule: true, name: name, clients: [])
+      let governedDirect = pythonSdk.mod(governed, path: root, findUp: false).generated
+      [governedScoped, governedDirect].each { kept =>
+        assert(kept.file("/" + root + "/" + path + "/main.dang").contents == main, path + ": the entrypoint did not survive")
+        assert(kept.file(governingPath).contents == config, path + ": the dang.toml that governs the entrypoint did not survive")
+        assert(kept.directory("/" + root).exists(path + "/dang.toml") == false, path + ": a dang.toml was written beside the entrypoint")
+      }
+      assert(pythonSdk.generateScope(governedScoped, isModule: true, name: name, clients: []).withWorkdir(".").changes(governedScoped.withWorkdir(".")).isEmpty, path + ": a second generation changed the module")
+    }
+
+    ["sdk/custom", "clients/core/custom"].each { path =>
+      let beforeRuntime = generated
+        .withNewFile(manifestPath, dangEntrypointManifest(name, "./" + path))
+        .withNewFile("/" + root + "/" + path + "/main.dang", main)
+      let runtimeRefused = pythonSdk(legacyRuntime: true).generateScope(beforeRuntime.withWorkdir(root), isModule: true, name: name, clients: []).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(runtimeRefused, "before moving the module onto a runtime", path + ": moving onto the runtime was not refused, and a later generation would delete the entrypoint: " + runtimeRefused)
+    }
+
+    let untouched = generated
+      .withNewFile(manifestPath, dangEntrypointManifest(name, "./clients/custom"))
+      .withNewFile("/" + root + "/clients/custom/main.dang", main)
+    let onRuntime = pythonSdk(legacyRuntime: true).generateScope(untouched.withWorkdir(root), isModule: true, name: name, clients: [])
+    assertNotContains(onRuntime.file(manifestPath).contents, "[entrypoint]", "the module did not move onto the runtime")
+    let onRuntimeAgain = pythonSdk(legacyRuntime: true).generateScope(onRuntime, isModule: true, name: name, clients: [])
+    assert(onRuntimeAgain.file("/" + root + "/clients/custom/main.dang").contents == main, "a second generation on the runtime lost a directory generation does not replace")
+
+    ["sdk", "sdk/src", "clients/core/src"].each { path =>
+      let seeded = generated
+        .withNewFile(manifestPath, dangEntrypointManifest(name, "./" + path))
+        .withNewFile("/" + root + "/" + path + "/main.dang", main)
+      let refused = pythonSdk.generateScope(seeded.withWorkdir(root), isModule: true, name: name, clients: []).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(refused, "shares that path with files this SDK generates", path + ": an entrypoint at a generated path was not refused: " + refused)
+      let directRefused = pythonSdk.mod(seeded, path: root, findUp: false).generated.cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(directRefused, "shares that path with files this SDK generates", path + ": direct generation did not refuse: " + directRefused)
+    }
+    null
+  }
+
   let dangEntrypointManifest(name: String!, source: String!): String! {
     "name = \"" + name + "\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"" + source + "\"\n"
   }

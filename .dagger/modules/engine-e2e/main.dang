@@ -172,6 +172,8 @@ type EngineE2e {
 
   pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check { onFloor(ws, "remote-entrypoint-replaced-check") }
 
+  pub ownEntrypointKeptCheck(ws: Workspace!): Void @check { onFloor(ws, "own-entrypoint-kept-check") }
+
   pub targetVersionCheck(ws: Workspace!): Void @check { onFloor(ws, "target-version-check") }
 
   pub targetVersionCliCheck(ws: Workspace!): Void @check { onFloor(ws, "target-version-cli-check") }

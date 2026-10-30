@@ -190,6 +190,7 @@ type PythonSdk {
         entrypointMode: mode,
         migrating: migrating,
         engineVersion: scopeEngineVersion(initialized, scope),
+        ownEntrypointPath: ownEntrypointPathOf(initialized, scope),
         targetVersion: targetVersionOf(targetVersion),
         clients: clients,
       ).generated.withWorkdir(scope)
@@ -662,6 +663,18 @@ type PythonSdk {
   }
 
   """
+  The module-relative path of a Dang entrypoint of the user's own that a
+  module's manifest names, or the empty string when it names none.
+  """
+  let ownEntrypointPathOf(ws: Workspace!, scope: String!): String! {
+    if (namesOwnEntrypoint(ws, scope) and hasEntrypointManifest(ws, scope) == false) {
+      normalizePath(ManifestToml(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents).entrypointSource)
+    } else {
+      ""
+    }
+  }
+
+  """
   Whether a module's manifest names a Dang entrypoint of the user's own, in
   the module's files, which generation keeps.
   """
@@ -770,6 +783,7 @@ type PythonSdk {
       entrypointMode: entrypointModeOf(ws, modPath),
       migrating: migratingModule(ws, modPath),
       engineVersion: scopeEngineVersion(ws, modPath),
+      ownEntrypointPath: ownEntrypointPathOf(ws, modPath),
       targetVersion: targetVersionOf(targetVersion),
       clients: null,
     )
