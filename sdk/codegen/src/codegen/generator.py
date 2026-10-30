@@ -49,7 +49,6 @@ from graphql import (
     get_named_type,
     is_leaf_type,
 )
-from graphql.pyutils import snake_to_camel
 from graphql.type.schema import TypeMap
 
 from codegen.naming import snake
@@ -1120,13 +1119,10 @@ class Input(ObjectHandler[GraphQLInputObjectType]):
             )
         )
 
-        # The query builder derives GraphQL names from the Python ones; record
-        # only those it can't.
-        names = {
-            f.name: f.graphql_name
-            for f in fields
-            if snake_to_camel(f.name, upper=False) != f.graphql_name
-        }
+        # The query builder sends a field by the GraphQL name recorded here:
+        # the Python name is the engine's spelling, which nothing converts
+        # back.
+        names = {f.name: f.graphql_name for f in fields}
         if names:
             yield ""
             yield f"_graphql_names = {tuple(names.items())!r}"
