@@ -22,12 +22,15 @@ Without a pattern, `dagger check` also selects the `engine-e2e` checks, which
 build engines from dagger/dagger commits. CI runs them:
 
 ```sh
-dagger check engine-e2e:floor-check
+dagger check engine-e2e:runtime-call-check
+dagger check engine-e2e:floor-coverage-check
 dagger check engine-e2e:below-floor-check
 ```
 
-`floor-check` runs every e2e check on the floor engine, built from its commit.
-To run e2e checks on the floor's released engine instead:
+Each e2e check has an `engine-e2e` check of the same name, which runs it on the
+floor engine, built from its commit. `floor-coverage-check` fails when an e2e
+check has no such check. To run e2e checks on the floor's released engine
+instead:
 
 ```sh
 dagger check --engine=image://registry.dagger.io/engine:v1.0.0-beta.18 \
