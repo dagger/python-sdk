@@ -176,8 +176,6 @@ type EngineE2e {
 
   pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check { onFloor(ws, "shared-entrypoint-build-check") }
 
-  pub runtimeNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-naming-check") }
-
   pub sdkTestCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-check") }
 
   pub sdkTestOldestPythonCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-oldest-python-check") }

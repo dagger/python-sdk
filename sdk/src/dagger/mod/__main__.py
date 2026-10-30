@@ -1,6 +1,7 @@
 """Commands the generated entrypoint runs in the module's container."""
 
 import argparse
+import functools
 import json
 import logging
 import pathlib
@@ -65,14 +66,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _entrypoint(args: argparse.Namespace) -> None:
-    from dagger.client._descriptor import registering_types
     from dagger.mod._entrypoint import write_entrypoint
-    from dagger.mod.cli import load_module
 
-    with registering_types():
-        mod = load_module()
     write_entrypoint(
-        mod.describe(),
+        _described(),
         name=args.name,
         output=args.output,
         outside=args.outside,
@@ -80,14 +77,22 @@ def _entrypoint(args: argparse.Namespace) -> None:
 
 
 def _describe(args: argparse.Namespace) -> None:
-    from dagger.client._descriptor import registering_types
     from dagger.mod._describe import describe_json
+
+    description = _described()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(describe_json(description))
+
+
+def _described():
+    """The module's description, its main object the one the engine takes."""
+    from dagger.client._descriptor import registering_types
     from dagger.mod.cli import load_module
 
     with registering_types():
         mod = load_module()
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(describe_json(mod.describe()))
+    anyio.run(functools.partial(mod.load_naming, names=False))
+    return mod.describe()
 
 
 def _call(args: argparse.Namespace) -> None:

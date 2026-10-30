@@ -104,7 +104,7 @@ type Mod {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)
         let entrypointPath = vendorDirName + "/" + entrypointDirName
-        entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside))), entrypointPath)
+        entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside), entrypointPath)), entrypointPath)
       } else if (entrypointMode == "remote") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
@@ -225,15 +225,34 @@ type Mod {
   """
   The entrypoint the engine loads instead of calling a runtime: the module's
   own container renders its types, and the container build travels with it.
+  Which class is the main object, the one that gets the constructor, the
+  engine says (ModuleSource.naming), for the module the entrypoint serves:
+  the renderer asks it as a nested client, about the source named by its ID.
+  It is asked from Python, so that this module, which an engine before the
+  floor still loads to refuse it, names no field such an engine lacks.
   """
-  let entrypointDir(generated: Workspace!, outside: [String!]!): Directory! {
+  let entrypointDir(generated: Workspace!, outside: [String!]!, entrypointPath: String!): Directory! {
     pythonSdkRuntime
       .moduleRuntime(modSource: staging(generated, outside).moduleSource("/" + rootPath), introspectionJson: null)
-      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput] +
-        outside.map { pattern => "--outside=" + pattern })
+      .withEnvVariable("DAGGER_MODULE_SOURCE_ID", toString(namedSource(generated, entrypointPath).id))
+      .withExec(
+        ["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput] +
+          outside.map { pattern => "--outside=" + pattern },
+        experimentalPrivilegedNesting: true,
+      )
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)
       .withNewFile("workspace_reader.py", currentModule.source.file("runtime/workspace_reader.py").contents)
+  }
+
+  """
+  The module the engine names once the entrypoint is generated: the manifest
+  this generation writes, with the entrypoint's directory in place, since the
+  dang.toml governing it decides the version the module is named by.
+  """
+  let namedSource(target: Workspace!, entrypointPath: String!): ModuleSource! {
+    entrypointManifest(target.withDirectory("/" + rootPath + "/" + entrypointPath, directory), entrypointPath)
+      .moduleSource("/" + rootPath)
   }
 
   """

@@ -1820,30 +1820,6 @@ type E2e {
     null
   }
 
-  """
-  Main object names derive from module names as in the engine's builtin Python
-  runtime, so a module keeps loading when it moves between the two.
-  """
-  pub runtimeNamingCheck: Void @check {
-    [
-      ["my-module", "MyModule"],
-      ["my_module", "MyModule"],
-      ["myModule", "MyModule"],
-      ["MyModule", "MyModule"],
-      ["HTTPServer", "Httpserver"],
-      ["s3-bucket", "S3Bucket"],
-      ["app2", "App2"],
-      ["a.b c", "ABC"],
-    ].each { pair =>
-      let name = pair[0] ?? ""
-      let want = pair[1] ?? ""
-      let got = pythonSdkRuntime.mainObjectName(name)
-      assert(got == want, "main object name for " + name + ": got " + got + ", want " + want)
-    }
-
-    null
-  }
-
   let sdkSource(ws: Workspace!): Directory! {
     ws
       .directory("/", include: ["sdk/**", "!sdk/**/.venv", "!sdk/**/__pycache__"])

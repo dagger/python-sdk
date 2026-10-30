@@ -83,7 +83,6 @@ type PythonModuleBuild {
         # Last, so the layers above are shared between modules.
         .withEnvVariable("DAGGER_MODULE", moduleName)
         .withEnvVariable("DAGGER_DEFAULT_PYTHON_PACKAGE", packageName)
-        .withEnvVariable("DAGGER_MAIN_OBJECT", mainObjectName(moduleName))
 
       install(built, source, cfg)
     }
@@ -94,40 +93,6 @@ type PythonModuleBuild {
   """
   pub scopeMembers(pyproject: File!): [String!]! {
     pyConfig(directory.withFile(projectCfg, pyproject), ".").members
-  }
-
-  """
-  The class name of a module's main object, converted like the engine's builtin
-  Python runtime (strcase.ToCamel) so a module loads the same on both.
-  """
-  pub mainObjectName(name: String!): String! {
-    name
-      .trimSpace
-      .split("")
-      .reduce(CamelState(out: "", capNext: true, prevIsCap: false)) { state, c =>
-        let isCap = c.containsMatch("^[A-Z]$")
-        let isLow = c.containsMatch("^[a-z]$")
-        let isNum = c.containsMatch("^[0-9]$")
-        if (isCap or isLow) {
-          let v = if (state.capNext and isLow) {
-            c.toUpper
-          } else if (state.capNext == false and state.prevIsCap and isCap) {
-            c.toLower
-          } else {
-            c
-          }
-          CamelState(out: state.out + v, capNext: false, prevIsCap: isCap)
-        } else if (isNum) {
-          CamelState(out: state.out + c, capNext: true, prevIsCap: false)
-        } else {
-          CamelState(
-            out: state.out,
-            capNext: c == "_" or c == " " or c == "-" or c == ".",
-            prevIsCap: false,
-          )
-        }
-      }
-      .out
   }
 
   let base(baseImage: String!, uvImage: String!, cfg: PyConfig!): Container! {
@@ -531,21 +496,5 @@ type PyConfig {
   """
   pub isScope: Boolean! {
     members.filter { member => member == "sdk" }.length > 0
-  }
-}
-
-"""
-Accumulator for the CamelCase conversion of a module name.
-"""
-type CamelState {
-  pub out: String!
-  pub capNext: Boolean!
-  pub prevIsCap: Boolean!
-
-  new(out: String! = "", capNext: Boolean! = true, prevIsCap: Boolean! = false) {
-    self.out = out
-    self.capNext = capNext
-    self.prevIsCap = prevIsCap
-    self
   }
 }

@@ -38,17 +38,20 @@ def selections():
 _NAMING_FIELD = re.compile(
     r"(typeNames|fieldNames|enumMemberNames)\(names: (\[.*?\])\)"
 )
+_MAIN_OBJECT_FIELD = re.compile(r"mainObject\(candidates: (\[.*?\])\)")
 
 
 class FakeEngine:
-    """Answers CurrentModule.naming from a table of the engine's names.
+    """Answers ModuleNaming from a table of the engine's names.
 
     A name the table lacks fails the query, as a name the engine can't name
-    does. Any other query gets the canned data. It keeps what it was asked.
+    does. mainObject answers ``main_object`` if it's among the candidates.
+    Any other query gets the canned data. It keeps what it was asked.
     """
 
     def __init__(self, names: typing.Mapping[str, typing.Mapping[str, str]]):
         self.names = names
+        self.main_object: str | None = None
         self.data: typing.Any = None
         self.queries: list[str] = []
 
@@ -60,11 +63,17 @@ class FakeEngine:
         self.queries.append(query)
         if not query.startswith("query ModuleNaming"):
             return self.data
-        naming = {}
+        naming: dict[str, typing.Any] = {}
         for field, names in _NAMING_FIELD.findall(query):
             table = self.names.get(field, {})
             naming[field] = [table[name] for name in json.loads(names)]
-        return {"currentModule": {"naming": naming}}
+        if m := _MAIN_OBJECT_FIELD.search(query):
+            candidates = json.loads(m.group(1))
+            naming["mainObject"] = (
+                self.main_object if self.main_object in candidates else None
+            )
+        root = "node" if "node(id:" in query else "currentModule"
+        return {root: {"naming": naming}}
 
 
 @pytest.fixture

@@ -1,24 +1,31 @@
-"""Schema names the engine gives a module's own declarations.
+"""How the engine names a module's own declarations.
 
 The runtime registers Python names (``get_url``, ``HttpFetcher``) and the
 engine turns them into schema names (``getUrl``, ``NamingAppHTTPFetcher``) by
-the naming rules of the version it names the module by. The calls the runtime
-builds itself, through the module's own interfaces, have to use those schema
-names: a wrong one is a fragment on a type that doesn't exist, a field the
-interface doesn't have, or an unknown enum member.
+the naming rules of the version it names the module by. Two things in the
+runtime depend on those rules:
 
-So the runtime doesn't predict them: it asks the engine, which answers for the
-module it is running (``CurrentModule.naming``) by the same rules it names the
-module by, legacy strcase for a module declaring a version before the
-identifier casing cut. One query per call, before anything is invoked, for
-every name the calls through the module's interfaces can use.
+- which of the module's classes is its main object, the one the engine finds
+  by the module's name;
+- the calls the runtime builds itself, through the module's own interfaces,
+  which select schema names: a wrong one is a fragment on a type that doesn't
+  exist, a field the interface doesn't have, or an unknown enum member.
+
+The runtime doesn't predict either: it asks the engine (``ModuleNaming``),
+which answers by the same rules it names the module by, legacy strcase for a
+module declaring a version before the identifier casing cut. It asks once,
+when the module is loaded, in one query: for the module it is running
+(``CurrentModule.naming``), or, when generation renders a module's entrypoint
+from outside of it, for the module source generation names
+(``ModuleSource.naming``, by the ID in ``SOURCE_ID_ENV``).
 """
 
 from __future__ import annotations
 
 import dataclasses
+import os
 import typing
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 
 from dagger.client._core import to_literal
 from dagger.client._session import default_session
@@ -28,6 +35,9 @@ if typing.TYPE_CHECKING:
     import enum
 
     from dagger.mod._resolver import ObjectType
+
+SOURCE_ID_ENV = "DAGGER_MODULE_SOURCE_ID"
+"""The ID of the ModuleSource to ask about, for a module not running in it."""
 
 Execute: typing.TypeAlias = Callable[[str], Awaitable[typing.Any]]
 """Runs a GraphQL query against the engine and returns its data."""
@@ -73,53 +83,75 @@ class ModuleNames:
             raise ModuleError(msg) from None
 
 
-async def module_names(
-    interfaces: Iterable[ObjectType],
-    enums: Iterable[type[enum.Enum]],
-    execute: Execute = _execute,
-) -> ModuleNames:
-    """Ask the engine how it names the module's interfaces and enums.
+@dataclasses.dataclass(frozen=True, slots=True)
+class Naming:
+    """The engine's answers for a module."""
 
-    One query: the interfaces' type names, their functions' and arguments'
-    names, and the members of the module's enums, which calls through an
-    interface send and receive.
+    main_object: str | None = None
+    """Which candidate the engine takes as the main object; None if it wasn't
+    asked, or takes none."""
+
+    names: ModuleNames = dataclasses.field(default_factory=ModuleNames)
+
+
+async def ask_naming(
+    *,
+    candidates: Sequence[str] | None = None,
+    interfaces: Iterable[ObjectType] = (),
+    enums: Iterable[type[enum.Enum]] = (),
+    source_id: str | None = None,
+    execute: Execute = _execute,
+) -> Naming:
+    """Ask the engine, in one query, how it names the module.
+
+    ``candidates`` are the classes that may be the main object, which is
+    asked only when given. The names are those of the interfaces, their
+    functions and arguments, and the members of the module's enums, which
+    calls through an interface send and receive; asked only for a module
+    with interfaces. ``source_id`` names the module source to ask about;
+    without it, the module the runtime runs in.
     """
     interfaces = list(interfaces)
-    types = sorted({iface.cls.__name__ for iface in interfaces})
-    fields = sorted(
-        {
-            name
-            for iface in interfaces
-            for fn in iface.functions.values()
-            for name in (fn.name, *(p.name for p in fn.parameters.values()))
-        }
-    )
-    members = sorted({member.name for cls in enums for member in cls})
-    asked = {
-        "typeNames": types,
-        "fieldNames": fields,
-        "enumMemberNames": members,
-    }
-    selections = "\n".join(
-        f"      {field}(names: {to_literal(names)})"
+    asked: dict[str, list[str]] = {}
+    if interfaces:
+        asked["typeNames"] = sorted({iface.cls.__name__ for iface in interfaces})
+        asked["fieldNames"] = sorted(
+            {
+                name
+                for iface in interfaces
+                for fn in iface.functions.values()
+                for name in (fn.name, *(p.name for p in fn.parameters.values()))
+            }
+        )
+        asked["enumMemberNames"] = sorted(
+            {member.name for cls in enums for member in cls}
+        )
+    selections = [
+        f"{field}(names: {to_literal(names)})"
         for field, names in asked.items()
         if names
-    )
+    ]
+    if candidates is not None:
+        selections.append(f"mainObject(candidates: {to_literal(list(candidates))})")
     if not selections:
-        return ModuleNames()
-    data = await execute(
-        "query ModuleNaming {\n"
-        "  currentModule {\n"
-        "    naming {\n"
-        f"{selections}\n"
-        "    }\n"
-        "  }\n"
-        "}"
-    )
-    naming = (data or {}).get("currentModule", {}).get("naming", {})
+        return Naming()
+
+    fields = "".join(f"      {s}\n" for s in selections)
+    if source_id is None:
+        root, open_, close = "currentModule", "currentModule {", "}"
+    else:
+        root = "node"
+        open_ = f"node(id: {to_literal(source_id)}) {{ ... on ModuleSource {{"
+        close = "} }"
+    query = f"query ModuleNaming {{\n  {open_}\n    naming {{\n{fields}"
+    data = await execute(f"{query}    }}\n  {close}\n}}")
+    naming = ((data or {}).get(root) or {}).get("naming")
+    if not isinstance(naming, dict):
+        msg = f"The engine answered no ModuleNaming: {data!r}"
+        raise ModuleError(msg)
 
     def answers(field: str) -> dict[str, str]:
-        names = asked[field]
+        names = asked.get(field)
         if not names:
             return {}
         got = naming.get(field)
@@ -128,8 +160,16 @@ async def module_names(
             raise ModuleError(msg)
         return dict(zip(names, got, strict=True))
 
-    return ModuleNames(
-        types=answers("typeNames"),
-        fields=answers("fieldNames"),
-        enum_members=answers("enumMemberNames"),
+    return Naming(
+        main_object=naming.get("mainObject") if candidates is not None else None,
+        names=ModuleNames(
+            types=answers("typeNames"),
+            fields=answers("fieldNames"),
+            enum_members=answers("enumMemberNames"),
+        ),
     )
+
+
+def source_id() -> str | None:
+    """The module source generation asks about, if it gave one."""
+    return os.environ.get(SOURCE_ID_ENV) or None
