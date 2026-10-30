@@ -543,8 +543,16 @@ type Scope {
       .withDirectory("src", clientSource(member))
   }
 
+  """
+  A client's schema: its module as the engine names and serves it, by the
+  version the module itself declares, with core as the scope sees it. Not
+  withEngineVersion(view), which would make the module declare the scope's
+  version and so name its declarations by that version's rules: a client of
+  a module past the identifier casing cut would call names the engine does
+  not serve it by.
+  """
   let clientSchema(member: ClientMember!): File! {
-    let schema = member.source.withEngineVersion(view).clientSchemaIntrospectionJSON
+    let schema = member.source.clientSchemaIntrospectionJSON(clientVersion: view)
     checkClientLoads(member, schema)
     schema
   }
