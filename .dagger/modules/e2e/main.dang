@@ -2075,7 +2075,7 @@ type E2e {
     ]
     let upgradeOnly = ["v1.0.0-beta.17", "v1.0.0-beta.14", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
     let accepted = [
-      "v1.0.0-beta.22", "v1.0.0-beta.22+6d5350e1", "v1.0.0-beta.23", "v1.0.0-rc.1", "v1.0.0",
+      "v1.0.0-beta.22", "v1.0.0-beta.22+017633c9", "v1.0.0-beta.23", "v1.0.0-rc.1", "v1.0.0",
       "v1.0.1", "v2.0.0-beta.1", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-dev.3", "devel", "",
     ]
     (pinned + upgradeOnly).each { engine =>
