@@ -536,18 +536,19 @@ type PythonSdk {
   """
   Why this SDK refuses an engine of the given version, or the empty string
   when it runs on it. Only a release older than the floor is refused: a
-  version this cannot read, a development build among them, passes, so an
-  unexpected format never blocks a user. The engine's own gate cannot do this:
-  it treats every prerelease of v1.0.0 as v1.0.0. The refusal offers the last
-  release below the floor only to an engine that release runs on.
+  version this cannot read passes, so an unexpected format never blocks a
+  user, and a build of dagger's main passes as the release it reports,
+  `v<release>+<commit>`. The engine's own gate cannot do this: it treats
+  every prerelease of v1.0.0 as v1.0.0. The refusal offers the last release
+  below the floor only to an engine that release runs on.
   """
   pub engineRefusal(engineVersion: String!): String! {
-    if (releasePrecedes(engineVersion, engineFloor) == false) {
+    if (Releases().precedes(engineVersion, engineFloor) == false) {
       ""
     } else {
       let needs = "this Python SDK needs Dagger engine " + engineFloor + " or later, and this engine is " +
         engineVersion + ". "
-      if (releasePrecedes(engineVersion, lastReleaseEngineFloor)) {
+      if (Releases().precedes(engineVersion, lastReleaseEngineFloor)) {
         needs + "Upgrade the engine."
       } else {
         needs + "Upgrade the engine, or pin the last release of this SDK that runs on it: " +
@@ -566,67 +567,6 @@ type PythonSdk {
       raise refusal
     }
     null
-  }
-
-  """
-  Whether release `a` comes before release `b` in semver precedence. False
-  when either is not a plain `vX.Y.Z[-pre][+build]` or is a development build.
-  """
-  let releasePrecedes(a: String!, b: String!): Boolean! {
-    let pattern = Regexp("^v([0-9]+)\\.([0-9]+)\\.([0-9]+)(?:-([0-9A-Za-z.]+))?(?:\\+[0-9A-Za-z.-]+)?$")
-    let ma = a.match(pattern)
-    let mb = b.match(pattern)
-    if (ma == null) {
-      false
-    } else if (mb == null) {
-      false
-    } else if (a.contains("dev") or b.contains("dev")) {
-      false
-    } else {
-      let ca = ma.captures
-      let cb = mb.captures
-      let coreA = [ca[0] ?? "", ca[1] ?? "", ca[2] ?? ""]
-      let coreB = [cb[0] ?? "", cb[1] ?? "", cb[2] ?? ""]
-      let preA = ca[3] ?? ""
-      let preB = cb[3] ?? ""
-      if (identifiersPrecede(coreA, coreB, 0)) {
-        true
-      } else if (identifiersPrecede(coreB, coreA, 0)) {
-        false
-      } else if (preA == "") {
-        false
-      } else if (preB == "") {
-        true
-      } else {
-        identifiersPrecede(preA.split("."), preB.split("."), 0)
-      }
-    }
-  }
-
-  """
-  Semver precedence of dot-separated identifiers from index `i`: numbers by
-  value and before words, words by ASCII, and a shorter list first when one
-  is a prefix of the other.
-  """
-  let identifiersPrecede(a: [String!]!, b: [String!]!, i: Int!): Boolean! {
-    if (i >= a.length) {
-      i < b.length
-    } else if (i >= b.length) {
-      false
-    } else {
-      let x = a[i] ?? ""
-      let y = b[i] ?? ""
-      let xNumber = x.containsMatch("^[0-9]+$")
-      let yNumber = y.containsMatch("^[0-9]+$")
-      if (x == y) {
-        identifiersPrecede(a, b, i + 1)
-      } else if (xNumber and yNumber) {
-        # Space sorts before every digit, so padding to one width orders by value.
-        x.padLeft(20) < y.padLeft(20)
-      } else {
-        xNumber or (yNumber == false and x < y)
-      }
-    }
   }
 
   """
