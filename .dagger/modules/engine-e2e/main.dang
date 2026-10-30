@@ -224,6 +224,8 @@ type EngineE2e {
 
   pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "git-workspace-generate-check") }
 
+  pub namingCheck(ws: Workspace!): Void @check { onFloor(ws, "naming-check") }
+
   """
   The release below the floor is refused: on its engine, generation names the
   floor and the release to pin instead.

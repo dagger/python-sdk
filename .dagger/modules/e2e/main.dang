@@ -2879,4 +2879,78 @@ type E2e {
     )
   }
 
+  let namingFixturePath: String! = fixtureRoot + "/naming"
+
+  """
+  naming-app generated as a static entrypoint module, and naming-caller
+  generated with a client of it, in a workspace of their own. With pinned,
+  naming-app's dang.toml declares v1.0.0-beta.22, which the engine names it
+  by; without one, the engine names it by v1.0.0-beta.20, the legacy rules.
+  """
+  let namingScope(ws: Workspace!, pinned: Boolean!): Workspace! {
+    let app = ws.directory("/" + namingFixturePath + "/app")
+    let appSource = if (pinned) {
+      app.withNewFile("dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
+    } else {
+      app
+    }
+    let tree = directory
+      .withDirectory("naming-app", appSource)
+      .withDirectory("naming-caller", ws.directory("/" + namingFixturePath + "/caller"))
+    let withApp = pythonSdk.generateScope(tree.asWorkspace.withWorkdir("naming-app"), isModule: true, name: "naming-app", clients: [])
+      .withWorkdir(".")
+    pythonSdk.generateScope(withApp.withWorkdir("naming-caller"), isModule: true, name: "naming-caller", clients: [withApp.moduleSource("/naming-app")])
+      .withWorkdir(".")
+  }
+
+  let pyFiles(generated: Workspace!, path: String!): String! {
+    let root = generated.directory("/" + path)
+    root.glob("**/*.py").map { file => root.file(file).contents }.join("\n")
+  }
+
+  """
+  The engine names a module's declarations by the version it names the module
+  by, and the SDK follows it on both sides of the identifier casing cut:
+
+  - generation spells the Python names of every schema identifier as the
+    engine does (experimental_with_all_gpus in core, whatever the version);
+  - the client generated for naming-app names its declarations as the
+    engine does at naming-app's version (NamingAppHttpFetcher and ARM_64
+    before the cut, NamingAppHTTPFetcher and ARM64 past it);
+  - naming-app's runtime, called through that client, calls its own
+    interface by the names the engine gave it (the namespaced type and its
+    function), so the call returns.
+
+  The fixture keeps to names the engine names the same on an object and on
+  an interface: by the legacy rules, it names an interface's fields twice,
+  which isn't idempotent (e2e_test is e2ETest on an object, e2Etest on an
+  interface), and CurrentModule.naming answers the object's spelling. Its
+  interface takes no own enum, which the engine refuses in the module's own
+  session.
+  """
+  pub namingCheck(ws: Workspace!): Void @check {
+    [
+      {{pinned: false, iface: "NamingAppHttpFetcher", member: "ARM_64"}},
+      {{pinned: true, iface: "NamingAppHTTPFetcher", member: "ARM64"}},
+    ].each { want =>
+      let label = if (want.pinned) { "naming-app at v1.0.0-beta.22" } else { "naming-app without a version" }
+      let generated = namingScope(ws, want.pinned)
+      let core = pyFiles(generated, "naming-caller/clients/core/src")
+      assertContains(core, "def experimental_with_all_gpus(", label + ": core's Python names are not the engine's")
+      let client = pyFiles(generated, "naming-caller/clients/naming-app/src")
+      assertContains(client, "class " + want.iface, label + ": the client does not name the interface " + want.iface)
+      assertContains(client, want.member + " = ", label + ": the client does not name the enum member " + want.member)
+      assertContains(client, "def get_url(", label + ": the client does not name get_url")
+      let outcomes = generated.withModule("naming-caller", name: "naming-caller")
+        .artifacts(include: ["naming-caller:fetch-check"]).asChecks
+        .{{ pass, error.{{ message }} }}
+      assert(outcomes.length == 1, label + ": expected the fetch check, got " + toString(outcomes.length))
+      # Selected on `pass` first: reading the message of a check that passed
+      # raises an evaluation error of its own.
+      let failed = outcomes.filter { c => c.pass == false }.map { c => c.error.message }
+      assert(failed.length == 0, label + ": the call through its interface failed: " + failed.join("\n"))
+      null
+    }
+    null
+  }
 }
