@@ -7,6 +7,9 @@ import (
 	"testing"
 )
 
+// stubTypeName stands in for the engine, which spells the class name.
+func stubTypeName(string) (string, error) { return "Main", nil }
+
 func TestRenderedPackageMatchesTheRuntime(t *testing.T) {
 	for _, tc := range []struct {
 		name, project, pkg string
@@ -22,7 +25,7 @@ func TestRenderedPackageMatchesTheRuntime(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := t.TempDir()
-			if err := run([]string{tc.name, filepath.Join("..", "..", "templates", "default"), out}); err != nil {
+			if err := run([]string{tc.name, filepath.Join("..", "..", "templates", "default"), out}, stubTypeName); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(out, "src", tc.pkg, "__init__.py")); err != nil {
