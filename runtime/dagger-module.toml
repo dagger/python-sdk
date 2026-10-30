@@ -1,5 +1,5 @@
 name = "python-sdk-runtime"
-engineVersion = "v1.0.0-0"
+engineVersion = "v1.0.0-beta.22"
 
 [runtime]
   source = "dang"
