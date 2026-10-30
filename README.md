@@ -43,8 +43,10 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a ref>` | an entrypoint served from elsewhere, the shared one below among them |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.18` or later, the first release that
-loads a module's files through its entrypoint's `sources` member. An
+This SDK needs an engine `v1.0.0-beta.22` or later, the first release that
+names identifiers by its naming rules and answers for them: generation asks
+it how to spell the Python names of the schema's identifiers, and a module
+asks it what it named the module's own declarations. An
 entrypoint runs a module on the engine's own version, so an entrypoint
 manifest keeps no `engineVersion`.
 

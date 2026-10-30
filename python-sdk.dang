@@ -527,21 +527,22 @@ type PythonSdk {
   let staticEntrypointPath: String! = vendorDirName + "/entrypoint"
 
   """
-  The first engine release this SDK runs on: the first that loads a
-  module's files through its entrypoint's sources member.
+  The first engine release this SDK runs on: the first that names identifiers
+  by its naming rules and answers for them, which generation (formatIdentifiers)
+  and the module runtime (CurrentModule.naming) both ask.
   """
-  let engineFloor: String! = "v1.0.0-beta.18"
+  let engineFloor: String! = "v1.0.0-beta.22"
 
   """
   The last release of this SDK that runs on an engine below engineFloor.
   """
-  let lastReleaseBelowFloor: String! = "v1.1.1"
+  let lastReleaseBelowFloor: String! = "v1.3.0"
 
   """
   The first engine release lastReleaseBelowFloor runs on, as its manifest
   declares.
   """
-  let lastReleaseEngineFloor: String! = "v1.0.0-beta.14"
+  let lastReleaseEngineFloor: String! = "v1.0.0-beta.18"
 
   """
   Why this SDK refuses an engine of the given version, or the empty string
