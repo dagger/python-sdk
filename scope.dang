@@ -532,14 +532,14 @@ type Scope {
 
   """
   The engine version the scope's code runs against: the one its module's own
-  runtime declares, or else the version core is generated at, which is the
-  engine's own view, as on an entrypoint. The engine
-  serves a schema in the view of the module it describes, so a client to a
-  module that declares an older version would otherwise name core types that
-  its scope does not have.
+  runtime declares, or else the targeted release, which the generated
+  entrypoint and the library announce to the engine. The engine serves a
+  schema in the view of the module it describes, so a client to a module that
+  declares an older version would otherwise name core types that its scope
+  does not have.
   """
   let view: String! {
-    if (engineVersion == "") { coreSchemaSource.engineVersion } else { engineVersion }
+    if (engineVersion == "") { targetVersion } else { engineVersion }
   }
 
   """
