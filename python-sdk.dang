@@ -529,7 +529,7 @@ type PythonSdk {
   engine until it comes from a published library, so this is the release
   the generated entrypoint and the library announce, not yet core's.
   """
-  let engineTarget: String! = "v1.0.0-beta.21"
+  let engineTarget: String! = "v1.0.0-beta.22"
 
   """
   The last release of this SDK that runs on an engine below engineFloor.
