@@ -1481,19 +1481,22 @@ type E2e {
   }
 
   """
-  A generated entrypoint declares its Dagger version in dang.toml, however the
-  module is generated, and nothing else carries that version.
+  A generated entrypoint declares one Dagger version, in dang.toml and on the
+  exec of the module's process, however the module is generated.
   """
   pub dangConfigCheck(ws: Workspace!): Void @check {
     let root = tomlGenerateModulePath
     let configPath = "/" + root + "/sdk/entrypoint/dang.toml"
-    let target = "v1.0.0-beta.21"
+    let target = targetVersion
 
     let generated = dangConfigGenerate(ws)
     assert(generated.cwd == ws.withWorkdir(root).cwd, "generation moved the caller's directory: " + generated.cwd)
     let written = generated.file(configPath).contents
     assertContainsAll(written, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + target + "\""])
-    assertNotContains(generated.file("/" + root + "/sdk/entrypoint/main.dang").contents, "DAGGER_CLIENT_VERSION", "the entrypoint declares a version outside dang.toml")
+    assertContainsAll(generated.file("/" + root + "/sdk/entrypoint/main.dang").contents, [
+      "let clientVersion: String! = \"" + target + "\"",
+      ".withEnvVariable(\"DAGGER_CLIENT_VERSION\", clientVersion)",
+    ])
     assert(dangConfigDirect(ws).file(configPath).contents == written, "a module generated directly got another dang.toml")
     assert(dangConfigGenerate(generated).withWorkdir(".").changes(generated.withWorkdir(".")).isEmpty, "a second generation changed the module")
 
@@ -1742,6 +1745,13 @@ type E2e {
   and git.
   """
   let floorVersion: String! = "1.0.0-beta.18"
+
+  """
+  The release python-sdk.dang's engineTarget names, which a generated
+  entrypoint declares.
+  """
+  let targetVersion: String! = "v1.0.0-beta.21"
+
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -2143,6 +2153,8 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
+      "let clientVersion: String! = \"" + targetVersion + "\"",
+      ".withEnvVariable(\"DAGGER_CLIENT_VERSION\", clientVersion)",
       "pub sources(workspace: Workspace!): Directory! {",
       "pub types: [TypeDef!]! {",
       "contextDir: directory.withDirectory(\".\", currentModule.contextDirectory",

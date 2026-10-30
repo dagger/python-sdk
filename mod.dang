@@ -34,8 +34,8 @@ type Mod {
   let engineVersion: String!
 
   """
-  The engine release a generated entrypoint declares in its dang.toml, which
-  an engine that reads the file serves the entrypoint and the module's process.
+  The engine release a generated entrypoint declares, both in its dang.toml and
+  as DAGGER_CLIENT_VERSION on the exec that starts the module's process.
   """
   let targetVersion: String!
 
@@ -320,7 +320,7 @@ type Mod {
   let entrypointDir(generated: Workspace!, outside: [String!]!): Directory! {
     pythonSdkRuntime
       .moduleRuntime(modSource: staging(generated, outside).moduleSource("/" + rootPath), introspectionJson: null)
-      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--output", entrypointOutput] +
+      .withExec(["python", "-m", "dagger.mod", "entrypoint", "--name", moduleName, "--client-version", targetVersion, "--output", entrypointOutput] +
         outside.map { pattern => "--outside=" + pattern })
       .directory(entrypointOutput)
       .withNewFile("build.dang", buildDang)

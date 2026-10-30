@@ -195,6 +195,11 @@ the module's types by that version's rules. A module needs to be generated again
 get the file. Engines up to v1.0.0-beta.21 ignore it and serve their own view,
 and standalone Dang tooling older than v2.2.0 refuses its import.
 
+The generated `main.dang` also sets `DAGGER_CLIENT_VERSION` to the same version
+on the exec that starts the module's process. An engine with
+[dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881) serves that
+view to the process; older engines ignore it.
+
 The Dagger version belongs to this SDK. Generation replaces `dagger = true` or
 another version on the `Dagger` import, and keeps the file's other settings and
 imports. The file is written again from those settings, so its comments and
@@ -291,7 +296,8 @@ SDK files:
 | File | What it is |
 | --- | --- |
 | `types.dang` | the module's types, as a literal list of `TypeDef` values |
-| `main.dang` | the `ModuleEntrypoint`: returns the types and runs calls in the module's container |
+| `main.dang` | the `ModuleEntrypoint`: returns the types, and runs calls in the module's container, declaring the targeted engine release to the engine |
+| `dang.toml` | the Dang language version and the targeted engine release |
 | `build.dang` | the container build, copied from `runtime/build.dang` |
 | `workspace_reader.py` | the workspace reader the build runs, copied from `runtime/workspace_reader.py` |
 
