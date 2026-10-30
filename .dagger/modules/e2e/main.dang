@@ -1492,7 +1492,7 @@ type E2e {
   pub dangConfigCheck(ws: Workspace!): Void @check {
     let root = tomlGenerateModulePath
     let configPath = "/" + root + "/sdk/entrypoint/dang.toml"
-    let target = targetVersion
+    let target = pythonSdk.targetVersionOf("")
 
     let generated = dangConfigGenerate(ws)
     assert(generated.cwd == ws.withWorkdir(root).cwd, "generation moved the caller's directory: " + generated.cwd)
@@ -1576,6 +1576,70 @@ type E2e {
 
   let dangConfigDirect(seeded: Workspace!): Workspace! {
     pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).generated
+  }
+
+  """
+  Generation generates for the engine release this SDK release hardcodes,
+  with the targetVersion setting as a pin. The targeted release is accepted,
+  and any other value is refused before anything is written, with a message
+  that says why: no release, later than the targeted one, below the floor,
+  or a release between the two, which needs the published core library for
+  it. A module generated directly is refused the same way.
+  """
+  pub targetVersionCheck(ws: Workspace!): Void @check {
+    let target = pythonSdk.targetVersionOf("")
+    let floor = "v" + floorVersion
+    assert(target == "v1.0.0-beta.21", "the targeted release is " + target)
+    assert(pythonSdk.targetVersionOf(target.trimPrefix("v") + "+build") == target, "the setting is not read as a release: " + pythonSdk.targetVersionOf(target.trimPrefix("v") + "+build"))
+    let scope = outputRoot + "/target-version"
+    let name = "target-version"
+    let scoped = ws.withNewDirectory("/" + scope, directory).withWorkdir(scope)
+    let pinned = pythonSdk(targetVersion: target).generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".")
+    assert(pinned.directory("/" + scope).exists("sdk/entrypoint/main.dang"), "a module pinned to the targeted release was not generated")
+
+    let remedy = ": set targetVersion in its dagger.toml settings to " + target + ", or remove it to generate for " + target
+    let between = if (floor == target) { [] :: [[String!]!]! } else { [[floor, floor + ", which needs the published core library for that release; it does not exist yet, and this Python SDK generates for " + target + " only" + remedy]] }
+    let refusals = between + [
+      ["v9.0.0", "v9.0.0, which is later than " + target + ", the engine release this Python SDK generates for: install the SDK release built for v9.0.0, or set targetVersion in its dagger.toml settings to " + target + ", or remove it"],
+      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest engine this Python SDK runs on" + remedy],
+      ["latest", "\"latest\", which is no engine release such as " + target + remedy],
+    ]
+    let plainScope = outputRoot + "/target-version-scope"
+    let plainRefused = pythonSdk(targetVersion: "v9.0.0").generateScope(ws.withNewDirectory("/" + plainScope, directory).withWorkdir(plainScope), isModule: false, name: "target-version-scope", clients: []).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(plainRefused, "scope " + plainScope + " pins targetVersion v9.0.0, which is later than " + target, "a scope without a module was not named in the refusal: " + plainRefused)
+    refusals.each { case =>
+      let setting = case[0] ?? ""
+      let want = "module \"" + name + "\" pins targetVersion " + (case[1] ?? "")
+      let said = pythonSdk(targetVersion: setting).generateScope(scoped, isModule: true, name: name, clients: []).cwd rescue {
+        err: Error => err.message
+      }
+      assertContains(said, want, "targetVersion " + setting + " generated, or was refused otherwise: " + said)
+      let direct = pythonSdk(targetVersion: setting).mod(pinned, path: scope, findUp: false).rootPath rescue {
+        err: Error => err.message
+      }
+      assertContains(direct, want, "a module generated directly with targetVersion " + setting + " was not refused the same way: " + direct)
+    }
+    [target, target.trimPrefix("v"), target + "+0123abcd", ""].each { setting =>
+      assert(pythonSdk.targetRefusal("module \"m\"", setting) == "", "the targeted release was refused as \"" + setting + "\": " + pythonSdk.targetRefusal("module \"m\"", setting))
+    }
+    null
+  }
+
+  """
+  `dagger module init python --target-version` records the targeted release
+  in the module's scope settings, and the module runs.
+  """
+  pub targetVersionCliCheck(ws: Workspace!): Void @check {
+    let path = ".dagger/modules/target-cli"
+    let target = pythonSdk.targetVersionOf("")
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "target-cli", "--path", path, "--target-version", target])
+    let settings = initialized.file(playgroundRoot + "/dagger.toml").contents
+    assertContains(settings, "targetVersion = \"" + target + "\"", "dagger module init did not record the target in the module's scope settings: " + settings)
+    let ran = cli(initialized, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
+    assert(ran.trimSpace != "", "the module did not run")
+    null
   }
 
   """
@@ -1743,13 +1807,6 @@ type E2e {
   and git.
   """
   let floorVersion: String! = "1.0.0-beta.18"
-
-  """
-  The release python-sdk.dang's engineTarget names, which a generated
-  entrypoint declares.
-  """
-  let targetVersion: String! = "v1.0.0-beta.21"
-
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -2075,7 +2132,7 @@ type E2e {
     assertContainsAll(main, [
       "implements ModuleEntrypoint",
       "let moduleName: String! = \"static-init\"",
-      "let clientVersion: String! = \"" + targetVersion + "\"",
+      "let clientVersion: String! = \"" + pythonSdk.targetVersionOf("") + "\"",
       ".withEnvVariable(\"DAGGER_CLIENT_VERSION\", clientVersion)",
       "pub sources(workspace: Workspace!): Directory! {",
       "pub types: [TypeDef!]! {",

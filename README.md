@@ -97,6 +97,32 @@ An unmanaged legacy `dagger.json` with `"sdk": {"source": "python"}` still
 resolves to the runtime built into the engine (`dagger/dagger`'s
 `sdk/python`), which generates bindings at module load.
 
+## The engine release a module targets
+
+Each release of this SDK targets one engine release, `v1.0.0-beta.21` today.
+Today that release is what the generated entrypoint declares (see "The Dagger
+version of a generated entrypoint") and what the setting below pins, not yet
+what the SDK generates core from:
+
+- `clients/core`, the global client and the dependency clients are still
+  generated from the running engine, so an engine update can still change
+  them, and an engine older than the targeted release is not refused: the
+  first call to a function it lacks fails.
+
+The scope setting `targetVersion`, under
+`[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
+release, from this SDK's floor to the targeted release;
+`dagger module init python --target-version <release>` writes it. Until core
+comes from a published library, only the targeted release is accepted: any
+other value stops generation before it writes anything, with a message that
+names the module and says why.
+
+Once the `dagger-clients-core` library is published for each release, core
+will come from it for the targeted or pinned release: `dagger generate` will
+write the same core whatever engine runs it, an SDK update will change the
+targeted release and the core, and older pins will be accepted. Dependency
+clients still come from loading the modules they name.
+
 ## Migrate a module
 
 Migrating takes two commands per module: the engine converts the module's
@@ -354,6 +380,7 @@ are persisted on the scope:
 ```sh
 dagger module init python --name my-module --template empty
 dagger module init python --name my-module --legacy-runtime
+dagger module init python --name my-module --target-version v1.0.0-beta.21
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
@@ -365,9 +392,11 @@ a module runs" describes; without it, a new module gets an entrypoint
 generated into it.
 
 `--template` picks a starter template: `default` (a small working module) when
-you pass nothing, or `empty` for a bare object class. The three
-`pyproject.toml` flags are optional; by default the template's Python version
-is used, uv is enabled, and no base image override is written.
+you pass nothing, or `empty` for a bare object class. `--target-version` pins
+the engine release to generate for, as "The engine release a module targets"
+describes. The three `pyproject.toml` flags are optional; by default the
+template's Python version is used, uv is enabled, and no base image override
+is written.
 
 ## Configure an existing module
 
