@@ -225,6 +225,14 @@ The two declarations reach an engine in different ways:
   it, for the entrypoint and for a module process that declares no version.
   Without it, an engine loads only the `.dang` files of an entrypoint: no release
   so far reads this file, v1.0.0-beta.22 included.
+  That pull request also proposes a default, unverified by running it here. An
+  entrypoint module with no Dagger version in its governing `dang.toml` (the file
+  or its Dagger import is missing, or it says only `dagger = true`) would be
+  served `v1.0.0-beta.20` instead of following the running engine, as it does
+  today. An entrypoint generated before this release is one, unless another file
+  governs it. An entrypoint whose governing file declares a version would use it;
+  for a remote entrypoint, that file is the one in its own directory. A module on
+  a runtime keeps its declared version.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.
