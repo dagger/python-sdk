@@ -253,24 +253,30 @@ type E2e {
   A new module's main class is named as the engine names the module, whose
   rules spell an acronym differently on either side of the identifier casing
   cut: http-server is HttpServer by the legacy rules a module without a
-  dang.toml is named by, and HTTPServer past the cut. Generation fails when
-  the engine takes the class for no main object, and the module loads.
+  dang.toml is named by, and HTTPServer past the cut; k8s-tools, which strcase
+  spells differently when it reads its own spelling again, is K8STools before
+  the cut. Generation fails when the engine takes the class for no main
+  object, and the module loads.
   """
   pub initNamingCheck(ws: Workspace!): Void @check {
     [
-      {{pinned: false, main: "HttpServer"}},
-      {{pinned: true, main: "HTTPServer"}},
+      {{name: "http-server", pkg: "http_server", pinned: false, main: "HttpServer"}},
+      {{name: "http-server", pkg: "http_server", pinned: true, main: "HTTPServer"}},
+      {{name: "k8s-tools", pkg: "k8s_tools", pinned: false, main: "K8STools"}},
+      {{name: "k8s-tools", pkg: "k8s_tools", pinned: true, main: "K8sTools"}},
+      {{name: "e2e-test", pkg: "e2e_test", pinned: false, main: "E2ETest"}},
+      {{name: "e2e-test", pkg: "e2e_test", pinned: true, main: "E2ETest"}},
     ].each { want =>
-      let label = if (want.pinned) { "http-server at v1.0.0-beta.22" } else { "http-server without a version" }
-      let scope = outputRoot + "/http-server"
+      let label = want.name + (if (want.pinned) { " at v1.0.0-beta.22" } else { " without a version" })
+      let scope = outputRoot + "/" + want.name
       let seeded = if (want.pinned) {
         ws.withNewFile("/" + scope + "/dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
       } else {
         ws.withNewDirectory("/" + scope, directory)
       }
-      let generated = pythonSdk.generateScope(seeded.withWorkdir(scope), isModule: true, name: "http-server", clients: [])
+      let generated = pythonSdk.generateScope(seeded.withWorkdir(scope), isModule: true, name: want.name, clients: [])
         .withWorkdir(".")
-      assertContains(generated.file("/" + scope + "/src/http_server/__init__.py").contents, "class " + want.main + ":", label + ": the main class is not " + want.main)
+      assertContains(generated.file("/" + scope + "/src/" + want.pkg + "/__init__.py").contents, "class " + want.main + ":", label + ": the main class is not " + want.main)
       let objects = generated.moduleSource("/" + scope).asModule.objects.{{ asObject.{{ name }} }}
       assert(objects.filter { o => o.asObject.name == want.main }.length == 1, label + ": the module does not load with its main object " + want.main)
       null
@@ -2891,12 +2897,8 @@ type E2e {
     interface by the names the engine gave it (the namespaced type and its
     function), so the call returns.
 
-  The fixture keeps to names the engine names the same on an object and on
-  an interface: by the legacy rules, it names an interface's fields twice,
-  which isn't idempotent (e2e_test is e2ETest on an object, e2Etest on an
-  interface), and CurrentModule.naming answers the object's spelling. Its
-  interface takes no own enum, which the engine refuses in the module's own
-  session.
+  Its interface takes no own enum, which the engine refuses in the module's
+  own session.
   """
   pub namingCheck(ws: Workspace!): Void @check {
     [

@@ -10,7 +10,7 @@ type EngineE2e {
   commit of the engine stack that carries what the floor needs
   (dagger/dagger naming/module-source-naming).
   """
-  let floorCommit: String! = "017633c9d125b973a0ae1401073ee3b4c37c2829"
+  let floorCommit: String! = "9e25570efd9dbb9598be473ab27f2760b7af6e07"
 
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
