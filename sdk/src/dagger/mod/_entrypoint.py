@@ -198,7 +198,7 @@ def _indent(lines: list[str], width: int) -> list[str]:
 SOURCES_EXCLUDE = '["**/.git", "**/.venv", "**/__pycache__"]'
 
 MAIN_TEMPLATE = """{header}
-# Needs Dagger v1.0.0-beta.18 or later; older engines report a missing "workspace" argument.
+# Needs Dagger v1.0.0-beta.22 or later; older engines report a missing "naming" field.
 type Entrypoint implements ModuleEntrypoint {{
   let moduleName: String! = {name}
 

@@ -118,7 +118,8 @@ type PythonModuleBuild {
   """
   The classes the module's own code decorates with @object_type, read from
   its source with Python's ast rather than by importing it, so that it reads
-  the same whichever SDK version the module installs.
+  the same whichever SDK version the module installs. A file this Python
+  can't parse is skipped: the module may never import it.
   """
   let objectTypes: [String!]! {
     container
@@ -141,7 +142,11 @@ type PythonModuleBuild {
     "    return getattr(d, 'attr', getattr(d, 'id', ''))",
     "found = set()",
     "for path in pathlib.Path(sys.argv[1]).rglob('*.py'):",
-    "    for node in ast.walk(ast.parse(path.read_bytes(), str(path))):",
+    "    try:",
+    "        tree = ast.parse(path.read_bytes(), str(path))",
+    "    except (SyntaxError, ValueError):",
+    "        continue",
+    "    for node in ast.walk(tree):",
     "        if isinstance(node, ast.ClassDef) and any(name(d) == 'object_type' for d in node.decorator_list):",
     "            found.add(node.name)",
     "print('\\n'.join(sorted(found)))",

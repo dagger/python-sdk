@@ -1892,7 +1892,7 @@ type E2e {
       .withFile("/core-only.py", ws.file("/helpers/core-schema/core_only.py"))
       .withFile("/schema.json", core.withEngineVersion(core.engineVersion).clientSchemaIntrospectionJSON)
       .withExec(["python", "/core-only.py", "/schema.json", "/core.json"])
-      .withExec(["uv", "run", "--frozen", "python", "-m", "codegen", "generate", "-i", "/core.json", "-o", sdkBindingsPath], experimentalPrivilegedNesting: true)
+      .withExec(["uv", "run", "--frozen", "python", "-m", "codegen", "generate", "-i", "/core.json", "-o", sdkBindingsPath])
       .withExec(["uv", "run", "--frozen", "ruff", "check", "--fix-only", sdkBindingsPath])
       .withExec(["uv", "run", "--frozen", "ruff", "format", sdkBindingsPath])
       .file(sdkBindingsPath)

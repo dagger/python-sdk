@@ -706,8 +706,8 @@ type PythonSdk {
 
   """
   Render a Python template with the requested module name. The engine spells
-  the main class's name (formatIdentifiers), which the renderer asks as a
-  nested client.
+  the main class's name (formatIdentifiers), which the renderer asks of the
+  session it runs in.
   """
   let renderedTemplate(name: String!, templateName: String!): Directory! {
     container
@@ -719,7 +719,7 @@ type PythonSdk {
       .withDirectory("/template", currentModule.source.directory("templates/" + templateName))
       .withWorkdir("/helper")
       .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
-      .withExec(["render-template", name, "/template", "/rendered"], experimentalPrivilegedNesting: true)
+      .withExec(["render-template", name, "/template", "/rendered"])
       .directory("/rendered")
   }
 

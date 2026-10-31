@@ -48,7 +48,9 @@ names identifiers by its naming rules and answers for them: generation asks
 it how to spell the Python names of the schema's identifiers, and a module
 asks it what it named the module's own declarations. An
 entrypoint runs a module on the engine's own version, so an entrypoint
-manifest keeps no `engineVersion`.
+manifest keeps no `engineVersion`. The engine names the module's own
+declarations by the version the entrypoint's `dang.toml` imports, and by the
+rules of v1.0.0-beta.20, before the identifier casing cut, without one.
 
 The SDK's modules declare `engineVersion` v1.0.0-beta.22. Engines compare
 only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.21
