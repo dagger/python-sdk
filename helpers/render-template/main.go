@@ -2,10 +2,7 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,7 +11,7 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:], engineTypeName); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -29,65 +26,18 @@ func packageName(moduleName string) string {
 	return strings.ReplaceAll(project, "-", "_")
 }
 
-// engineTypeName is the module's name in PascalCase as the engine spells it
-// (formatIdentifiers), which the template names the main class after: the
-// engine knows where the name's words are. It asks the Dagger session the
-// command runs in as a nested client.
-func engineTypeName(moduleName string) (string, error) {
-	port, token := os.Getenv("DAGGER_SESSION_PORT"), os.Getenv("DAGGER_SESSION_TOKEN")
-	if port == "" || token == "" {
-		return "", errors.New("no Dagger session to name the module's class with: run render-template as a nested client")
-	}
-	body, err := json.Marshal(map[string]any{
-		"query":     `query($names: [String!]!) { formatIdentifiers(names: $names, casing: PASCAL) }`,
-		"variables": map[string]any{"names": []string{moduleName}},
-	})
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+port+"/query", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth(token, "")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	var result struct {
-		Data struct {
-			FormatIdentifiers []string `json:"formatIdentifiers"`
-		} `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("format the module's name: HTTP %s: %w", resp.Status, err)
-	}
-	if len(result.Errors) > 0 {
-		return "", fmt.Errorf("format the module's name %q: %s", moduleName, result.Errors[0].Message)
-	}
-	if len(result.Data.FormatIdentifiers) != 1 {
-		return "", fmt.Errorf("format the module's name %q: got %v", moduleName, result.Data.FormatIdentifiers)
-	}
-	return result.Data.FormatIdentifiers[0], nil
-}
-
-func run(args []string, typeName func(string) (string, error)) error {
-	if len(args) != 3 {
-		return fmt.Errorf("usage: render-template MODULE_NAME TEMPLATE_DIR OUT_DIR")
+// run renders the template for a module. MODULE_TYPE names the main class:
+// the module's type name as the engine will name the module, which the caller
+// asks the engine for.
+func run(args []string) error {
+	if len(args) != 4 {
+		return fmt.Errorf("usage: render-template MODULE_NAME MODULE_TYPE TEMPLATE_DIR OUT_DIR")
 	}
 
 	moduleName := args[0]
-	templateDir := args[1]
-	outDir := args[2]
-	moduleType, err := typeName(moduleName)
-	if err != nil {
-		return err
-	}
+	moduleType := args[1]
+	templateDir := args[2]
+	outDir := args[3]
 	data := map[string]string{
 		"ModuleName":    moduleName,
 		"ModuleProject": strings.ToLower(moduleName),
