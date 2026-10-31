@@ -1,8 +1,4 @@
-# Generated from runtime/build.dang by the e2e module. DO NOT EDIT.
-#
-# Refresh with:
-#   dagger call -m .dagger/modules/e2e shared-entrypoint-build \
-#     export --path entrypoint/build.dang
+# Copied from runtime/build.dang when this shared entrypoint froze. DO NOT EDIT.
 
 """
 The container a Python module runs in, built from its committed files.
