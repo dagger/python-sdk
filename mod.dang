@@ -242,6 +242,19 @@ type Mod {
   }
 
   """
+  The engine's naming of this module as generation writes it: the source the
+  static entrypoint is named by (namedSource), or else the module as its
+  manifest has it.
+  """
+  pub naming: ModuleNaming! {
+    if (entrypointMode == "generated") {
+      namedSource(ws, vendorDirName + "/" + entrypointDirName).naming
+    } else {
+      ws.moduleSource("/" + rootPath).naming
+    }
+  }
+
+  """
   The module the engine names once the entrypoint is generated: the manifest
   this generation writes, with the entrypoint's directory in place, since the
   dang.toml governing it decides the version the module is named by.

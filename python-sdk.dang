@@ -179,7 +179,7 @@ type PythonSdk {
       let initialized = if (hadConfig) {
         rooted
       } else {
-        rooted.withDirectory("/" + scope, moduleTemplate(name, template, pythonVersion, useUv, baseImage))
+        rooted.withDirectory("/" + scope, moduleTemplate(name, mainTypeName(rooted, scope, name), template, pythonVersion, useUv, baseImage))
       }
       # Read before the manifest is written: that write resets the entrypoint
       # table, and a module keeps the kind it came with.
@@ -688,11 +688,34 @@ type PythonSdk {
   }
 
   """
+  The main class name of a new module: the module's type name as the engine
+  will name the module, asked of the module as generation writes it, before
+  it has any code. The engine names a module by its version's rules, which
+  spell an acronym differently on either side of the identifier casing cut.
+  """
+  let mainTypeName(ws: Workspace!, scope: String!, name: String!): String! {
+    let staged = Mod(
+      rootPath: scope,
+      ws: generateScopeManifest(ws, scope, name),
+      entrypointMode: entrypointModeOf(ws, scope),
+      migrating: false,
+      engineVersion: "",
+      clients: [] :: [ModuleSource!]!,
+    )
+    let names = staged.naming.typeNames(names: [name])
+    if (names.length != 1) {
+      raise "the engine named " + toString(names.length) + " types for module \"" + name + "\""
+    } else {
+      names[0] ?? ""
+    }
+  }
+
+  """
   The files of a new module: the named template rendered for the module name,
   with the pyproject.toml settings applied. An empty template name selects the
   default.
   """
-  let moduleTemplate(name: String!, template: String!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
+  let moduleTemplate(name: String!, typeName: String!, template: String!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
     let selectedTemplate = if (template == "") { "default" } else { template }
 
     let known = currentModule.source.directory("templates").entries.map { entry => entry.trimSuffix("/") }
@@ -700,16 +723,15 @@ type PythonSdk {
     if (known.filter { entry => entry == selectedTemplate }.length == 0) {
       raise "unknown init template: " + template
     } else {
-      configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
+      configuredTemplate(renderedTemplate(name, typeName, selectedTemplate), pythonVersion, useUv, baseImage)
     }
   }
 
   """
-  Render a Python template with the requested module name. The engine spells
-  the main class's name (formatIdentifiers), which the renderer asks of the
-  session it runs in.
+  Render a Python template with the requested module name, its main class
+  named typeName.
   """
-  let renderedTemplate(name: String!, templateName: String!): Directory! {
+  let renderedTemplate(name: String!, typeName: String!, templateName: String!): Directory! {
     container
       .from("golang:1.25-alpine")
       .withoutEntrypoint
@@ -719,7 +741,7 @@ type PythonSdk {
       .withDirectory("/template", currentModule.source.directory("templates/" + templateName))
       .withWorkdir("/helper")
       .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
-      .withExec(["render-template", name, "/template", "/rendered"])
+      .withExec(["render-template", name, typeName, "/template", "/rendered"])
       .directory("/rendered")
   }
 

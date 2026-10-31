@@ -250,6 +250,36 @@ type E2e {
   }
 
   """
+  A new module's main class is named as the engine names the module, whose
+  rules spell an acronym differently on either side of the identifier casing
+  cut: http-server is HttpServer by the legacy rules a module without a
+  dang.toml is named by, and HTTPServer past the cut. Generation fails when
+  the engine takes the class for no main object, and the module loads.
+  """
+  pub initNamingCheck(ws: Workspace!): Void @check {
+    [
+      {{pinned: false, main: "HttpServer"}},
+      {{pinned: true, main: "HTTPServer"}},
+    ].each { want =>
+      let label = if (want.pinned) { "http-server at v1.0.0-beta.22" } else { "http-server without a version" }
+      let scope = outputRoot + "/http-server"
+      let seeded = if (want.pinned) {
+        ws.withNewFile("/" + scope + "/dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
+      } else {
+        ws.withNewDirectory("/" + scope, directory)
+      }
+      let generated = pythonSdk.generateScope(seeded.withWorkdir(scope), isModule: true, name: "http-server", clients: [])
+        .withWorkdir(".")
+      assertContains(generated.file("/" + scope + "/src/http_server/__init__.py").contents, "class " + want.main + ":", label + ": the main class is not " + want.main)
+      let objects = generated.moduleSource("/" + scope).asModule.objects.{{ asObject.{{ name }} }}
+      assert(objects.filter { o => o.asObject.name == want.main }.length == 1, label + ": the module does not load with its main object " + want.main)
+      null
+    }
+
+    null
+  }
+
+  """
   generateScope preserves a current manifest. It migrates a pre-1.0
   dagger.json to dagger-module.toml. Both cases get the scope tree, and the
   vendored source of the layout before it becomes a workspace source.

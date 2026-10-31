@@ -113,6 +113,8 @@ type EngineE2e {
 
   pub generateScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-init-check") }
 
+  pub initNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "init-naming-check") }
+
   pub generateScopeExistingCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-existing-check") }
 
   pub generateScopeClientsCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-clients-check") }
