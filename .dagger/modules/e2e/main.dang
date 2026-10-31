@@ -276,6 +276,18 @@ type E2e {
       null
     }
 
+    # The other kinds of entrypoint name a new module by its manifest alone.
+    [
+      {{label: "on the shared entrypoint", sdk: pythonSdk(remoteEntrypoint: true)}},
+      {{label: "on the runtime", sdk: pythonSdk(legacyRuntime: true)}},
+    ].each { kind =>
+      let scope = outputRoot + "/http-server"
+      let generated = kind.sdk.generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "http-server", clients: [])
+        .withWorkdir(".")
+      assertContains(generated.file("/" + scope + "/src/http_server/__init__.py").contents, "class HttpServer:", "http-server " + kind.label + ": the main class is not HttpServer")
+      null
+    }
+
     null
   }
 
