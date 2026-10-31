@@ -647,7 +647,7 @@ def test_input_object_graphql_names():
     rendered = InputHandler(local_ctx).render(input_type)
 
     assert "@typecheck" not in rendered
-    assert "_graphql_names = (('ssh_url', 'sshURL'),)" in rendered
+    assert "_graphql_names = (('call_id', 'callId'), ('ssh_url', 'sshURL'))" in rendered
 
 
 def test_input_object_post_init_checks():

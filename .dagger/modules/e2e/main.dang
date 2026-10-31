@@ -250,6 +250,54 @@ type E2e {
   }
 
   """
+  A new module's main class is named as the engine names the module, whose
+  rules spell an acronym differently on either side of the identifier casing
+  cut: http-server is HttpServer by the legacy rules a module without a
+  dang.toml is named by, and HTTPServer past the cut; k8s-tools, which strcase
+  spells differently when it reads its own spelling again, is K8STools before
+  the cut. Generation fails when the engine takes the class for no main
+  object, and the module loads.
+  """
+  pub initNamingCheck(ws: Workspace!): Void @check {
+    [
+      {{name: "http-server", pkg: "http_server", pinned: false, main: "HttpServer"}},
+      {{name: "http-server", pkg: "http_server", pinned: true, main: "HTTPServer"}},
+      {{name: "k8s-tools", pkg: "k8s_tools", pinned: false, main: "K8STools"}},
+      {{name: "k8s-tools", pkg: "k8s_tools", pinned: true, main: "K8sTools"}},
+      {{name: "e2e-test", pkg: "e2e_test", pinned: false, main: "E2ETest"}},
+      {{name: "e2e-test", pkg: "e2e_test", pinned: true, main: "E2ETest"}},
+    ].each { want =>
+      let label = want.name + (if (want.pinned) { " at v1.0.0-beta.22" } else { " without a version" })
+      let scope = outputRoot + "/" + want.name
+      let seeded = if (want.pinned) {
+        ws.withNewFile("/" + scope + "/dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
+      } else {
+        ws.withNewDirectory("/" + scope, directory)
+      }
+      let generated = pythonSdk.generateScope(seeded.withWorkdir(scope), isModule: true, name: want.name, clients: [])
+        .withWorkdir(".")
+      assertContains(generated.file("/" + scope + "/src/" + want.pkg + "/__init__.py").contents, "class " + want.main + ":", label + ": the main class is not " + want.main)
+      let objects = generated.moduleSource("/" + scope).asModule.objects.{{ asObject.{{ name }} }}
+      assert(objects.filter { o => o.asObject.name == want.main }.length == 1, label + ": the module does not load with its main object " + want.main)
+      null
+    }
+
+    # The other kinds of entrypoint name a new module by its manifest alone.
+    [
+      {{label: "on the shared entrypoint", sdk: pythonSdk(remoteEntrypoint: true)}},
+      {{label: "on the runtime", sdk: pythonSdk(legacyRuntime: true)}},
+    ].each { kind =>
+      let scope = outputRoot + "/http-server"
+      let generated = kind.sdk.generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "http-server", clients: [])
+        .withWorkdir(".")
+      assertContains(generated.file("/" + scope + "/src/http_server/__init__.py").contents, "class HttpServer:", "http-server " + kind.label + ": the main class is not HttpServer")
+      null
+    }
+
+    null
+  }
+
+  """
   generateScope preserves a current manifest. It migrates a pre-1.0
   dagger.json to dagger-module.toml. Both cases get the scope tree, and the
   vendored source of the layout before it becomes a workspace source.
@@ -1655,11 +1703,11 @@ type E2e {
   let callerSecretPath: String! = "review-secret.txt"
 
   """
-  The first release that loads a module's files through its entrypoint's
-  sources member. It is this SDK's floor. Its engine image carries its CLI,
-  and git.
+  The first release whose engine names identifiers by its naming rules and
+  answers for them (formatIdentifiers, CurrentModule.naming). It is this SDK's
+  floor. Its engine image carries its CLI, and git.
   """
-  let floorVersion: String! = "1.0.0-beta.18"
+  let floorVersion: String! = "1.0.0-beta.22"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -1817,30 +1865,6 @@ type E2e {
       ws.file("/entrypoint/workspace_reader.py").contents == ws.file("/runtime/workspace_reader.py").contents,
       "entrypoint/workspace_reader.py is stale; refresh it with `cp runtime/workspace_reader.py entrypoint/`",
     )
-    null
-  }
-
-  """
-  Main object names derive from module names as in the engine's builtin Python
-  runtime, so a module keeps loading when it moves between the two.
-  """
-  pub runtimeNamingCheck: Void @check {
-    [
-      ["my-module", "MyModule"],
-      ["my_module", "MyModule"],
-      ["myModule", "MyModule"],
-      ["MyModule", "MyModule"],
-      ["HTTPServer", "Httpserver"],
-      ["s3-bucket", "S3Bucket"],
-      ["app2", "App2"],
-      ["a.b c", "ABC"],
-    ].each { pair =>
-      let name = pair[0] ?? ""
-      let want = pair[1] ?? ""
-      let got = pythonSdkRuntime.mainObjectName(name)
-      assert(got == want, "main object name for " + name + ": got " + got + ", want " + want)
-    }
-
     null
   }
 
@@ -2080,51 +2104,6 @@ type E2e {
     assertNotContains(build, "currentModule", "build.dang still reads the SDK module's source")
     assertNotContains(build, "import glob, os, re, sys, tomllib", "build.dang still inlines the workspace reader")
 
-    null
-  }
-
-  """
-  The SDK refuses an engine release older than its floor before it generates
-  anything, and names the version it found and what to do: pin the SDK's last
-  release before the floor where that release runs, from v1.0.0-beta.14, and
-  only upgrade below it. Every other version passes, a development build and
-  one it cannot read among them, so an unexpected format never blocks a user.
-  On an engine the SDK refuses, generation itself refuses.
-  """
-  pub engineFloorRefusalCheck(ws: Workspace!): Void @check {
-    let pin = "dagger module install github.com/dagger/python-sdk@v1.1.1"
-    let pinned = ["v1.0.0-beta.17", "v1.0.0-beta.17+0da36c8d", "v1.0.0-beta.16", "v1.0.0-beta.15", "v1.0.0-beta.14", "v1.0.0-beta.14+06660c3c"]
-    let upgradeOnly = ["v1.0.0-beta.13", "v1.0.0-beta.9", "v1.0.0-alpha.20", "v0.21.9"]
-    let accepted = [
-      "v1.0.0-beta.18", "v1.0.0-beta.18+249edbd6", "v1.0.0-beta.19", "v1.0.0-rc.1", "v1.0.0",
-      "v1.0.1", "v2.0.0-beta.1", "v0.21.1-20260529020034-dev-b2f595b50044", "v1.0.0-dev.3", "devel", "",
-    ]
-    (pinned + upgradeOnly).each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      let wants = ["needs Dagger engine v" + floorVersion + " or later", "this engine is " + engine + ".", "Upgrade the engine"]
-      wants.each { want =>
-        assertContains(refusal, want, "engine \"" + engine + "\": the refusal does not say \"" + want + "\": " + refusal)
-      }
-    }
-    pinned.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assertContains(refusal, pin, "engine \"" + engine + "\": the refusal does not offer the last release that runs on it: " + refusal)
-    }
-    upgradeOnly.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assertNotContains(refusal, "pin", "engine \"" + engine + "\": the refusal offers a release that does not run on it either: " + refusal)
-    }
-    accepted.each { engine =>
-      let refusal = pythonSdk.engineRefusal(engine)
-      assert(refusal == "", "the SDK refused engine \"" + engine + "\": " + refusal)
-    }
-    let refusal = pythonSdk.engineRefusal(version)
-    if (refusal != "") {
-      let said = pythonSdk.generateScope(ws.withNewDirectory("/floor-probe", directory).withWorkdir("floor-probe"), isModule: true, name: "floor-probe", clients: []).cwd rescue {
-        err: Error => err.message
-      }
-      assert(said.contains(refusal), "generation on engine " + version + ", which the SDK refuses, said: " + said)
-    }
     null
   }
 
@@ -2521,11 +2500,11 @@ type E2e {
     ws.withNewFile("/" + resourcesAppPath + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
   }
 
-  let resourcesGenerated(sdk: PythonSdk!, ws: Workspace!): Workspace! {
+  let resourcesGenerated(sdk: PythonSDK!, ws: Workspace!): Workspace! {
     sdk.generateScope(ws.withWorkdir(resourcesAppPath), isModule: true, name: "resources-app", clients: []).withWorkdir(".")
   }
 
-  let resourcesAttempt(sdk: PythonSdk!, ws: Workspace!): String! {
+  let resourcesAttempt(sdk: PythonSDK!, ws: Workspace!): String! {
     resourcesGenerated(sdk, ws).file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents rescue {
       err: Error => err.message
     }
@@ -2876,4 +2855,74 @@ type E2e {
     )
   }
 
+  let namingFixturePath: String! = fixtureRoot + "/naming"
+
+  """
+  naming-app generated as a static entrypoint module, and naming-caller
+  generated with a client of it, in a workspace of their own. With pinned,
+  naming-app's dang.toml declares v1.0.0-beta.22, which the engine names it
+  by; without one, the engine names it by v1.0.0-beta.20, the legacy rules.
+  """
+  let namingScope(ws: Workspace!, pinned: Boolean!): Workspace! {
+    let app = ws.directory("/" + namingFixturePath + "/app")
+    let appSource = if (pinned) {
+      app.withNewFile("dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
+    } else {
+      app
+    }
+    let tree = directory
+      .withDirectory("naming-app", appSource)
+      .withDirectory("naming-caller", ws.directory("/" + namingFixturePath + "/caller"))
+    let withApp = pythonSdk.generateScope(tree.asWorkspace.withWorkdir("naming-app"), isModule: true, name: "naming-app", clients: [])
+      .withWorkdir(".")
+    pythonSdk.generateScope(withApp.withWorkdir("naming-caller"), isModule: true, name: "naming-caller", clients: [withApp.moduleSource("/naming-app")])
+      .withWorkdir(".")
+  }
+
+  let pyFiles(generated: Workspace!, path: String!): String! {
+    let root = generated.directory("/" + path)
+    root.glob("**/*.py").map { file => root.file(file).contents }.join("\n")
+  }
+
+  """
+  The engine names a module's declarations by the version it names the module
+  by, and the SDK follows it on both sides of the identifier casing cut:
+
+  - generation spells the Python names of every schema identifier as the
+    engine does (experimental_with_all_gpus in core, whatever the version);
+  - the client generated for naming-app names its declarations as the
+    engine does at naming-app's version (NamingAppHttpFetcher and ARM_64
+    before the cut, NamingAppHTTPFetcher and ARM64 past it);
+  - naming-app's runtime, called through that client, calls its own
+    interface by the names the engine gave it (the namespaced type and its
+    function), so the call returns.
+
+  Its interface takes no own enum, which the engine refuses in the module's
+  own session.
+  """
+  pub namingCheck(ws: Workspace!): Void @check {
+    [
+      {{pinned: false, iface: "NamingAppHttpFetcher", member: "ARM_64"}},
+      {{pinned: true, iface: "NamingAppHTTPFetcher", member: "ARM64"}},
+    ].each { want =>
+      let label = if (want.pinned) { "naming-app at v1.0.0-beta.22" } else { "naming-app without a version" }
+      let generated = namingScope(ws, want.pinned)
+      let core = pyFiles(generated, "naming-caller/clients/core/src")
+      assertContains(core, "def experimental_with_all_gpus(", label + ": core's Python names are not the engine's")
+      let client = pyFiles(generated, "naming-caller/clients/naming-app/src")
+      assertContains(client, "class " + want.iface, label + ": the client does not name the interface " + want.iface)
+      assertContains(client, want.member + " = ", label + ": the client does not name the enum member " + want.member)
+      assertContains(client, "def get_url(", label + ": the client does not name get_url")
+      let outcomes = generated.withModule("naming-caller", name: "naming-caller")
+        .artifacts(include: ["naming-caller:fetch-check"]).asChecks
+        .{{ pass, error.{{ message }} }}
+      assert(outcomes.length == 1, label + ": expected the fetch check, got " + toString(outcomes.length))
+      # Selected on `pass` first: reading the message of a check that passed
+      # raises an evaluation error of its own.
+      let failed = outcomes.filter { c => c.pass == false }.map { c => c.error.message }
+      assert(failed.length == 0, label + ": the call through its interface failed: " + failed.join("\n"))
+      null
+    }
+    null
+  }
 }

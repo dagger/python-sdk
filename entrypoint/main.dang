@@ -89,6 +89,7 @@ type Entrypoint implements ModuleEntrypoint {
       contextDir: directory.withDirectory(".", currentModule.source, exclude: ["**/.venv", "**/__pycache__"]),
       subPath: ".",
       moduleName: moduleName,
+      naming: currentModule.naming,
     )
   }
 

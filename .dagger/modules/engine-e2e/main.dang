@@ -6,14 +6,11 @@ aligned with its engine-dev dependency in dagger-module.toml.
 """
 type EngineE2e {
   """
-  Commit of v1.0.0-beta.18, this SDK's floor.
+  Commit of v1.0.0-beta.22, this SDK's floor. Until that release is out, the
+  commit of the engine stack that carries what the floor needs
+  (dagger/dagger naming/module-source-naming).
   """
-  let floorCommit: String! = "249edbd646e63c5181053c8af72623ed9bdf030d"
-
-  """
-  Commit of v1.0.0-beta.17, the last release below the floor.
-  """
-  let belowFloorCommit: String! = "0da36c8da9cb6a682c7d27eca9bd2c125de5ed09"
+  let floorCommit: String! = "9e25570efd9dbb9598be473ab27f2760b7af6e07"
 
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
@@ -116,6 +113,8 @@ type EngineE2e {
 
   pub generateScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-init-check") }
 
+  pub initNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "init-naming-check") }
+
   pub generateScopeExistingCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-existing-check") }
 
   pub generateScopeClientsCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-clients-check") }
@@ -174,8 +173,6 @@ type EngineE2e {
 
   pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check { onFloor(ws, "shared-entrypoint-build-check") }
 
-  pub runtimeNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-naming-check") }
-
   pub sdkTestCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-check") }
 
   pub sdkTestOldestPythonCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-oldest-python-check") }
@@ -187,8 +184,6 @@ type EngineE2e {
   pub configCheck(ws: Workspace!): Void @check { onFloor(ws, "config-check") }
 
   pub staticScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "static-scope-init-check") }
-
-  pub engineFloorRefusalCheck(ws: Workspace!): Void @check { onFloor(ws, "engine-floor-refusal-check") }
 
   pub collectionsCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-check") }
 
@@ -222,16 +217,5 @@ type EngineE2e {
 
   pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "git-workspace-generate-check") }
 
-  """
-  The release below the floor is refused: on its engine, generation names the
-  floor and the release to pin instead.
-  """
-  pub belowFloorCheck(ws: Workspace!): Void @check {
-    let checked = sdkClient(ws, belowFloorEngineDev(ws: daggerSource(belowFloorCommit)).installClient(client: clientBase))
-      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", "engine-floor-refusal-check"]))
-    # A pattern that matches no check passes too.
-    let said = checked.stdout + checked.stderr
-    assert(said.contains("1 passed"), "engine-floor-refusal-check did not run on the engine below the floor:\n" + said)
-    null
-  }
+  pub namingCheck(ws: Workspace!): Void @check { onFloor(ws, "naming-check") }
 }

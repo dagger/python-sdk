@@ -502,7 +502,7 @@ type Scope {
   let coreSchema: File! {
     codegenBase
       .withFile(coreOnlyScriptPath, currentModule.source.file("helpers/core-schema/core_only.py"))
-      .withMountedFile(schemaPath, coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJSON)
+      .withMountedFile(schemaPath, coreSchemaSource.withEngineVersion(view).clientSchemaIntrospectionJson)
       .withExec(["python", coreOnlyScriptPath, schemaPath, coreOnlyPath])
       .file(coreOnlyPath)
   }
@@ -543,8 +543,16 @@ type Scope {
       .withDirectory("src", clientSource(member))
   }
 
+  """
+  A client's schema: its module as the engine names and serves it, by the
+  version the module itself declares, with core as the scope sees it. Not
+  withEngineVersion(view), which would make the module declare the scope's
+  version and so name its declarations by that version's rules: a client of
+  a module past the identifier casing cut would call names the engine does
+  not serve it by.
+  """
   let clientSchema(member: ClientMember!): File! {
-    let schema = member.source.withEngineVersion(view).clientSchemaIntrospectionJSON
+    let schema = member.source.clientSchemaIntrospectionJson(clientVersion: view)
     checkClientLoads(member, schema)
     schema
   }
@@ -678,7 +686,10 @@ type Scope {
 
   """
   The code generator's environment, synced once per SDK version and shared by
-  every scope that generates.
+  every scope that generates. The generator reaches the session it runs in,
+  as every exec can, because the engine spells the Python names of the
+  schema's identifiers (formatIdentifiers, see
+  sdk/codegen/src/codegen/naming.py).
   """
   let codegenEnv: Container! {
     codegenBase.withExec(["uv", "sync", "--frozen", "--no-dev", "--package", "codegen"])

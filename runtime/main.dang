@@ -12,11 +12,7 @@ type PythonSdkRuntime {
   """
   pub moduleRuntime(modSource: ModuleSource!, introspectionJson: File): Container! {
     let modName = modSource.moduleOriginalName
-    let build = PythonModuleBuild(
-      contextDir: modSource.contextDirectory,
-      subPath: modSource.sourceSubpath,
-      moduleName: modName,
-    )
+    let build = buildOf(modSource, modSource.naming)
 
     if (modSource.configExists == false or build.source.exists("pyproject.toml") == false) {
       raise "module \"" + modName + "\" has no source to trust; run `dagger generate` and commit the generated files"
@@ -31,6 +27,15 @@ type PythonSdkRuntime {
   }
 
   """
+  The module installed, its main object the one `naming` takes. Generation
+  renders a module's static entrypoint in it, by the naming of the module it
+  generates, which another source than the one it builds from may decide.
+  """
+  pub installed(modSource: ModuleSource!, naming: ModuleNaming!): Container! {
+    buildOf(modSource, naming).installed
+  }
+
+  """
   The workspace members this runtime reads from a scope's pyproject.toml.
   Generation checks the file it writes with it.
   """
@@ -38,10 +43,12 @@ type PythonSdkRuntime {
     PythonModuleBuild().scopeMembers(pyproject)
   }
 
-  """
-  The class name of a module's main object.
-  """
-  pub mainObjectName(name: String!): String! {
-    PythonModuleBuild().mainObjectName(name)
+  let buildOf(modSource: ModuleSource!, naming: ModuleNaming!): PythonModuleBuild! {
+    PythonModuleBuild(
+      contextDir: modSource.contextDirectory,
+      subPath: modSource.sourceSubpath,
+      moduleName: modSource.moduleOriginalName,
+      naming: naming,
+    )
   }
 }

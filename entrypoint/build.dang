@@ -24,10 +24,16 @@ type PythonModuleBuild {
 
   pub moduleName: String!
 
-  new(contextDir: Directory! = directory, subPath: String! = ".", moduleName: String! = "") {
+  """
+  How the engine names the module, which says which class is its main object.
+  """
+  pub naming: ModuleNaming
+
+  new(contextDir: Directory! = directory, subPath: String! = ".", moduleName: String! = "", naming: ModuleNaming = null) {
     self.contextDir = contextDir
     self.subPath = subPath
     self.moduleName = moduleName
+    self.naming = naming
     self
   }
 
@@ -83,51 +89,74 @@ type PythonModuleBuild {
         # Last, so the layers above are shared between modules.
         .withEnvVariable("DAGGER_MODULE", moduleName)
         .withEnvVariable("DAGGER_DEFAULT_PYTHON_PACKAGE", packageName)
-        .withEnvVariable("DAGGER_MAIN_OBJECT", mainObjectName(moduleName))
 
       install(built, source, cfg)
+        .withEnvVariable("DAGGER_MAIN_OBJECT", mainObject)
     }
   }
+
+  """
+  The class name of the module's main object: of the classes its code
+  decorates with @object_type, the one the engine takes.
+  """
+  let mainObject: String! {
+    if (naming == null) {
+      raise "module \"" + moduleName + "\" is built without the engine's naming of it"
+    } else {
+      let candidates = objectTypes
+      let main = naming.mainObject(candidates: candidates)
+      if (main == null) {
+        raise "module \"" + moduleName + "\": the engine takes none of its object types (" +
+          (if (candidates.length == 0) { "there are none" } else { candidates.join(", ") }) +
+          ") for its main object; name a class decorated with @object_type after the module"
+      } else {
+        main
+      }
+    }
+  }
+
+  """
+  The classes the module's own code decorates with @object_type, read from
+  its source with Python's ast rather than by importing it, so that it reads
+  the same whichever SDK version the module installs. A file this Python
+  can't parse is skipped: the module may never import it.
+  """
+  let objectTypes: [String!]! {
+    container
+      .from(defaultBaseImage)
+      .withMountedDirectory("/module", filesOf(
+        source,
+        include: ["src/**/*.py", "*.py"],
+        exclude: ["**/.venv", "**/__pycache__"],
+      ))
+      .withExec(["python", "-c", objectTypesScript, "/module"])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
+  }
+
+  let objectTypesScript: String! = [
+    "import ast, pathlib, sys",
+    "def name(d):",
+    "    d = d.func if isinstance(d, ast.Call) else d",
+    "    return getattr(d, 'attr', getattr(d, 'id', ''))",
+    "found = set()",
+    "for path in pathlib.Path(sys.argv[1]).rglob('*.py'):",
+    "    try:",
+    "        tree = ast.parse(path.read_bytes(), str(path))",
+    "    except (SyntaxError, ValueError):",
+    "        continue",
+    "    for node in ast.walk(tree):",
+    "        if isinstance(node, ast.ClassDef) and any(name(d) == 'object_type' for d in node.decorator_list):",
+    "            found.add(node.name)",
+    "print('\\n'.join(sorted(found)))",
+  ].join("\n")
 
   """
   The workspace members of a scope's pyproject.toml, read as the build does.
   """
   pub scopeMembers(pyproject: File!): [String!]! {
     pyConfig(directory.withFile(projectCfg, pyproject), ".").members
-  }
-
-  """
-  The class name of a module's main object, converted like the engine's builtin
-  Python runtime (strcase.ToCamel) so a module loads the same on both.
-  """
-  pub mainObjectName(name: String!): String! {
-    name
-      .trimSpace
-      .split("")
-      .reduce(CamelState(out: "", capNext: true, prevIsCap: false)) { state, c =>
-        let isCap = c.containsMatch("^[A-Z]$")
-        let isLow = c.containsMatch("^[a-z]$")
-        let isNum = c.containsMatch("^[0-9]$")
-        if (isCap or isLow) {
-          let v = if (state.capNext and isLow) {
-            c.toUpper
-          } else if (state.capNext == false and state.prevIsCap and isCap) {
-            c.toLower
-          } else {
-            c
-          }
-          CamelState(out: state.out + v, capNext: false, prevIsCap: isCap)
-        } else if (isNum) {
-          CamelState(out: state.out + c, capNext: true, prevIsCap: false)
-        } else {
-          CamelState(
-            out: state.out,
-            capNext: c == "_" or c == " " or c == "-" or c == ".",
-            prevIsCap: false,
-          )
-        }
-      }
-      .out
   }
 
   let base(baseImage: String!, uvImage: String!, cfg: PyConfig!): Container! {
@@ -531,21 +560,5 @@ type PyConfig {
   """
   pub isScope: Boolean! {
     members.filter { member => member == "sdk" }.length > 0
-  }
-}
-
-"""
-Accumulator for the CamelCase conversion of a module name.
-"""
-type CamelState {
-  pub out: String!
-  pub capNext: Boolean!
-  pub prevIsCap: Boolean!
-
-  new(out: String! = "", capNext: Boolean! = true, prevIsCap: Boolean! = false) {
-    self.out = out
-    self.capNext = capNext
-    self.prevIsCap = prevIsCap
-    self
   }
 }

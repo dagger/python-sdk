@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"text/template"
-
-	"github.com/iancoleman/strcase"
 )
 
 func main() {
@@ -28,19 +26,22 @@ func packageName(moduleName string) string {
 	return strings.ReplaceAll(project, "-", "_")
 }
 
+// run renders the template for a module. MODULE_TYPE names the main class:
+// the module's type name as the engine will name the module, which the caller
+// asks the engine for.
 func run(args []string) error {
-	if len(args) != 3 {
-		return fmt.Errorf("usage: render-template MODULE_NAME TEMPLATE_DIR OUT_DIR")
+	if len(args) != 4 {
+		return fmt.Errorf("usage: render-template MODULE_NAME MODULE_TYPE TEMPLATE_DIR OUT_DIR")
 	}
 
 	moduleName := args[0]
-	templateDir := args[1]
-	outDir := args[2]
+	moduleType := args[1]
+	templateDir := args[2]
+	outDir := args[3]
 	data := map[string]string{
 		"ModuleName":    moduleName,
 		"ModuleProject": strings.ToLower(moduleName),
-		"ModuleType":    strcase.ToCamel(moduleName),
-		"ModuleImport":  "dagger/" + strcase.ToKebab(moduleName),
+		"ModuleType":    moduleType,
 		"ModulePackage": packageName(moduleName),
 	}
 

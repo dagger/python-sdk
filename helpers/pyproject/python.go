@@ -17,7 +17,7 @@ const pythonFloor = "3.12"
 
 // lastReleaseBelowPythonFloor is the last release of this SDK, whose floor
 // was lastReleasePythonFloor. A refusal offers it only to a Python that
-// release runs on, as engineRefusal in python-sdk.dang does for engines.
+// release runs on.
 const (
 	lastReleaseBelowPythonFloor = "v1.2.0"
 	lastReleasePythonFloor      = "3.10"

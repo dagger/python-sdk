@@ -1,5 +1,5 @@
 name = "python-sdk"
-engineVersion = "v1.0.0-beta.18"
+engineVersion = "v1.0.0-beta.22"
 include = ["!.dagger", "!future", "!docs"]
 
 [runtime]
