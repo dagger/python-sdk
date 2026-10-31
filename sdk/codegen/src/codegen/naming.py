@@ -8,10 +8,10 @@ schema's version, so the words are cut by the engine's naming dictionary
 ``experimental_with_all_gpus``) rather than by a converter of the SDK's own.
 
 The generator asks once, up front, for every name in the schema, and asks
-directly for a name it meets that wasn't among them. It runs as a nested
-client of the Dagger session (``experimentalPrivilegedNesting``), which it
-reaches through ``DAGGER_SESSION_PORT`` and ``DAGGER_SESSION_TOKEN``. A name
-the engine can't format fails the generation.
+directly for a name it meets that wasn't among them. It is a nested client of
+the Dagger session it runs in, which it reaches through
+``DAGGER_SESSION_PORT`` and ``DAGGER_SESSION_TOKEN``. A name the engine can't
+format fails the generation.
 """
 
 from __future__ import annotations
@@ -38,6 +38,9 @@ Format: typing.TypeAlias = Callable[[list[str]], list[str]]
 
 class NamingError(Exception):
     """The engine couldn't name an identifier."""
+
+
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 class Session:
@@ -68,10 +71,15 @@ class Session:
             headers={"Content-Type": "application/json", "Authorization": self.auth},
         )
         try:
-            with urllib.request.urlopen(request) as response:  # noqa: S310
+            # The session is local: a proxy the exec inherits must not see it.
+            with _opener.open(request) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as e:
-            result = json.load(e)
+            try:
+                result = json.load(e)
+            except ValueError:
+                msg = f"the Dagger session answered HTTP {e.code}: {e.reason}"
+                raise NamingError(msg) from e
         if errors := result.get("errors"):
             msg = "; ".join(str(e.get("message", e)) for e in errors)
             raise NamingError(msg)
