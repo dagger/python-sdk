@@ -291,6 +291,14 @@ neither. A module stays on a runtime, the one this SDK publishes included, until
 its manifest stops naming it. One that only says what this release's generation
 writes goes with the entrypoint.
 
+An entrypoint of your own stays where it is, even inside a directory generation
+replaces: `sdk/`, `clients/core/` or a client it generates. An entrypoint at a
+path that generation also writes is refused: move it out, and name the new path
+in `dagger-module.toml`. Moving a module onto a runtime with its entrypoint in
+one of those directories is refused too: the manifest would stop naming it, and
+the next generation would delete it. Generation leaves any other directory under
+`clients/` alone.
+
 A `dang.toml` in the directory of a client that is no longer declared stays
 there, alone, when generation deletes the rest of that directory. Move or remove
 it before declaring a client of that name again: generation refuses a directory
