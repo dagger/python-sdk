@@ -202,7 +202,6 @@ def _indent(lines: list[str], width: int) -> list[str]:
 SOURCES_EXCLUDE = '["**/.git", "**/.venv", "**/__pycache__"]'
 
 MAIN_TEMPLATE = """{header}
-# Needs Dagger v1.0.0-beta.18 or later; older engines report a missing "workspace" argument.
 type Entrypoint implements ModuleEntrypoint {{
   let moduleName: String! = {name}
   let clientVersion: String! = {client_version}
@@ -230,12 +229,7 @@ type Entrypoint implements ModuleEntrypoint {{
       fnArgs: fnArgs,
     }}}})
     let result = runtime
-      # The exec is cached on its own recipe, which holds neither the call's
-      # arguments nor its cache policy; the engine's digest of the call does
-      # (dagger/dagger#14491), so a policy reaches the exec through it.
       .withEnvVariable("DAGGER_MODULE_CALL_DIGEST", callDigest ?? "")
-      # The release the module's code is generated for. The engine ignores it
-      # today; a later one serves that release's view to the module's process.
       .withEnvVariable("DAGGER_CLIENT_VERSION", clientVersion)
       .withExec(["python", "-m", "dagger.mod", "call", "--output", "/dagger/result.json"], stdin: request, experimentalPrivilegedNesting: true)
       .file("/dagger/result.json")
