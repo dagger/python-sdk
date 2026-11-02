@@ -37,5 +37,17 @@ dagger check --engine=image://registry.dagger.io/engine:v1.0.0-beta.18 \
   -m .dagger/modules/e2e runtime-call-check
 ```
 
+Two `engine-e2e` checks run the target checks on the engine of the release this
+SDK targets, v1.0.0-beta.22, built from its commit. Only that release serves a
+module or a session the view of the release it announces, so the floor cannot
+prove it. `floor-coverage-check` does not count these checks:
+
+```sh
+dagger check engine-e2e:target-version-on-target-check
+dagger check engine-e2e:target-version-cli-on-target-check
+```
+
+Move their commit with the targeted release.
+
 Judge a check by `dagger check`, never by `dagger call <check>`: on
 v1.0.0-beta.18, `dagger call` exits 0 when the check fails.
