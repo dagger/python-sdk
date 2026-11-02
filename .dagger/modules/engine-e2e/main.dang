@@ -1,8 +1,9 @@
 """
 The e2e checks of the Python SDK on engines built from pinned dagger/dagger
 commits, so a run proves the floor whatever engine runs it. Each e2e check
-runs on the floor as a check of its own, under its own name. Keep each commit
-aligned with its engine-dev dependency in dagger-module.toml.
+runs on the floor as a check of its own, under its own name, and the checks
+of the targeted release also run on that release. Keep each commit aligned
+with its engine-dev dependency in dagger-module.toml.
 """
 type EngineE2e {
   """
@@ -14,6 +15,14 @@ type EngineE2e {
   Commit of v1.0.0-beta.17, the last release below the floor.
   """
   let belowFloorCommit: String! = "0da36c8da9cb6a682c7d27eca9bd2c125de5ed09"
+
+  """
+  Commit of v1.0.0-beta.22, the release this SDK targets. Move it, and
+  targetRelease, with engineTarget in python-sdk.dang.
+  """
+  let targetCommit: String! = "ddee9399a4070d7347621cb1e0cef84827110777"
+
+  let targetRelease: String! = "v1.0.0-beta.22"
 
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
@@ -71,6 +80,32 @@ type EngineE2e {
   """
   let onFloor(ws: Workspace!, check: String!): Void {
     floorClient(ws)
+      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", check]))
+      .sync
+    null
+  }
+
+  """
+  A client of the targeted release's engine that has confirmed it reaches
+  that release: on another engine, the checks below would skip what only that
+  release serves and pass.
+  """
+  let targetClient(ws: Workspace!): Container! {
+    let client = sdkClient(ws, targetEngineDev(ws: daggerSource(targetCommit)).installClient(client: clientBase))
+    let reported = client.withExec(withoutOuterSession(["query"]), stdin: "{ version }").stdout
+    let quoted = "\"" + targetRelease
+    assert(reported.contains(quoted + "\"") or reported.contains(quoted + "+"), "the target engine reports " + reported.trimSpace + ", not " + targetRelease)
+    client
+  }
+
+  """
+  One e2e check on the targeted release's engine, which serves a module or a
+  session the view of the release it announces. The floor's engine serves its
+  own view whatever they announce, so what the release's view adds is only
+  asserted here.
+  """
+  let onTarget(ws: Workspace!, check: String!): Void {
+    targetClient(ws)
       .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", check]))
       .sync
     null
@@ -221,6 +256,10 @@ type EngineE2e {
   pub workspaceRefMatchCheck(ws: Workspace!): Void @check { onFloor(ws, "workspace-ref-match-check") }
 
   pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "git-workspace-generate-check") }
+
+  pub targetVersionOnTargetCheck(ws: Workspace!): Void @check { onTarget(ws, "target-version-check") }
+
+  pub targetVersionCliOnTargetCheck(ws: Workspace!): Void @check { onTarget(ws, "target-version-cli-check") }
 
   """
   The release below the floor is refused: on its engine, generation names the
