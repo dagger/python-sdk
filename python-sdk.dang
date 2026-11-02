@@ -287,7 +287,7 @@ type PythonSdk {
         # generator reads core in; what only a runtime can honour stays as
         # written. Inline at each site: sdk-helpers' type names change with its
         # own declared engineVersion (SdkHelpers… vs SDKHelpers… from the
-        # v1.0.0-beta.22 naming rules), so this module must not spell them.
+        # v1.0.0-beta.25 naming rules), so this module must not spell them.
         sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest))
           .withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else if (ours) {
