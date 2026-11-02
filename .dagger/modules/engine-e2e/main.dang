@@ -11,7 +11,7 @@ type EngineE2e {
   commit of the engine stack that carries what the floor needs
   (dagger/dagger naming/module-source-naming).
   """
-  let floorCommit: String! = "c8f0ab8cb78a12ead9379d1ef1a02990274f7364"
+  let floorCommit: String! = "f921c4d81695fc5a56eb650c74089da63d65c7c5"
 
   """
   Commit of v1.0.0-beta.24, the release this SDK targets. Move it, and

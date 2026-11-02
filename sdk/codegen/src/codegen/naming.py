@@ -2,10 +2,11 @@
 
 Every Python identifier the generator styles from the schema (methods,
 arguments, input fields) is the schema name in snake_case, and the engine is
-the one that spells it: ``Query.formatIdentifiers(casing: SNAKE)``, at the
-schema's version, so the words are cut by the engine's naming dictionary
-(``withGPU`` is ``with_gpu``, ``experimentalWithAllGPUs`` is
-``experimental_with_all_gpus``) rather than by a converter of the SDK's own.
+the one that spells it: ``Query.naming(version:).formatIdentifiers(casing:
+SNAKE)``, at the schema's version, so the words are cut by the engine's
+naming dictionary (``withGPU`` is ``with_gpu``, ``experimentalWithAllGPUs``
+is ``experimental_with_all_gpus``) rather than by a converter of the SDK's
+own.
 
 The generator asks once, up front, for every name in the schema, and asks
 directly for a name it meets that wasn't among them. It is a nested client of
@@ -90,13 +91,15 @@ class Session:
         if version:
             query = (
                 "query FormatIdentifiers($names: [String!]!, $version: String!) {\n"
-                "  formatIdentifiers(names: $names, casing: SNAKE, version: $version)\n"
+                "  naming(version: $version) {\n"
+                "    formatIdentifiers(names: $names, casing: SNAKE)\n"
+                "  }\n"
                 "}"
             )
         else:
             query = (
                 "query FormatIdentifiers($names: [String!]!) {\n"
-                "  formatIdentifiers(names: $names, casing: SNAKE)\n"
+                "  naming { formatIdentifiers(names: $names, casing: SNAKE) }\n"
                 "}"
             )
 
@@ -104,7 +107,7 @@ class Session:
             variables: dict[str, typing.Any] = {"names": names}
             if version:
                 variables["version"] = version
-            formatted = self.query(query, variables)["formatIdentifiers"]
+            formatted = self.query(query, variables)["naming"]["formatIdentifiers"]
             if len(formatted) != len(names):
                 msg = f"formatIdentifiers gave {len(formatted)} of {len(names)} names"
                 raise NamingError(msg)
