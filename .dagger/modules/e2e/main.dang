@@ -274,10 +274,10 @@ type E2e {
       {{name: "e2e-test", pkg: "e2e_test", pinned: false, main: "E2ETest"}},
       {{name: "e2e-test", pkg: "e2e_test", pinned: true, main: "E2ETest"}},
     ].each { want =>
-      let label = want.name + (if (want.pinned) { " at v1.0.0-beta.22" } else { " without a version" })
+      let label = want.name + (if (want.pinned) { " at v1.0.0-beta.25" } else { " without a version" })
       let scope = outputRoot + "/" + want.name
       let seeded = if (want.pinned) {
-        ws.withNewFile("/" + scope + "/dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
+        ws.withNewFile("/" + scope + "/dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.25\"\n")
       } else {
         ws.withNewDirectory("/" + scope, directory)
       }
@@ -1933,7 +1933,7 @@ type E2e {
   answers for them (formatIdentifiers, CurrentModule.naming). It is this SDK's
   floor. Its engine image carries its CLI, and git.
   """
-  let floorVersion: String! = "1.0.0-beta.22"
+  let floorVersion: String! = "1.0.0-beta.25"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
 
   """
@@ -3092,13 +3092,13 @@ type E2e {
   """
   naming-app generated as a static entrypoint module, and naming-caller
   generated with a client of it, in a workspace of their own. With pinned,
-  naming-app's dang.toml declares v1.0.0-beta.22, which the engine names it
+  naming-app's dang.toml declares v1.0.0-beta.25, which the engine names it
   by; without one, the engine names it by v1.0.0-beta.20, the legacy rules.
   """
   let namingScope(ws: Workspace!, pinned: Boolean!): Workspace! {
     let app = ws.directory("/" + namingFixturePath + "/app")
     let appSource = if (pinned) {
-      app.withNewFile("dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.22\"\n")
+      app.withNewFile("dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.25\"\n")
     } else {
       app
     }
@@ -3137,7 +3137,7 @@ type E2e {
       {{pinned: false, iface: "NamingAppHttpFetcher", member: "ARM_64"}},
       {{pinned: true, iface: "NamingAppHTTPFetcher", member: "ARM64"}},
     ].each { want =>
-      let label = if (want.pinned) { "naming-app at v1.0.0-beta.22" } else { "naming-app without a version" }
+      let label = if (want.pinned) { "naming-app at v1.0.0-beta.25" } else { "naming-app without a version" }
       let generated = namingScope(ws, want.pinned)
       let core = pyFiles(generated, "naming-caller/clients/core/src")
       assertContains(core, "def experimental_with_all_gpus(", label + ": core's Python names are not the engine's")

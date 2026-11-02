@@ -49,7 +49,7 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a path in the module>` | a Dang entrypoint of the user's own, kept as written |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.22` or later, the first release that
+This SDK needs an engine `v1.0.0-beta.25` or later, the first release that
 names identifiers by its naming rules and answers for them: generation asks
 it how to spell the Python names of the schema's identifiers, and a module
 asks it what it named the module's own declarations. An
@@ -58,8 +58,8 @@ manifest keeps no `engineVersion`. The engine names the module's own
 declarations by the version the entrypoint's `dang.toml` imports, and by the
 rules of v1.0.0-beta.20, before the identifier casing cut, without one.
 
-The SDK's modules declare `engineVersion` v1.0.0-beta.22. Engines compare
-only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.21
+The SDK's modules declare `engineVersion` v1.0.0-beta.25. Engines compare
+only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.24
 still loads them, and fails wherever the SDK uses what it lacks. To stay on
 such an engine, pin `v1.3.0`, the last release that runs there:
 `dagger module install github.com/dagger/python-sdk@v1.3.0`, and
