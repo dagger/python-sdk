@@ -528,7 +528,7 @@ type PythonSdk {
   bumped with each SDK release. Core is read from the running engine in that
   release's view, and the generated entrypoint and the library announce it.
   """
-  let engineTarget: String! = "v1.0.0-beta.22"
+  let engineTarget: String! = "v1.0.0-beta.23"
 
   """
   The last release of this SDK that runs on an engine below engineFloor.

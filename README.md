@@ -99,7 +99,7 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 
 ## The engine release a module targets
 
-Each release of this SDK targets one engine release, `v1.0.0-beta.22` today.
+Each release of this SDK targets one engine release, `v1.0.0-beta.23` today.
 That release, or the one the setting below pins, is what the SDK generates
 for and announces:
 
@@ -340,7 +340,7 @@ are persisted on the scope:
 ```sh
 dagger module init python --name my-module --template empty
 dagger module init python --name my-module --legacy-runtime
-dagger module init python --name my-module --target-version v1.0.0-beta.22
+dagger module init python --name my-module --target-version v1.0.0-beta.23
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
