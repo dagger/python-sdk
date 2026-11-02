@@ -17,12 +17,12 @@ type EngineE2e {
   let belowFloorCommit: String! = "0da36c8da9cb6a682c7d27eca9bd2c125de5ed09"
 
   """
-  Commit of v1.0.0-beta.22, the release this SDK targets. Move it, and
+  Commit of v1.0.0-beta.23, the release this SDK targets. Move it, and
   targetRelease, with engineTarget in python-sdk.dang.
   """
-  let targetCommit: String! = "ddee9399a4070d7347621cb1e0cef84827110777"
+  let targetCommit: String! = "f0a3d728cf7012e0954f772b5dc5c8471648afaa"
 
-  let targetRelease: String! = "v1.0.0-beta.22"
+  let targetRelease: String! = "v1.0.0-beta.23"
 
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
