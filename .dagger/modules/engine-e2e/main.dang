@@ -233,6 +233,8 @@ type EngineE2e {
 
   pub legacyRuntimeCheck(ws: Workspace!): Void @check { onFloor(ws, "legacy-runtime-check") }
 
+  pub dangConfigCheck(ws: Workspace!): Void @check { onFloor(ws, "dang-config-check") }
+
   pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check { onFloor(ws, "remote-entrypoint-replaced-check") }
 
   pub targetVersionCheck(ws: Workspace!): Void @check { onFloor(ws, "target-version-check") }
