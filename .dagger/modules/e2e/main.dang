@@ -1543,18 +1543,32 @@ type E2e {
       }
       assertContains(direct, want, "a module generated directly with targetVersion " + setting + " was not refused the same way: " + direct)
     }
-    [target, target.trimPrefix("v"), target + "+0123abcd", "", floor].each { setting =>
+    [target, target.trimPrefix("v"), target + "+0123abcd", "", floor, floor.trimPrefix("v"), floor + "+0123abcd"].each { setting =>
       assert(pythonSdk.targetRefusal("module \"m\"", setting) == "", "the targeted release was refused as \"" + setting + "\": " + pythonSdk.targetRefusal("module \"m\"", setting))
+    }
+
+    # The target is a v1.0.0 prerelease below beta.100. Identifiers compare as
+    # numbers, so beta.100 is later than it and beta.9 is below the floor,
+    # where text order would say the opposite.
+    let later = [target + ".1", target.split("-")[0] ?? "", "v1.0.0-beta.100", "1.0.0-beta.100", "v1.0.0-beta.100+0123abcd"]
+    later.each { setting =>
+      let said = pythonSdk.targetRefusal("module \"m\"", setting)
+      assertContains(said, "pins targetVersion " + pythonSdk.targetVersionOf(setting) + ", which is later than " + target, "targetVersion " + setting + " was not refused as later than the targeted release: " + said)
+    }
+    ["v1.0.0-beta.9", "1.0.0-beta.9"].each { setting =>
+      let said = pythonSdk.targetRefusal("module \"m\"", setting)
+      assertContains(said, "pins targetVersion v1.0.0-beta.9, which is below " + floor, "targetVersion " + setting + " was not refused as below the floor: " + said)
     }
     null
   }
 
   """
   `dagger module init python --target-version` records the targeted release
-  in the module's scope settings, and the module runs. A module pinned to the
-  floor stays pinned when `dagger generate` or `dagger call python-sdk mod
-  generate` generates it again, also when the pin is recorded in a config
-  below the workspace root under a key that climbs out of it with `..`.
+  in the module's scope settings, and the module runs; a release later than
+  the targeted one is refused. A module pinned to the floor stays pinned
+  when `dagger generate` or `dagger call python-sdk mod generate` generates
+  it again, also when the pin is recorded in a config below the workspace
+  root under a key that climbs out of it with `..`.
   """
   pub targetVersionCliCheck(ws: Workspace!): Void @check {
     let path = ".dagger/modules/target-cli"
@@ -1566,6 +1580,12 @@ type E2e {
     assertContains(main, "let clientVersion: String! = \"" + target + "\"", "the generated entrypoint does not declare the targeted release: " + main)
     let ran = cli(initialized, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
     assert(ran.trimSpace != "", "the module did not run")
+
+    let later = target + ".1"
+    let refused = playground(ws)
+      .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "target-cli-later", "--path", ".dagger/modules/target-cli-later", "--target-version", later], experimentalPrivilegedNesting: true, expect: ReturnType.FAILURE)
+      .stderr
+    assertContains(refused, "module \"target-cli-later\" pins targetVersion " + later + ", which is later than " + target, "dagger module init accepted a targetVersion later than the targeted release: " + refused)
 
     let pinnedPath = ".dagger/modules/target-cli-pinned"
     let pinned = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "target-cli-pinned", "--path", pinnedPath, "--target-version", "v" + floorVersion])
