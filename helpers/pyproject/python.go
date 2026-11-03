@@ -13,7 +13,7 @@ import (
 
 // pythonFloor is the oldest Python the SDK runs on. A test holds it to the
 // requires-python of sdk/pyproject.toml.
-const pythonFloor = "3.12"
+const pythonFloor = "3.11"
 
 // lastReleaseBelowPythonFloor is the last release of this SDK, whose floor
 // was lastReleasePythonFloor. A refusal offers it only to a Python that

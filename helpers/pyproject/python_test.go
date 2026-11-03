@@ -23,16 +23,17 @@ func TestPythonFloorIsTheSDKs(t *testing.T) {
 
 func TestBelowPythonFloor(t *testing.T) {
 	for v, want := range map[string]bool{
-		"3.11":      true,
-		"3.11.9":    true,
+		"3.10":      true,
+		"3.10.9":    true,
 		"2.7":       true,
 		"2":         true,
-		"3.12.0rc1": true,
-		"3.12rc1":   true,
-		"3.12.dev0": true,
+		"3.11.0rc1": true,
+		"3.11rc1":   true,
+		"3.11.dev0": true,
+		"3.11":      false,
+		"3.11.0":    false,
+		"3.11.1rc1": false,
 		"3.12":      false,
-		"3.12.0":    false,
-		"3.12.1rc1": false,
 		"3.13.0b2":  false,
 		"3":         false,
 		"4":         false,
@@ -64,19 +65,19 @@ func TestPythonRefusal(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		"floor":                     {map[string]string{"pyproject.toml": project(">=3.12")}, ""},
+		"floor":                     {map[string]string{"pyproject.toml": project(">=3.11")}, ""},
 		"newer":                     {map[string]string{"pyproject.toml": project(">=3.14")}, ""},
-		"older floor":               {map[string]string{"pyproject.toml": project(">=3.11")}, `this Python SDK needs Python 3.12 or later, and requires-python = ">=3.11" asks for Python 3.11. Ask for Python 3.12 or later, or pin the last release of this SDK that runs on it: dagger module install github.com/dagger/python-sdk@v1.2.0`},
+		"older floor":               {map[string]string{"pyproject.toml": project(">=3.10")}, `this Python SDK needs Python 3.11 or later, and requires-python = ">=3.10" asks for Python 3.10. Ask for Python 3.11 or later, or pin the last release of this SDK that runs on it: dagger module install github.com/dagger/python-sdk@v1.2.0`},
 		"older range":               {map[string]string{"pyproject.toml": project(">=3.10,<4")}, "asks for Python 3.10."},
-		"older exact":               {map[string]string{"pyproject.toml": project("==3.11.4")}, "asks for Python 3.11.4."},
+		"older exact":               {map[string]string{"pyproject.toml": project("==3.10.4")}, "asks for Python 3.10.4."},
 		"another major":             {map[string]string{"pyproject.toml": project(">=2.7")}, "asks for Python 2.7."},
 		"older major only":          {map[string]string{"pyproject.toml": project(">=2")}, "asks for Python 2."},
-		"range the runtime ignores": {map[string]string{"pyproject.toml": project("~=3.11")}, ""},
+		"range the runtime ignores": {map[string]string{"pyproject.toml": project("~=3.10")}, ""},
 		"no requires-python":        {map[string]string{"pyproject.toml": "[project]\nname = \"app\"\n"}, ""},
 		"no pyproject.toml":         {map[string]string{}, ""},
 		"older pin": {
-			map[string]string{".python-version": "3.11.9\n", "pyproject.toml": project(">=3.14")},
-			"this Python SDK needs Python 3.12 or later, and .python-version pins Python 3.11.9. Set it to Python 3.12 or later, or pin the last release",
+			map[string]string{".python-version": "3.10.9\n", "pyproject.toml": project(">=3.14")},
+			"this Python SDK needs Python 3.11 or later, and .python-version pins Python 3.10.9. Set it to Python 3.11 or later, or pin the last release",
 		},
 		"pin over requires-python": {map[string]string{".python-version": "3.13\n", "pyproject.toml": project(">=3.10")}, ""},
 		"base image over requires-python": {
@@ -84,7 +85,7 @@ func TestPythonRefusal(t *testing.T) {
 			"",
 		},
 		"base image over pin": {
-			map[string]string{".python-version": "3.11\n", "pyproject.toml": "[tool.dagger]\nbase-image = \"python:3.14-slim\"\n"},
+			map[string]string{".python-version": "3.10\n", "pyproject.toml": "[tool.dagger]\nbase-image = \"python:3.14-slim\"\n"},
 			"",
 		},
 		"unreadable pin": {map[string]string{".python-version": "pypy3.10\n"}, ""},
@@ -102,7 +103,7 @@ func TestPythonRefusal(t *testing.T) {
 }
 
 func TestPythonRefusalOffersTheLastReleaseOnlyWhereItRuns(t *testing.T) {
-	for requires, offered := range map[string]bool{">=3.11": true, ">=3.10": true, ">=3.9": false, ">=2.7": false} {
+	for requires, offered := range map[string]bool{">=3.10": true, ">=3.9": false, ">=2.7": false} {
 		got, err := pythonRefusal(moduleDir(t, map[string]string{"pyproject.toml": "[project]\nrequires-python = \"" + requires + "\"\n"}))
 		if err != nil {
 			t.Fatal(err)
@@ -115,7 +116,7 @@ func TestPythonRefusalOffersTheLastReleaseOnlyWhereItRuns(t *testing.T) {
 
 func TestRunPythonRefusalTakesADirectory(t *testing.T) {
 	dir := moduleDir(t, map[string]string{"pyproject.toml": "[project]\nrequires-python = \">=3.10\"\n"})
-	if got := printed(t, "python-refusal", dir); !strings.Contains(got, "needs Python 3.12 or later") {
+	if got := printed(t, "python-refusal", dir); !strings.Contains(got, "needs Python 3.11 or later") {
 		t.Errorf("got %q", got)
 	}
 }

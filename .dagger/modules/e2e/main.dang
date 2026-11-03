@@ -940,8 +940,8 @@ type E2e {
     let ws = withScope(scope, tomlGenerateModulePath, "toml-generate-app")
     let pyprojectPath = tomlGenerateModulePath + "/pyproject.toml"
     let pyproject = ws.file("/" + pyprojectPath).contents
-    let onFloor = pyproject.replace("requires-python = \">=3.14\"", "requires-python = \">=3.12\"")
-    let belowFloor = pyproject.replace("requires-python = \">=3.14\"", "requires-python = \">=3.11\"")
+    let onFloor = pyproject.replace("requires-python = \">=3.14\"", "requires-python = \">=3.11\"")
+    let belowFloor = pyproject.replace("requires-python = \">=3.14\"", "requires-python = \">=3.10\"")
     assert(belowFloor != pyproject, "the fixture asks for no Python to lower")
 
     let floor = pythonSdk.mod(ws.withNewFile("/" + pyprojectPath, onFloor), path: tomlGenerateModulePath).generate
@@ -951,8 +951,8 @@ type E2e {
       err: Error => err.message
     }
     assertContainsAll(older, [
-      "the module at " + tomlGenerateModulePath + ": this Python SDK needs Python 3.12 or later",
-      "requires-python = \">=3.11\" asks for Python 3.11. Ask for Python 3.12 or later",
+      "the module at " + tomlGenerateModulePath + ": this Python SDK needs Python 3.11 or later",
+      "requires-python = \">=3.10\" asks for Python 3.10. Ask for Python 3.11 or later",
       "pin the last release of this SDK that runs on it: dagger module install github.com/dagger/python-sdk@v1.2.0",
       "then run dagger generate again",
     ])
@@ -961,24 +961,24 @@ type E2e {
     let onOwnImage = pythonSdk.mod(ws.withNewFile("/" + pyprojectPath, ownImage), path: tomlGenerateModulePath).generate
     assertAdded(onOwnImage, tomlGenerateModulePath + "/" + sdkMemberFile)
 
-    let pinned = ws.withNewFile("/" + tomlGenerateModulePath + "/.python-version", "3.11\n")
+    let pinned = ws.withNewFile("/" + tomlGenerateModulePath + "/.python-version", "3.10\n")
     let pinRefused = pythonSdk.mod(pinned, path: tomlGenerateModulePath).generated.cwd rescue {
       err: Error => err.message
     }
-    assertContains(pinRefused, "this Python SDK needs Python 3.12 or later, and .python-version pins Python 3.11. Set it to Python 3.12 or later", "a module pinned to Python 3.11 was generated")
+    assertContains(pinRefused, "this Python SDK needs Python 3.11 or later, and .python-version pins Python 3.10. Set it to Python 3.11 or later", "a module pinned to Python 3.10 was generated")
 
     let initScope = outputRoot + "/python-floor-init"
-    let initRefused = pythonSdk(template: "empty", pythonVersion: "3.11")
+    let initRefused = pythonSdk(template: "empty", pythonVersion: "3.10")
       .generateScope(scope.withNewDirectory("/" + initScope, directory).withWorkdir(initScope), isModule: true, name: "python-floor-init", clients: [])
       .cwd rescue {
         err: Error => err.message
       }
-    assertContains(initRefused, "asks for Python 3.11", "a new module asking for Python 3.11 was initialized")
+    assertContains(initRefused, "asks for Python 3.10", "a new module asking for Python 3.10 was initialized")
 
-    let setRefused = pythonSdk.mod(ws, path: tomlGenerateModulePath).config.set(pythonVersion: "3.11").after.file(pyprojectPath).contents rescue {
+    let setRefused = pythonSdk.mod(ws, path: tomlGenerateModulePath).config.set(pythonVersion: "3.10").after.file(pyprojectPath).contents rescue {
       err: Error => err.message
     }
-    assertContains(setRefused, "asks for Python 3.11", "config set wrote Python 3.11")
+    assertContains(setRefused, "asks for Python 3.10", "config set wrote Python 3.10")
 
     null
   }
@@ -1462,8 +1462,8 @@ type E2e {
     assert(release.trimSpace != "", "the generated module did not run")
 
     let floorPath = ".dagger/modules/sdk-floor"
-    let onFloor = cli(initialized, ["module", "init", "python", "--auto-apply", "--name", "sdk-floor", "--path", floorPath, "--python-version", "3.12"])
-      .withExec(["grep", "-q", ">=3.12", floorPath + "/pyproject.toml"])
+    let onFloor = cli(initialized, ["module", "init", "python", "--auto-apply", "--name", "sdk-floor", "--path", floorPath, "--python-version", "3.11"])
+      .withExec(["grep", "-q", ">=3.11", floorPath + "/pyproject.toml"])
     let floorRelease = cli(onFloor, ["-m", floorPath, "call", "container", "file", "--path", "/etc/alpine-release", "contents"])
       .stdout
     assert(floorRelease.trimSpace != "", "the default template did not run on the Python floor")
@@ -1543,18 +1543,32 @@ type E2e {
       }
       assertContains(direct, want, "a module generated directly with targetVersion " + setting + " was not refused the same way: " + direct)
     }
-    [target, target.trimPrefix("v"), target + "+0123abcd", "", floor].each { setting =>
+    [target, target.trimPrefix("v"), target + "+0123abcd", "", floor, floor.trimPrefix("v"), floor + "+0123abcd"].each { setting =>
       assert(pythonSdk.targetRefusal("module \"m\"", setting) == "", "the targeted release was refused as \"" + setting + "\": " + pythonSdk.targetRefusal("module \"m\"", setting))
+    }
+
+    # The target is a v1.0.0 prerelease below beta.100. Identifiers compare as
+    # numbers, so beta.100 is later than it and beta.9 is below the floor,
+    # where text order would say the opposite.
+    let later = [target + ".1", target.split("-")[0] ?? "", "v1.0.0-beta.100", "1.0.0-beta.100", "v1.0.0-beta.100+0123abcd"]
+    later.each { setting =>
+      let said = pythonSdk.targetRefusal("module \"m\"", setting)
+      assertContains(said, "pins targetVersion " + pythonSdk.targetVersionOf(setting) + ", which is later than " + target, "targetVersion " + setting + " was not refused as later than the targeted release: " + said)
+    }
+    ["v1.0.0-beta.9", "1.0.0-beta.9"].each { setting =>
+      let said = pythonSdk.targetRefusal("module \"m\"", setting)
+      assertContains(said, "pins targetVersion v1.0.0-beta.9, which is below " + floor, "targetVersion " + setting + " was not refused as below the floor: " + said)
     }
     null
   }
 
   """
   `dagger module init python --target-version` records the targeted release
-  in the module's scope settings, and the module runs. A module pinned to the
-  floor stays pinned when `dagger generate` or `dagger call python-sdk mod
-  generate` generates it again, also when the pin is recorded in a config
-  below the workspace root under a key that climbs out of it with `..`.
+  in the module's scope settings, and the module runs; a release later than
+  the targeted one is refused. A module pinned to the floor stays pinned
+  when `dagger generate` or `dagger call python-sdk mod generate` generates
+  it again, also when the pin is recorded in a config below the workspace
+  root under a key that climbs out of it with `..`.
   """
   pub targetVersionCliCheck(ws: Workspace!): Void @check {
     let path = ".dagger/modules/target-cli"
@@ -1566,6 +1580,12 @@ type E2e {
     assertContains(main, "let clientVersion: String! = \"" + target + "\"", "the generated entrypoint does not declare the targeted release: " + main)
     let ran = cli(initialized, ["-m", path, "call", "container", "file", "--path", "/etc/alpine-release", "contents"]).stdout
     assert(ran.trimSpace != "", "the module did not run")
+
+    let later = target + ".1"
+    let refused = playground(ws)
+      .withExec(["dagger", "module", "init", "python", "--auto-apply", "--name", "target-cli-later", "--path", ".dagger/modules/target-cli-later", "--target-version", later], experimentalPrivilegedNesting: true, expect: ReturnType.FAILURE)
+      .stderr
+    assertContains(refused, "module \"target-cli-later\" pins targetVersion " + later + ", which is later than " + target, "dagger module init accepted a targetVersion later than the targeted release: " + refused)
 
     let pinnedPath = ".dagger/modules/target-cli-pinned"
     let pinned = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", "target-cli-pinned", "--path", pinnedPath, "--target-version", "v" + floorVersion])
