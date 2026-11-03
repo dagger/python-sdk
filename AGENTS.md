@@ -38,7 +38,7 @@ dagger check --engine=image://registry.dagger.io/engine:v1.0.0-beta.18 \
 ```
 
 Two `engine-e2e` checks run the target checks on the engine of the release this
-SDK targets, v1.0.0-beta.23, built from its commit. Only that release serves a
+SDK targets, v1.0.0-beta.24, built from its commit. Only that release serves a
 module or a session the view of the release it announces, so the floor cannot
 prove it. `floor-coverage-check` does not count these checks:
 
