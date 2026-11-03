@@ -1,5 +1,5 @@
 src = ["src", "tests"]
-target-version = "py312"
+target-version = "py311"
 
 [format]
 docstring-code-format = true
