@@ -271,12 +271,13 @@ than v2.2.0 refuses the file's import.
 
 `entrypoint/` is the `ModuleEntrypoint`, written in Dang, that this repository
 used to serve to every Python module as `dagger.io/sdk/python/entrypoint@v1`,
-before each module got one generated into it. It is frozen: generation no
-longer writes a manifest that names it, a module whose manifest names it, a
-pin of it or a fork moves to the generated entrypoint at its next
-`dagger generate`, and its copies of `runtime/build.dang` and
-`runtime/workspace_reader.py` no longer follow the runtime's. It stays in the
-repository, with the tags that serve it, so a module pinned to it in git
+before each module got one generated into it. Generation no longer writes a
+manifest that names it; a module whose manifest names it, a pin of it or a
+fork moves to the generated entrypoint at its next `dagger generate`.
+The naming port still maintains its copies of `runtime/build.dang` and
+`runtime/workspace_reader.py`, with a check keeping them synchronized, for
+modules explicitly loading that entrypoint. It stays in the repository,
+with the tags that serve it, so a module pinned to it in git
 still loads: `@v1` selects the greatest `entrypoint/v1.*` tag, then the
 greatest plain `v1.*` tag. The Python process it starts belongs to no module
 on the engine's side, as with the static entrypoint.
