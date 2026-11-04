@@ -120,13 +120,9 @@ type Mod {
       if (entrypointMode == "generated") {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)
-        let withEntrypoint = scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside), entrypointPath))
-        let entrypointDirectory = withEntrypoint.withWorkdir(modulePath(entrypointPath))
-        let configured = sdkHelpers.loadDangConfig(entrypointDirectory)
-          .withVersion("2.1")
-          .withDaggerImport(name: "Dagger", version: targetVersion)
-          .generate(entrypointDirectory)
-        entrypointManifest(configured.withWorkdir("."), entrypointPath)
+        let configured = namedWorkspace(scoped, entrypointPath)
+        configured.withDirectory("/" + rootPath + "/" + entrypointPath,
+          entrypointDir(configured, patterns(outside), entrypointPath))
       } else if (entrypointMode == "own") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
@@ -228,7 +224,9 @@ type Mod {
   yet. So the runtime manifest points back at the module being built.
   """
   let staging(target: Workspace!, outside: [String!]!): Workspace! {
-    if (hasEntrypointManifest) {
+    # The final entrypoint manifest is already staged for naming, even when
+    # the input module originally used a runtime or had no entrypoint.
+    if (hasEntrypointManifest or entrypointMode == "generated") {
       let staged = ManifestToml(ws.file("/" + manifestPath).contents).withoutEntrypoint
       let loaded = sdkHelpers.moduleManifest(loadToml: staged)
       # A static entrypoint manifest holds no runtime to fall back on.
@@ -286,8 +284,21 @@ type Mod {
   dang.toml governing it decides the version the module is named by.
   """
   let namedSource(target: Workspace!, entrypointPath: String!): ModuleSource! {
-    entrypointManifest(target.withDirectory("/" + rootPath + "/" + entrypointPath, directory), entrypointPath)
-      .moduleSource("/" + rootPath)
+    namedWorkspace(target, entrypointPath).moduleSource("/" + rootPath)
+  }
+
+  """
+  The final manifest and config, before main-object selection or building the
+  entrypoint. Reuse this workspace in the output so naming never observes the
+  previous import while the generated module declares a different version.
+  """
+  let namedWorkspace(target: Workspace!, entrypointPath: String!): Workspace! {
+    let dir = target.withDirectory("/" + modulePath(entrypointPath), directory).withWorkdir(modulePath(entrypointPath))
+    let configured = sdkHelpers.loadDangConfig(dir)
+      .withVersion("2.1")
+      .withDaggerImport(name: "Dagger", version: targetVersion)
+      .generate(dir)
+    entrypointManifest(configured.withWorkdir("."), entrypointPath)
   }
 
   """
