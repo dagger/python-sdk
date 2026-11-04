@@ -15,7 +15,7 @@ pytestmark = [
 ]
 
 # CurrentModule.naming's answers for a module "naming-app" at
-# v1.0.0-beta.25, as the engine's identifier naming rules name it.
+# v1.0.0-beta.26, as the engine's identifier naming rules name it.
 NAMES = {
     "typeNames": {"HttpFetcher": "NamingAppHTTPFetcher"},
     "fieldNames": {
