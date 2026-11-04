@@ -7,7 +7,3 @@ engineVersion = "v1.0.0-0"
 [[dependencies]]
   name = "engine-dev"
   source = "github.com/dagger/dagger/.dagger/modules/engine-dev@6d5f9c8ba8616b45476ae011acbd80b7540019e8"
-
-[[dependencies]]
-  name = "target-engine-dev"
-  source = "github.com/dagger/dagger/.dagger/modules/engine-dev@b32e84b60b99b68e836408d4318f0818982ea86d"
