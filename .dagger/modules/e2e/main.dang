@@ -2249,6 +2249,7 @@ type E2e {
       "pub types: [TypeDef!]! {",
       "contextDir: directory.withDirectory(\".\", currentModule.contextDirectory",
     ])
+    assertContainsAll(changes.layer.file(scope + "/sdk/entrypoint/dang.toml").contents, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + pythonSdk.targetVersionOf("") + "\""])
     assertNotContains(main, "workspace.id", "the static entrypoint hands the module the caller's workspace")
     assertNotContains(main, "clients:", "the static entrypoint still hands the module its clients")
     # Found through its own source, so a moved module needs no regeneration.
@@ -2575,6 +2576,7 @@ type E2e {
       assertContains(manifest, "source = \"./sdk/entrypoint\"", source + ": the module was not moved to the generated entrypoint: " + manifest)
       assertNotContains(manifest, source, source + ": the manifest still names the entrypoint served from elsewhere: " + manifest)
       assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint/main.dang"), source + ": no entrypoint was generated into the module")
+      assertContainsAll(moved.file("/" + tomlGenerateModulePath + "/sdk/entrypoint/dang.toml").contents, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + pythonSdk.targetVersionOf("") + "\""])
       assert(pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).entrypointMode == "generated", source + ": not read as a module to generate an entrypoint into")
     }
     ["./custom", "/custom", ".custom", "custom", "held", "example.com/repo"].each { source =>
