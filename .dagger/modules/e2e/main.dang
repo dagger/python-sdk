@@ -1519,40 +1519,38 @@ type E2e {
       }
     }
 
-    [
-      ["dang = \"2.0\"\n", "declares Dang 2.0"],
-      ["[imports.Dagger]\npath = \"./schema\"\n", "imports Dagger from a path"],
-      ["[imports.Dagger]\nendpoint = \"http://example\"\n", "has an endpoint"],
-      ["[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n", "another Dagger version"],
-    ].each { case =>
-      let seeded = generated.withNewFile(configPath, case[0] ?? "")
-      let want = case[1] ?? ""
-      let scopeRefused = dangConfigGenerate(seeded).cwd rescue {
-        err: Error => err.message
-      }
-      assertContains(scopeRefused, want, "scope generation did not refuse: " + want)
-      let directRefused = dangConfigDirect(seeded).cwd rescue {
-        err: Error => err.message
-      }
-      assertContains(directRefused, want, "direct generation did not refuse: " + want)
+    dangConfigBoth(generated.withNewFile(configPath, "dang = \"2.0\"\n"), configPath).each { contents =>
+      assertContains(contents, "dang = \"2.1\"", "generation kept another Dang version: " + contents)
     }
-
-    let ancestorPath = "/" + root + "/dang.toml"
-    [
-      ["[imports.Lib]\npath = \"./lib\"\n", "would take the place of"],
-      ["[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n", "another Dagger version"],
-    ].each { case =>
-      let refused = dangConfigGenerate(ws.withNewFile(ancestorPath, case[0] ?? "")).cwd rescue {
-        err: Error => err.message
-      }
-      assertContains(refused, case[1] ?? "", "a dang.toml in the module directory was silently replaced: " + refused)
+    dangConfigBoth(generated.withNewFile(configPath, "[imports.Dagger]\npath = \"./schema\"\n"), configPath).each { contents =>
+      assertContains(contents, "dagger = \"" + target + "\"", "generation did not set the Dagger version: " + contents)
+      assertNotContains(contents, "./schema", "generation kept the Dagger import's path: " + contents)
     }
-    let matching = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"" + target + "\"\n"
-    let sdkPath = "/" + root + "/sdk/dang.toml"
-    let sdkRefused = dangConfigGenerate(ws.withNewFile(sdkPath, "[imports.Lib]\npath = \"./lib\"\n")).cwd rescue {
+    dangConfigBoth(generated.withNewFile(configPath, "[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n"), configPath).each { contents =>
+      assertContainsAll(contents, ["[imports.Other]", "dagger = \"v1.0.0-beta.20\"", "dagger = \"" + target + "\""])
+    }
+    let endpoint = generated.withNewFile(configPath, "[imports.Dagger]\nendpoint = \"http://example\"\n")
+    let scopeRefused = dangConfigGenerate(endpoint).cwd rescue {
       err: Error => err.message
     }
-    assertContains(sdkRefused, "would take the place of", "a dang.toml in sdk/ was silently replaced: " + sdkRefused)
+    assertContains(scopeRefused, "has an endpoint", "scope generation did not surface the sdk-helpers endpoint error: " + scopeRefused)
+    let directRefused = dangConfigDirect(endpoint).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(directRefused, "has an endpoint", "direct generation did not surface the sdk-helpers endpoint error: " + directRefused)
+
+    let ancestorPath = "/" + root + "/dang.toml"
+    let sdkPath = "/" + root + "/sdk/dang.toml"
+    let ancestorSettings = "[imports.Lib]\npath = \"./lib\"\n"
+    let unwritten = generated.withoutFile(configPath)
+    [ancestorPath, sdkPath].each { path =>
+      [ancestorSettings, "[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n"].each { settings =>
+        let nearer = dangConfigGenerate(unwritten.withNewFile(path, settings))
+        assert(nearer.file(path).contents == settings, "generation changed " + path)
+        assert(nearer.file(configPath).contents == written, path + " changed the generated dang.toml")
+      }
+    }
+    let matching = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = \"" + target + "\"\n"
     assert(dangConfigGenerate(generated.withoutFile(configPath).withNewFile(sdkPath, "[imports.Dagger]\ndagger = true\n")).file(sdkPath).contents == "[imports.Dagger]\ndagger = true\n", "a dang.toml in sdk/ did not survive the directory being replaced")
     assert(dangConfigGenerate(generated.withNewFile(sdkPath, "[imports.Lib]\npath = \"./lib\"\n")).file(sdkPath).contents == "[imports.Lib]\npath = \"./lib\"\n", "a dang.toml in sdk/ above the entrypoint's own did not survive")
     let aboveModule = "/" + fixtureRoot + "/toml-generate/dang.toml"
@@ -1562,8 +1560,7 @@ type E2e {
     let beside = dangConfigGenerate(ws.withNewFile(ancestorPath, matching))
     assert(beside.file(ancestorPath).contents == matching, "generation changed a dang.toml in the module directory")
     assert(beside.file(configPath).contents == written, "a dang.toml in the module directory changed the generated one")
-    assert(dangConfigGenerate(ws.withNewFile(ancestorPath, "[imports.Dagger]\ndagger = true\n")).file(configPath).contents == written, "a dang.toml in the module directory that adds nothing was refused")
-    let ancestorSettings = "[imports.Lib]\npath = \"./lib\"\n"
+    assert(dangConfigGenerate(ws.withNewFile(ancestorPath, "[imports.Dagger]\ndagger = true\n")).file(configPath).contents == written, "a dang.toml in the module directory that adds nothing changed the generated one")
     let governed = generated.withNewFile(ancestorPath, ancestorSettings)
     assert(dangConfigGenerate(governed).file(ancestorPath).contents == ancestorSettings, "generation changed a file the entrypoint's own dang.toml governs over")
 
@@ -1609,6 +1606,10 @@ type E2e {
 
   let dangConfigDirect(seeded: Workspace!): Workspace! {
     pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).generated
+  }
+
+  let dangConfigBoth(seeded: Workspace!, path: String!): [String!]! {
+    [dangConfigGenerate(seeded), dangConfigDirect(seeded)].map { kept => kept.file(path).contents }
   }
 
   """

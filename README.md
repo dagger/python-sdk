@@ -233,8 +233,7 @@ the Dang language version and the Dagger version the module targets: this SDK
 release's, or the `targetVersion` pin (see "The engine release a module
 targets"). For a module on a runtime or on an entrypoint of its own, generation
 creates no `dang.toml` for an entrypoint, and keeps one already there, as
-described below. Generation refuses a `dang.toml` it cannot keep the meaning of,
-as listed below.
+described below.
 
 ```toml
 dang = "2.1"
@@ -277,21 +276,25 @@ identifier-casing cut comes later; its release is not decided.
 A module needs to be generated again to get both. Standalone Dang tooling older
 than v2.2.0 refuses the file's import.
 
-The Dagger version belongs to this SDK. Generation replaces `dagger = true` or
-another version on the `Dagger` import, and keeps the file's other settings and
-imports. The file is written again from those settings, so its comments and
-formatting are lost.
+The Dagger version belongs to this SDK. Generation loads
+`sdk/entrypoint/dang.toml` when there is one, through sdk-helpers, sets
+`dang = "2.1"`, and sets the `Dagger` import to the target, replacing
+`dagger = true` or another version. It keeps the file's other settings and
+imports, including other imports that declare a Dagger version of their own;
+an engine with dagger/dagger#14902 refuses to load the entrypoint when such an
+import declares another version than the `Dagger` import.
+sdk-helpers removes a `path` from the `Dagger` import, because Dang does not
+allow one beside `dagger`. It refuses a non-empty `endpoint` on that import,
+because Dang does not allow one beside a version; generation then stops with
+that error and writes nothing, as it does for a file sdk-helpers cannot parse.
+The file is written again from those settings, so its comments and formatting
+are lost.
 
-Generation refuses, without writing anything, a `dang.toml` it cannot keep the
-meaning of:
-
-- A language version other than `2.1`.
-- A `path` or a non-empty `endpoint` on the `Dagger` import.
-- Another import that declares a different Dagger version.
-- With no `sdk/entrypoint/dang.toml` yet, a `dang.toml` in `sdk/` or the module
-  directory that says anything the generated file would not, or another Dagger
-  version: the generated file would take its place. Files above the module
-  directory do not govern an entrypoint.
+Generation reads no other `dang.toml`. Dang takes the nearest `dang.toml` in a
+file's directory or above it, and does not merge the ones further up, so a
+`dang.toml` in `sdk/` or the module directory no longer applies to the generated
+entrypoint once `sdk/entrypoint/dang.toml` is written. The generated entrypoint
+needs only the `Dagger` import. Generation leaves those files as they are.
 
 Generation changes no `dang.toml` other than `sdk/entrypoint/dang.toml` of a
 module on a generated entrypoint. Those it finds in `sdk/` and `clients/` survive
