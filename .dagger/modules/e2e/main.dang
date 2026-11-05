@@ -2737,6 +2737,13 @@ type E2e {
       .withWorkdir(".")
     assert(again.changes(generated).isEmpty, "a second generation changed a module with an outside library")
 
+    # members/junk is committed, ignored and not valid TOML: the derivation and
+    # uv lock both refuse it if generation reads it.
+    let ignoredMember = resourcesSeeded(ws.withNewFile(resourcesProject, ws.file(resourcesProject).contents
+      .replace("members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"../../members/*\"]")))
+    let withIgnored = resourcesGenerated(pythonSdk, ignoredMember)
+    assertDerived(withIgnored.file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents, "an ignored file changed what generation derives")
+
     let member = ws.withNewFile(resourcesProject, ws.file(resourcesProject).contents
       .replace("members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"../../libs/greet\"]")
       .replace(greetSource, "greet = { workspace = true }"))
