@@ -1487,6 +1487,93 @@ type E2e {
   }
 
   """
+  A generated entrypoint declares one Dagger version, in dang.toml and on the
+  exec of the module's process, however the module is generated.
+  """
+  pub dangConfigCheck(ws: Workspace!): Void @check {
+    let root = tomlGenerateModulePath
+    let configPath = "/" + root + "/sdk/entrypoint/dang.toml"
+    let target = pythonSdk.targetVersionOf("")
+
+    let generated = dangConfigGenerate(ws)
+    assert(generated.cwd == ws.withWorkdir(root).cwd, "generation moved the caller's directory: " + generated.cwd)
+    let written = generated.file(configPath).contents
+    assertContainsAll(written, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + target + "\""])
+    assertContainsAll(generated.file("/" + root + "/sdk/entrypoint/main.dang").contents, [
+      "let clientVersion: String! = \"" + target + "\"",
+      ".withEnvVariable(\"DAGGER_CLIENT_VERSION\", clientVersion)",
+    ])
+    assert(dangConfigDirect(ws).file(configPath).contents == written, "a module generated directly got another dang.toml")
+    assert(dangConfigGenerate(generated).withWorkdir(".").changes(generated.withWorkdir(".")).isEmpty, "a second generation changed the module")
+    let generatedDirectly = dangConfigDirect(ws)
+    assert(generatedDirectly.cwd == ws.withWorkdir(".").cwd, "direct generation moved the workspace's directory: " + generatedDirectly.cwd)
+    assert(dangConfigDirect(generatedDirectly).changes(generatedDirectly).isEmpty, "a second direct generation changed the module")
+
+    let owned = "dang = \"2.0\"\n\n[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\npath = \"./schema\"\n\n[imports.Lib]\npath = \"./lib\"\n\n[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n"
+    dangConfigBoth(generated.withNewFile(configPath, owned), configPath).each { contents =>
+      assertContainsAll(contents, ["dang = \"2.1\"", "dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\"", "[imports.Other]", "dagger = \"v1.0.0-beta.20\""])
+      assertNotContains(contents, "./schema", "generation kept the Dagger import's path: " + contents)
+      assertNotContains(contents, "dang = \"2.0\"", "generation kept another Dang version: " + contents)
+    }
+    let endpoint = generated.withNewFile(configPath, "[imports.Dagger]\nendpoint = \"http://example\"\n")
+    let scopeRefused = dangConfigGenerate(endpoint).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(scopeRefused, "has an endpoint", "scope generation did not surface the sdk-helpers endpoint error: " + scopeRefused)
+    let directRefused = dangConfigDirect(endpoint).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(directRefused, "has an endpoint", "direct generation did not surface the sdk-helpers endpoint error: " + directRefused)
+
+    let ancestorPath = "/" + root + "/dang.toml"
+    let ancestorSettings = "[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n"
+    let nearer = dangConfigGenerate(generated.withoutFile(configPath).withNewFile(ancestorPath, ancestorSettings))
+    assert(nearer.file(ancestorPath).contents == ancestorSettings, "generation changed a dang.toml in the module directory")
+    assert(nearer.file(configPath).contents == written, "a dang.toml in the module directory changed the generated one")
+
+    let remote = generated
+      .withNewFile("/" + root + "/dagger-module.toml", dangEntrypointManifest("toml-generate-app", "github.com/someone/python-sdk/entrypoint@entrypoint/v1"))
+      .withNewFile(configPath, "[imports.Lib]\npath = \"./lib\"\n")
+    let moved = dangConfigGenerate(remote)
+    assertContains(moved.file("/" + root + "/dagger-module.toml").contents, "source = \"./sdk/entrypoint\"", "the module stayed on the remote entrypoint")
+    assertContainsAll(moved.file(configPath).contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\""])
+
+    let customizedLeaf = "dang = \"2.1\"\n\n[imports.Dagger]\ndagger = true\n\n[imports.Lib]\npath = \"./lib\"\n"
+    let customized = generated.withNewFile(configPath, customizedLeaf)
+    let onRuntime = pythonSdk(legacyRuntime: true).generateScope(customized.withWorkdir(root), isModule: true, name: "toml-generate-app", clients: [])
+    assert(onRuntime.directory("/" + root).exists("sdk/entrypoint/main.dang") == false, "moving onto the runtime kept the entrypoint")
+    assert(onRuntime.file(configPath).contents == customizedLeaf, "moving onto the runtime lost the entrypoint's dang.toml")
+    let returned = dangConfigGenerate(onRuntime.withNewFile("/" + root + "/dagger-module.toml", "name = \"toml-generate-app\"\n"))
+    assertContainsAll(returned.file(configPath).contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\""])
+    let ownEntrypoint = customized
+      .withNewFile("/" + root + "/dagger-module.toml", dangEntrypointManifest("toml-generate-app", "./custom"))
+      .withNewFile("/" + root + "/custom/main.dang", "# a Dang entrypoint of the user's own\n")
+    assert(dangConfigGenerate(ownEntrypoint).file(configPath).contents == customizedLeaf, "moving onto an entrypoint of the user's own lost the entrypoint's dang.toml")
+
+    let custom = "# the user's own\n"
+    let own = ws
+      .withNewFile("/" + root + "/dagger-module.toml", dangEntrypointManifest("toml-generate-app", "./custom"))
+      .withNewFile("/" + root + "/custom/main.dang", "# a Dang entrypoint of the user's own\n")
+      .withNewFile("/" + root + "/custom/dang.toml", custom)
+    let keptOwn = dangConfigGenerate(own)
+    assert(keptOwn.file("/" + root + "/custom/dang.toml").contents == custom, "generation changed the dang.toml of an entrypoint of the user's own")
+    assert(keptOwn.directory("/" + root).exists("sdk/entrypoint") == false, "a module on its own entrypoint got a generated one")
+    null
+  }
+
+  let dangConfigGenerate(seeded: Workspace!): Workspace! {
+    pythonSdk.generateScope(seeded.withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+  }
+
+  let dangConfigDirect(seeded: Workspace!): Workspace! {
+    pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).generated
+  }
+
+  let dangConfigBoth(seeded: Workspace!, path: String!): [String!]! {
+    [dangConfigGenerate(seeded), dangConfigDirect(seeded)].map { kept => kept.file(path).contents }
+  }
+
+  """
   Generation generates for the engine release this SDK release hardcodes,
   with the targetVersion setting as a pin. A release from the floor to the
   targeted one is accepted, and any other value is refused before anything
@@ -1516,6 +1603,7 @@ type E2e {
     let floorPinned = pythonSdk(targetVersion: floor).generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".")
     assertNotContains(floorPinned.file("/" + scope + "/" + coreInitPath).contents, newInBeta22, "core was not read in the view of the pinned release")
     assertContains(floorPinned.file("/" + scope + "/sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"" + floor + "\"", "the entrypoint does not declare the pinned release")
+    assertContains(floorPinned.file("/" + scope + "/sdk/entrypoint/dang.toml").contents, "dagger = \"" + floor + "\"", "dang.toml does not follow the targetVersion pin")
     if (version.contains(target)) {
       assertContains(pinned.file("/" + scope + "/" + coreInitPath).contents, newInBeta22, "core was not read in the view of the targeted release")
     }
@@ -1622,6 +1710,7 @@ type E2e {
     assertContains(generated.file(playgroundRoot + "/" + configFile).contents, "targetVersion = \"v" + floorVersion + "\"", command + " dropped the recorded pin")
     assertContains(generated.file(root + "sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"v" + floorVersion + "\"", command + " did not generate the entrypoint for the pinned release")
     assertContains(generated.file(root + versionFilePath).contents, "CLI_VERSION = \"" + floorVersion + "\"", command + " did not vendor the pinned release's CLI version")
+    assertContains(generated.file(root + "sdk/entrypoint/dang.toml").contents, "dagger = \"v" + floorVersion + "\"", command + " did not write the pinned release to dang.toml")
     assertNotContains(generated.file(root + coreInitPath).contents, newInBeta22, command + " did not read core in the view of the pinned release")
     null
   }
@@ -2122,6 +2211,7 @@ type E2e {
       "pub types: [TypeDef!]! {",
       "contextDir: directory.withDirectory(\".\", currentModule.contextDirectory",
     ])
+    assertContainsAll(changes.layer.file(scope + "/sdk/entrypoint/dang.toml").contents, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + pythonSdk.targetVersionOf("") + "\""])
     assertNotContains(main, "workspace.id", "the static entrypoint hands the module the caller's workspace")
     assertNotContains(main, "clients:", "the static entrypoint still hands the module its clients")
     # Found through its own source, so a moved module needs no regeneration.
@@ -2398,7 +2488,8 @@ type E2e {
     let moved = runtime.generateScope(generated.withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: []).withWorkdir(".")
     assertContains(moved.file(manifestPath).contents, "source = \"" + sdkRuntimeSource + "\"", "the flag did not move the module onto the runtime")
     assertNotContains(moved.file(manifestPath).contents, "[entrypoint]", "the entrypoint table survived the move to a runtime")
-    assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint") == false, "moving onto the runtime left the entrypoint behind")
+    assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint/main.dang") == false, "moving onto the runtime left the entrypoint behind")
+    assert(pythonSdk.mod(moved, path: tomlGenerateModulePath, findUp: false).entrypointMode == "runtime", "a module moved onto the runtime is not read as one")
 
     # A runtime of the user's own is theirs, flag or no flag.
     let ownRuntime = "name = \"" + name + "\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"../../../../../../runtime\"\n"
@@ -2448,6 +2539,7 @@ type E2e {
       assertContains(manifest, "source = \"./sdk/entrypoint\"", source + ": the module was not moved to the generated entrypoint: " + manifest)
       assertNotContains(manifest, source, source + ": the manifest still names the entrypoint served from elsewhere: " + manifest)
       assert(moved.directory("/" + tomlGenerateModulePath).exists("sdk/entrypoint/main.dang"), source + ": no entrypoint was generated into the module")
+      assertContainsAll(moved.file("/" + tomlGenerateModulePath + "/sdk/entrypoint/dang.toml").contents, ["dang = \"2.1\"", "[imports.Dagger]", "dagger = \"" + pythonSdk.targetVersionOf("") + "\""])
       assert(pythonSdk.mod(seeded, path: tomlGenerateModulePath, findUp: false).entrypointMode == "generated", source + ": not read as a module to generate an entrypoint into")
     }
     ["./custom", "/custom", ".custom", "custom", "held", "example.com/repo"].each { source =>

@@ -124,6 +124,8 @@ for and announces:
   serves its own view instead, and is not refused: the first call to a function
   it lacks fails. A module that keeps a runtime of its own uses the version its
   manifest declares.
+- Generation also writes it to `sdk/entrypoint/dang.toml`, beside the generated
+  entrypoint; see "The Dagger version of a generated entrypoint".
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
@@ -218,6 +220,49 @@ header), or its manifest does (a pre-1.0 `dagger.json`, or `[runtime] source =
 off. The global client is temporary: move the code to
 `from dagger_clients.core import ...` and turn the flag off.
 
+## The Dagger version of a generated entrypoint
+
+Every generation that writes the generated entrypoint also writes
+`sdk/entrypoint/dang.toml`, with the Dang language version and the Dagger
+version the module targets: this SDK release's, or the `targetVersion` pin (see
+"The engine release a module targets"). The generated `main.dang` sets
+`DAGGER_CLIENT_VERSION` to the same version on the exec that starts the module's
+process.
+
+```toml
+dang = "2.1"
+
+[imports]
+  [imports.Dagger]
+    dagger = "v1.0.0-beta.24"
+```
+
+Generation loads an existing `sdk/entrypoint/dang.toml` through sdk-helpers,
+sets `dang = "2.1"` and the version of the `Dagger` import, and keeps the file's
+other settings and imports. The file is written again, so its comments and
+formatting are lost. sdk-helpers removes a `path` from the `Dagger` import,
+which Dang does not allow beside `dagger`, and refuses a non-empty `endpoint` on
+it, which Dang does not allow beside a version. Generation reads no other
+`dang.toml`: Dang uses the nearest one, so a `dang.toml` in `sdk/` or the module
+directory does not apply to the generated entrypoint. A module that moves to a
+runtime or an entrypoint of its own keeps `sdk/entrypoint/dang.toml`, and its
+settings are read again if the module moves back.
+
+The two declarations reach an engine in different ways:
+
+- `dang.toml`: no release so far, v1.0.0-beta.25 included, takes the module's
+  Dagger version from the file.
+  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902), not
+  merged, would. It also refuses an entrypoint whose imports declare different
+  Dagger versions, and proposes a fixed default release for an entrypoint whose
+  `dang.toml` declares no Dagger version.
+- `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
+  first released in v1.0.0-beta.22, makes an engine serve that version's view to
+  the process. Engines up to v1.0.0-beta.21 do not read it.
+
+A module needs to be generated again to get both. Standalone Dang tooling older
+than v2.2.0 refuses the file's import.
+
 ## Shared entrypoint
 
 `entrypoint/` is the `ModuleEntrypoint`, written in Dang, that this repository
@@ -251,6 +296,7 @@ SDK files:
 | --- | --- |
 | `types.dang` | the module's types, as a literal list of `TypeDef` values |
 | `main.dang` | the `ModuleEntrypoint`: returns the types, and runs calls in the module's container, declaring the targeted engine release to the engine |
+| `dang.toml` | the Dang language version and the targeted engine release |
 | `build.dang` | the container build, copied from `runtime/build.dang` |
 | `workspace_reader.py` | the workspace reader the build runs, copied from `runtime/workspace_reader.py` |
 

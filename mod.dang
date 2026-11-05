@@ -35,7 +35,8 @@ type Mod {
   let engineVersion: String!
 
   """
-  The engine release this module's generated code is generated for.
+  The engine release a generated entrypoint declares, both in its dang.toml and
+  as DAGGER_CLIENT_VERSION on the exec that starts the module's process.
   """
   let targetVersion: String!
 
@@ -112,12 +113,20 @@ type Mod {
       # The scope writes sdk/ whole, so an entrypoint from an earlier static
       # generation is gone unless it is written again. It also relocks
       # uv.lock, which the derived resources are checked against.
-      let scoped = scope.generated
+      let entrypointPath = vendorDirName + "/" + entrypointDirName
+      # The entrypoint's dang.toml may hold the user's settings, so it outlives a
+      # move to another runner.
+      let scoped = scope.generated.withDirectory("/", ws.directory("/", include: [modulePath(entrypointPath + "/dang.toml")]))
       if (entrypointMode == "generated") {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)
-        let entrypointPath = vendorDirName + "/" + entrypointDirName
-        entrypointManifest(scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside))), entrypointPath)
+        let withEntrypoint = scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside)))
+        let entrypointDirectory = withEntrypoint.withWorkdir(modulePath(entrypointPath))
+        let configured = sdkHelpers.loadDangConfig(entrypointDirectory)
+          .withVersion("2.1")
+          .withDaggerImport(name: "Dagger", version: targetVersion)
+          .generate(entrypointDirectory)
+        entrypointManifest(configured.withWorkdir("."), entrypointPath)
       } else if (entrypointMode == "own") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
@@ -125,6 +134,10 @@ type Mod {
         scoped
       }
     }
+  }
+
+  let modulePath(path: String!): String! {
+    if (rootPath == ".") { path } else { rootPath + "/" + path }
   }
 
   """
