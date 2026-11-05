@@ -1559,6 +1559,8 @@ type E2e {
     assert(dangConfigDirect(generatedDirectly).changes(generatedDirectly).isEmpty, "a second direct generation changed the module")
 
     let owned = "dang = \"2.0\"\n\n[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\npath = \"./schema\"\n\n[imports.Lib]\npath = \"./lib\"\n\n[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n"
+    let olderLeaf = "[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n\n[imports.Lib]\npath = \"./lib\"\n"
+    assert(pythonSdk.mod(generated.withNewFile(configPath, olderLeaf), path: root, findUp: false).naming.version == target, "naming did not read the merged dang.toml")
     dangConfigBoth(generated.withNewFile(configPath, owned), configPath).each { contents =>
       assertContainsAll(contents, ["dang = \"2.1\"", "dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\"", "[imports.Other]", "dagger = \"v1.0.0-beta.20\""])
       assertNotContains(contents, "./schema", "generation kept the Dagger import's path: " + contents)
@@ -1594,6 +1596,7 @@ type E2e {
     assert(onRuntime.file(configPath).contents == customizedLeaf, "moving onto the runtime lost the entrypoint's dang.toml")
     let returned = dangConfigGenerate(onRuntime.withNewFile("/" + root + "/dagger-module.toml", "name = \"toml-generate-app\"\n"))
     assertContainsAll(returned.file(configPath).contents, ["dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\""])
+    assertContains(returned.file("/" + root + "/sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"" + target + "\"", "a module back from the runtime declares another version")
     let ownEntrypoint = customized
       .withNewFile("/" + root + "/dagger-module.toml", dangEntrypointManifest("toml-generate-app", "./custom"))
       .withNewFile("/" + root + "/custom/main.dang", "# a Dang entrypoint of the user's own\n")
