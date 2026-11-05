@@ -256,7 +256,7 @@ The two declarations reach an engine in different ways:
 - `dang.toml`: released engines through v1.0.0-beta.25 do not select the
   module's Dagger version from the file, though they may read its language
   settings. The v1.0.0-beta.26 engine this SDK needs, not released yet and
-  built from dagger/dagger `a26dc3ad` until it is, carries
+  built from dagger/dagger `7e9eaacc` until it is, carries
   [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902): it takes
   the module's Dagger version from the file, and refuses a file whose imports
   declare different Dagger versions, so generation stops with that error. An

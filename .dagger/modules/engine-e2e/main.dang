@@ -8,10 +8,10 @@ the older target engine itself. Keep the commit aligned with its dependency.
 type EngineE2e {
   """
   Commit of v1.0.0-beta.26, this SDK's floor. Until that release is out, the
-  commit of the engine stack that carries what the floor needs
-  (dagger/dagger naming/module-source-naming).
+  dagger/dagger main commit that merged the naming stack the floor needs
+  (through dagger/dagger#14996).
   """
-  let floorCommit: String! = "a26dc3ad8b05045963c40b0803bc0f39c71f0790"
+  let floorCommit: String! = "7e9eaacc376e5c3bed3efdca9e1ba750bc8d9233"
 
   let floorRelease: String! = "v1.0.0-beta.26"
 
