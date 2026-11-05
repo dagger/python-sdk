@@ -1558,14 +1558,23 @@ type E2e {
     assert(generatedDirectly.cwd == ws.withWorkdir(".").cwd, "direct generation moved the workspace's directory: " + generatedDirectly.cwd)
     assert(dangConfigDirect(generatedDirectly).changes(generatedDirectly).isEmpty, "a second direct generation changed the module")
 
-    let owned = "dang = \"2.0\"\n\n[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\npath = \"./schema\"\n\n[imports.Lib]\npath = \"./lib\"\n\n[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n"
+    let owned = "dang = \"2.0\"\n\n[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\npath = \"./schema\"\n\n[imports.Lib]\npath = \"./lib\"\n\n[imports.Other]\ndagger = true\n"
     let olderLeaf = "[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n\n[imports.Lib]\npath = \"./lib\"\n"
     assert(pythonSdk.mod(generated.withNewFile(configPath, olderLeaf), path: root, findUp: false).naming.version == target, "naming did not read the merged dang.toml")
     dangConfigBoth(generated.withNewFile(configPath, owned), configPath).each { contents =>
-      assertContainsAll(contents, ["dang = \"2.1\"", "dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\"", "[imports.Other]", "dagger = \"v1.0.0-beta.20\""])
+      assertContainsAll(contents, ["dang = \"2.1\"", "dagger = \"" + target + "\"", "[imports.Lib]", "path = \"./lib\"", "[imports.Other]", "dagger = true"])
       assertNotContains(contents, "./schema", "generation kept the Dagger import's path: " + contents)
       assertNotContains(contents, "dang = \"2.0\"", "generation kept another Dang version: " + contents)
     }
+    let disagreeing = generated.withNewFile(configPath, "[imports.Dagger]\ndagger = \"v1.0.0-beta.20\"\n\n[imports.Other]\ndagger = \"v1.0.0-beta.20\"\n")
+    let scopeDisagreed = dangConfigGenerate(disagreeing).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(scopeDisagreed, "declare different Dagger versions", "scope generation did not surface the engine's refusal: " + scopeDisagreed)
+    let directDisagreed = dangConfigDirect(disagreeing).cwd rescue {
+      err: Error => err.message
+    }
+    assertContains(directDisagreed, "declare different Dagger versions", "direct generation did not surface the engine's refusal: " + directDisagreed)
     let endpoint = generated.withNewFile(configPath, "[imports.Dagger]\nendpoint = \"http://example\"\n")
     let scopeRefused = dangConfigGenerate(endpoint).cwd rescue {
       err: Error => err.message
