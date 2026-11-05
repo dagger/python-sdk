@@ -189,7 +189,6 @@ type PythonSdk {
         entrypointMode: mode,
         migrating: migrating,
         engineVersion: scopeEngineVersion(initialized, scope),
-        ownEntrypointPath: ownEntrypointPathOf(initialized, scope),
         targetVersion: targetVersionOf(targetVersion),
         clients: clients,
       ).generated.withWorkdir(scope)
@@ -285,8 +284,8 @@ type PythonSdk {
         # Moved onto the runtime this SDK publishes, with the version the
         # generator reads core in; what only a runtime can honour stays as
         # written. Inline at each site: sdk-helpers' type names change with its
-        # own declared engineVersion (SdkHelpers… vs SDKHelpers… past the
-        # identifier-casing cut), so this module must not spell them.
+        # own declared engineVersion (SdkHelpers… vs SDKHelpers… from the
+        # v1.0.0-beta.22 naming rules), so this module must not spell them.
         sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest))
           .withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else if (ours) {
@@ -748,18 +747,6 @@ type PythonSdk {
   }
 
   """
-  The module-relative path of a Dang entrypoint of the user's own that a
-  module's manifest names, or the empty string when it names none.
-  """
-  let ownEntrypointPathOf(ws: Workspace!, scope: String!): String! {
-    if (namesOwnEntrypoint(ws, scope) and hasEntrypointManifest(ws, scope) == false) {
-      normalizePath(ManifestToml(ws.file("/" + scopePath(scope, "dagger-module.toml")).contents).entrypointSource)
-    } else {
-      ""
-    }
-  }
-
-  """
   Whether a module's manifest names a Dang entrypoint of the user's own, in
   the module's files, which generation keeps.
   """
@@ -869,7 +856,6 @@ type PythonSdk {
       entrypointMode: entrypointModeOf(ws, modPath),
       migrating: migratingModule(ws, modPath),
       engineVersion: scopeEngineVersion(ws, modPath),
-      ownEntrypointPath: ownEntrypointPathOf(ws, modPath),
       targetVersion: targetVersionOf(setting),
       clients: null,
     )

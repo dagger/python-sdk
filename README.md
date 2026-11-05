@@ -222,18 +222,12 @@ off. The global client is temporary: move the code to
 
 ## The Dagger version of a generated entrypoint
 
-Every generation that writes the generated entrypoint in `sdk/entrypoint` also
-writes `sdk/entrypoint/dang.toml`, for the default target and for any
-`targetVersion` pin alike. That covers a new module, a module generated again, a
-module that names an entrypoint served from elsewhere, which generation
-replaces, and a module on the runtime built into the engine that moves to the
-generated entrypoint. "How a module runs" describes which modules get the
-generated entrypoint and which stay on, or move to, a runtime. The file holds
-the Dang language version and the Dagger version the module targets: this SDK
-release's, or the `targetVersion` pin (see "The engine release a module
-targets"). For a module on a runtime or on an entrypoint of its own, generation
-creates no `dang.toml` for an entrypoint, and keeps one already there, as
-described below.
+Every generation that writes the generated entrypoint also writes
+`sdk/entrypoint/dang.toml`, with the Dang language version and the Dagger
+version the module targets: this SDK release's, or the `targetVersion` pin (see
+"The engine release a module targets"). The generated `main.dang` sets
+`DAGGER_CLIENT_VERSION` to the same version on the exec that starts the module's
+process.
 
 ```toml
 dang = "2.1"
@@ -243,84 +237,31 @@ dang = "2.1"
     dagger = "v1.0.0-beta.24"
 ```
 
-The generated `main.dang` also sets `DAGGER_CLIENT_VERSION` to the same version
-on the exec that starts the module's process.
+Generation loads an existing `sdk/entrypoint/dang.toml` through sdk-helpers,
+sets `dang = "2.1"` and the version of the `Dagger` import, and keeps the file's
+other settings and imports. The file is written again, so its comments and
+formatting are lost. sdk-helpers removes a `path` from the `Dagger` import,
+which Dang does not allow beside `dagger`, and refuses a non-empty `endpoint` on
+it, which Dang does not allow beside a version. Generation reads no other
+`dang.toml`: Dang uses the nearest one, so a `dang.toml` in `sdk/` or the module
+directory does not apply to the generated entrypoint. A module that moves to a
+runtime or an entrypoint of its own keeps `sdk/entrypoint/dang.toml`, and its
+settings are read again if the module moves back.
 
 The two declarations reach an engine in different ways:
 
-- `dang.toml`: [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902),
-  not merged, makes an engine read the file and take the module's version from
-  it, for the entrypoint and for a module process that declares no version.
-  Without it, an engine does not take the module's Dagger version from the file:
-  no release so far does, v1.0.0-beta.25 included, and such an engine serves an
-  entrypoint module at its own version. It may still read the file's `dang` key,
-  the Dang language version, when it parses the module's type names.
-  That pull request also proposes a default, unverified by running it here: an
-  entrypoint module with no Dagger version in its governing `dang.toml` (the file
-  or its Dagger import is missing, or it says only `dagger = true`) would be
-  served a fixed release before the identifier-casing cut, instead of following
-  the running engine as it does today. The proposed release has changed while the
-  pull request is open, so this README does not name it. An entrypoint generated
-  before this release is one, unless another file governs it. An entrypoint whose
-  governing file declares a version would use it; for a remote entrypoint, that
-  file is the one in its own directory. A module on a runtime keeps its declared
-  version.
+- `dang.toml`: no release so far, v1.0.0-beta.25 included, takes the module's
+  Dagger version from the file.
+  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902), not
+  merged, would. It also refuses an entrypoint whose imports declare different
+  Dagger versions, and proposes a fixed default release for an entrypoint whose
+  `dang.toml` declares no Dagger version.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.
 
-v1.0.0-beta.20 and v1.0.0-beta.21 share one API view, and v1.0.0-beta.21 is the
-last release in it; v1.0.0-beta.22 is the first with a view of its own. The
-identifier-casing cut comes later; its release is not decided.
-
 A module needs to be generated again to get both. Standalone Dang tooling older
 than v2.2.0 refuses the file's import.
-
-The Dagger version belongs to this SDK. Generation loads
-`sdk/entrypoint/dang.toml` when there is one, through sdk-helpers, sets
-`dang = "2.1"`, and sets the `Dagger` import to the target, replacing
-`dagger = true` or another version. It keeps the file's other settings and
-imports, including other imports that declare a Dagger version of their own;
-an engine with dagger/dagger#14902 refuses to load the entrypoint when such an
-import declares another version than the `Dagger` import.
-sdk-helpers removes a `path` from the `Dagger` import, because Dang does not
-allow one beside `dagger`. It refuses a non-empty `endpoint` on that import,
-because Dang does not allow one beside a version; generation then stops with
-that error and writes nothing, as it does for a file sdk-helpers cannot parse.
-The file is written again from those settings, so its comments and formatting
-are lost.
-
-Generation reads no other `dang.toml`. Dang takes the nearest `dang.toml` in a
-file's directory or above it, and does not merge the ones further up, so a
-`dang.toml` in `sdk/` or the module directory no longer applies to the generated
-entrypoint once `sdk/entrypoint/dang.toml` is written. The generated entrypoint
-needs only the `Dagger` import. Generation leaves those files as they are.
-
-Generation changes no `dang.toml` other than `sdk/entrypoint/dang.toml` of a
-module on a generated entrypoint. Those it finds in `sdk/` and `clients/` survive
-their directories being replaced, whatever runs the module: a
-`sdk/entrypoint/dang.toml` with your settings stays when the module moves to a
-runtime or an entrypoint of its own, and is read again once the manifest names
-neither. A module stays on a runtime, the one this SDK publishes included, until
-its manifest stops naming it. One that only says what this release's generation
-writes goes with the entrypoint.
-
-An entrypoint of your own stays where it is, even inside a directory generation
-replaces: `sdk/`, `clients/core/` or a client it generates. An entrypoint at a
-path that generation also writes is refused: move it out, and name the new path
-in `dagger-module.toml`. Moving a module onto a runtime with its entrypoint in
-one of those directories is refused too: the manifest would stop naming it, and
-the next generation would delete it. Generation leaves any other directory under
-`clients/` alone.
-
-A `dang.toml` in the directory of a client that is no longer declared stays
-there, alone, when generation deletes the rest of that directory. Move or remove
-it before declaring a client of that name again: generation refuses a directory
-it did not write.
-
-A module that names an entrypoint served from elsewhere moves to a generated
-one, and to the Dagger version above. A `dang.toml` of that remote entrypoint
-is not copied: its settings describe files that the module no longer uses.
 
 ## Shared entrypoint
 

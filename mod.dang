@@ -41,14 +41,6 @@ type Mod {
   let targetVersion: String!
 
   """
-  The module-relative path of a Dang entrypoint of the user's own in the
-  module's files, as its manifest named it before generation; empty otherwise.
-  Generation can drop the name from the manifest, and the files are still the
-  user's.
-  """
-  let ownEntrypointPath: String!
-
-  """
   The module scope's clients, as the engine hands them to generation. Null
   reads them from the workspace config, for a module generated directly.
   """
@@ -121,14 +113,20 @@ type Mod {
       # The scope writes sdk/ whole, so an entrypoint from an earlier static
       # generation is gone unless it is written again. It also relocks
       # uv.lock, which the derived resources are checked against.
-      let scoped = withOwnEntrypoint(scope.generated).withDirectory("/", retainedDangConfigs)
+      let entrypointPath = vendorDirName + "/" + entrypointDirName
+      # The entrypoint's dang.toml may hold the user's settings, so it outlives a
+      # move to another runner.
+      let scoped = scope.generated.withDirectory("/", ws.directory("/", include: [modulePath(entrypointPath + "/dang.toml")]))
       if (entrypointMode == "generated") {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)
-        let entrypointPath = vendorDirName + "/" + entrypointDirName
         let withEntrypoint = scoped.withDirectory("/" + rootPath + "/" + entrypointPath, entrypointDir(scoped, patterns(outside)))
-        let entrypointDirectory = modulePath(entrypointPath)
-        entrypointManifest(dangConfigWritten(entrypointDirectory, withEntrypoint, entrypointDirectory).withWorkdir("."), entrypointPath)
+        let entrypointDirectory = withEntrypoint.withWorkdir(modulePath(entrypointPath))
+        let configured = sdkHelpers.loadDangConfig(entrypointDirectory)
+          .withVersion("2.1")
+          .withDaggerImport(name: "Dagger", version: targetVersion)
+          .generate(entrypointDirectory)
+        entrypointManifest(configured.withWorkdir("."), entrypointPath)
       } else if (entrypointMode == "own") {
         checkNoResources(PyprojectHelper().outsidePaths(scoped, rootPath))
         scoped
@@ -136,79 +134,6 @@ type Mod {
         scoped
       }
     }
-  }
-
-  """
-  The workspace with an entrypoint of the user's own put back, when generation
-  replaced the directory it is in. An entrypoint that generation left as it was
-  needs nothing. One that generation changed in place shares a path with the
-  scope's files: keeping them would pin an old SDK file, and replacing them would
-  change the entrypoint, so that is refused. So is moving one that generation
-  replaces to a runtime: its name leaves the manifest, and the next generation
-  could not tell its files from the scope's.
-  """
-  let withOwnEntrypoint(target: Workspace!): Workspace! {
-    let path = ownEntrypointPath
-    let inGenerated = [vendorDirName, clientsDirName].filter { dir => path == dir or path.hasPrefix(dir + "/") }.length > 0
-    let source = modulePath(path)
-    if (inGenerated == false or ws.directory("/", include: [source]).exists(source) == false) {
-      target
-    } else if (target.directory("/" + rootPath).exists(path) and target.directory("/" + source).digest == ws.directory("/" + source).digest) {
-      target
-    } else if (entrypointMode != "own") {
-      raise "the entrypoint at " + source + " is in a directory generation replaces, and a module on a runtime no longer names it, so a later generation would delete it: move it out, or remove it, before moving the module onto a runtime"
-    } else if (target.directory("/" + rootPath).exists(path) == false) {
-      target.withDirectory("/" + source, ws.directory("/" + source))
-    } else {
-      raise "the entrypoint at " + source + " shares that path with files this SDK generates: move it out of them, and name it in dagger-module.toml"
-    }
-  }
-
-  """
-  The dang.toml files of sdk/ and clients/, as generation found them: the scope
-  writes sdk/ and generated clients whole, and they are the user's in every mode,
-  and may govern an entrypoint of the user's own below them. A leaf that only says
-  what generation writes is the SDK's own, and goes with an inactive entrypoint.
-  """
-  let retainedDangConfigs: Directory! {
-    let entrypointDirectory = modulePath(vendorDirName + "/" + entrypointDirName)
-    let leaf = dangConfigPath(entrypointDirectory)
-    # A leaf above an entrypoint of the user's own governs it, whatever it says.
-    let governsOwn = ownEntrypointPath.hasPrefix(vendorDirName + "/" + entrypointDirName + "/")
-    let inactive = entrypointMode != "generated" and governsOwn == false and hasDangConfig(entrypointDirectory) and ws.file("/" + leaf).contents == dangConfigContents("")
-    let exclude = if (inactive) { ["**/.venv", leaf] } else { ["**/.venv"] }
-    ws.directory("/", include: [modulePath(vendorDirName + "/**/dang.toml"), modulePath(clientsDirName + "/**/dang.toml")], exclude: exclude)
-  }
-
-  """
-  The workspace with dang.toml written into the directory `into`, from the
-  settings of the directory `from`, or from none when it is empty, in the
-  workspace generation started from. It names no sdk-helpers type, whose name
-  depends on the engine's naming rules.
-  """
-  let dangConfigWritten(from: String!, target: Workspace!, into: String!): Workspace! {
-    let loaded = if (from != "" and hasDangConfig(from)) {
-      sdkHelpers.loadDangConfig(ws.withWorkdir(from))
-    } else {
-      sdkHelpers.dangConfig
-    }
-    loaded
-      .withVersion(dangLanguageVersion)
-      .withDaggerImport(name: "Dagger", version: targetVersion)
-      .generate(target.withWorkdir(into))
-  }
-
-  let dangConfigContents(from: String!): String! {
-    dangConfigWritten(from, ws, rootPath).file("/" + dangConfigPath(rootPath)).contents
-  }
-
-  let hasDangConfig(dir: String!): Boolean! {
-    let path = dangConfigPath(dir)
-    ws.directory("/", include: [path]).exists(path)
-  }
-
-  let dangConfigPath(dir: String!): String! {
-    if (dir == ".") { "dang.toml" } else { dir + "/dang.toml" }
   }
 
   let modulePath(path: String!): String! {
@@ -425,8 +350,6 @@ type Mod {
   }
 
   let vendorDirName: String! = "sdk"
-  let clientsDirName: String! = "clients"
   let entrypointDirName: String! = "entrypoint"
   let entrypointOutput: String! = "/dagger/entrypoint"
-  let dangLanguageVersion: String! = "2.1"
 }
