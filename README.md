@@ -62,9 +62,9 @@ The engine normalizes a pre-beta.22 target to its shared beta.21 naming view.
 The SDK's modules declare `engineVersion` v1.0.0-beta.26. Engines compare
 only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.25
 still loads them, and fails wherever the SDK uses what it lacks. To stay on
-such an engine, pin `v1.3.0`, the last release that runs there:
-`dagger module install github.com/dagger/python-sdk@v1.3.0`, and
-`dagger.io/sdk/python/entrypoint@v1.3.0` for the shared entrypoint.
+such an engine, pin a release from before this floor, such as `v1.6.0`:
+`dagger module install github.com/dagger/python-sdk@v1.6.0`, and
+`dagger.io/sdk/python/entrypoint@v1.6.0` for the shared entrypoint.
 
 An entrypoint served from elsewhere, such as the shared one this repository
 used to serve as `dagger.io/sdk/python/entrypoint@v1`, a pin of it or a fork,
