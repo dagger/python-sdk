@@ -222,17 +222,26 @@ off. The global client is temporary: move the code to
 
 ## The Dagger version of a generated entrypoint
 
-Generating a module with an entrypoint in `sdk/entrypoint` also writes
-`sdk/entrypoint/dang.toml`, with the Dang language version and the Dagger
-version the module targets: this SDK release's, or the `targetVersion` pin (see
-"The engine release a module targets"):
+Every generation that writes the generated entrypoint in `sdk/entrypoint` also
+writes `sdk/entrypoint/dang.toml`, for the default target and for any
+`targetVersion` pin alike. That covers a new module, a module generated again, a
+module that names an entrypoint served from elsewhere, which generation
+replaces, and a module on the runtime built into the engine that moves to the
+generated entrypoint. "How a module runs" describes which modules get the
+generated entrypoint and which stay on, or move to, a runtime. The file holds
+the Dang language version and the Dagger version the module targets: this SDK
+release's, or the `targetVersion` pin (see "The engine release a module
+targets"). For a module on a runtime or on an entrypoint of its own, generation
+creates no `dang.toml` for an entrypoint, and keeps one already there, as
+described below. Generation refuses a `dang.toml` it cannot keep the meaning of,
+as listed below.
 
 ```toml
 dang = "2.1"
 
 [imports]
   [imports.Dagger]
-    dagger = "v1.0.0-beta.23"
+    dagger = "v1.0.0-beta.24"
 ```
 
 The generated `main.dang` also sets `DAGGER_CLIENT_VERSION` to the same version
@@ -243,8 +252,10 @@ The two declarations reach an engine in different ways:
 - `dang.toml`: [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902),
   not merged, makes an engine read the file and take the module's version from
   it, for the entrypoint and for a module process that declares no version.
-  Without it, an engine loads only the `.dang` files of an entrypoint: no release
-  so far reads this file, v1.0.0-beta.23 included.
+  Without it, an engine does not take the module's Dagger version from the file:
+  no release so far does, v1.0.0-beta.25 included, and such an engine serves an
+  entrypoint module at its own version. It may still read the file's `dang` key,
+  the Dang language version, when it parses the module's type names.
   That pull request also proposes a default, unverified by running it here: an
   entrypoint module with no Dagger version in its governing `dang.toml` (the file
   or its Dagger import is missing, or it says only `dagger = true`) would be
