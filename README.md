@@ -53,8 +53,7 @@ This SDK needs an engine `v1.0.0-beta.26` or later, the first release that
 names identifiers by its naming rules and answers for them: generation asks
 it how to spell the Python names of the schema's identifiers, and a module
 asks it what it named the module's own declarations. An entrypoint manifest
-keeps no `engineVersion`; generation writes its API target to the
-entrypoint's `dang.toml` and to the module process's `DAGGER_CLIENT_VERSION`.
+keeps no `engineVersion` (see "The Dagger version of a generated entrypoint").
 The final config and manifest are staged before naming or main-object
 selection, so those answers describe the module generation actually writes.
 The engine normalizes a pre-beta.22 target to its shared beta.21 naming view.
@@ -254,12 +253,15 @@ settings are read again if the module moves back.
 
 The two declarations reach an engine in different ways:
 
-- `dang.toml`: no release so far, v1.0.0-beta.25 included, takes the module's
-  Dagger version from the file.
-  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902), not
-  merged, would. It also refuses an entrypoint whose imports declare different
-  Dagger versions, and proposes a fixed default release for an entrypoint whose
-  `dang.toml` declares no Dagger version.
+- `dang.toml`: released engines through v1.0.0-beta.25 do not select the
+  module's Dagger version from the file, though they may read its language
+  settings. The v1.0.0-beta.26 engine this SDK needs, not released yet and
+  built from dagger/dagger `a26dc3ad` until it is, carries
+  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902): it takes
+  the module's Dagger version from the file, and refuses a file whose imports
+  declare different Dagger versions, so generation stops with that error. An
+  entrypoint whose `dang.toml` declares no Dagger version is served
+  v1.0.0-beta.25, the last release before the identifier-casing cut.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.
