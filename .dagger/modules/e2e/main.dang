@@ -1611,7 +1611,7 @@ type E2e {
     let remedy = ": set targetVersion in its dagger.toml settings to " + target + ", or remove it to generate for " + target
     let refusals = [
       ["v9.0.0", "v9.0.0, which is later than " + target + ", the engine release this Python SDK generates for: install the SDK release built for v9.0.0, or set targetVersion in its dagger.toml settings to " + target + ", or remove it"],
-      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest engine this Python SDK runs on" + remedy],
+      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest release a targetVersion pin may name" + remedy],
       ["latest", "\"latest\", which is no engine release such as " + target + remedy],
     ]
     let plainScope = outputRoot + "/target-version-scope"
@@ -1876,8 +1876,8 @@ type E2e {
 
   """
   The first release that loads a module's files through its entrypoint's
-  sources member. It is this SDK's floor. Its engine image carries its CLI,
-  and git.
+  sources member, and the oldest one a targetVersion pin may name. Its engine
+  image carries its CLI, and git.
   """
   let floorVersion: String! = "1.0.0-beta.18"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }

@@ -132,7 +132,7 @@ for and announces:
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
-release, from this SDK's floor to the targeted release;
+release, from `v1.0.0-beta.18` to the targeted release;
 `dagger module init python --target-version <release>` writes it. Any other
 value stops generation before it writes anything, with a message that names
 the module and says why.
