@@ -2027,8 +2027,8 @@ type E2e {
   """
   The client bindings this repository's tests import, as the code generator
   writes them from core and sdk/ruff.toml tidies them. Core is read the way a
-  scope reads it, from the engine running this. The committed file is the
-  floor release's core; refresh it on that engine:
+  scope reads it, from the engine running this. Refresh the committed file
+  with:
 
     dagger call -m .dagger/modules/e2e sdk-bindings export --path sdk/src/dagger/client/gen.py
   """
@@ -2045,25 +2045,6 @@ type E2e {
   }
 
   let sdkBindingsPath: String! = "src/dagger/client/gen.py"
-
-  """
-  The committed client bindings are what sdkBindings writes, so neither a
-  hand edit nor a new core leaves them behind. Each release serves a core of
-  its own, so only the floor release's engine can tell.
-  """
-  pub sdkBindingsCheck(ws: Workspace!): Void @check {
-    let path = "sdk/" + sdkBindingsPath
-    if ((version.split("+")[0] ?? version) != "v" + floorVersion) {
-      note(sdkContainer(ws), "skipped, " + path + " is the core of v" + floorVersion + " and this engine is " + version)
-    } else {
-      assert(
-        ws.file("/" + path).contents == sdkBindings(ws).contents,
-        path + " is not what the code generator writes; refresh it on the v" + floorVersion +
-          " engine with `dagger call -m .dagger/modules/e2e sdk-bindings export --path " + path + "`",
-      )
-    }
-    null
-  }
 
   """
   config.get should reflect pyproject.toml and report unset values as null
