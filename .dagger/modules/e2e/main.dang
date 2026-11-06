@@ -264,8 +264,8 @@ type E2e {
 
   """
   Initializing a module at the workspace root uploads only template paths.
-  The nested CLI must upload workspace files without the ignored cache,
-  which a whole-directory destination baseline would import.
+  The client container's CLI must upload workspace files without the ignored
+  cache, which a whole-directory destination baseline would import.
   """
   rootInitIgnoresCheck(ws: Workspace!): Void @check {
     let config = "[modules.python-sdk]\nsource = \".sdk-source\"\ncheck.skip = [\"*\"]\n" +
@@ -291,7 +291,9 @@ type E2e {
     } else {
       ["dagger", "generate", "python-sdk", "-y"]
     }
-    let generated = client.withExec(["python3", "/check-uploads.py"] + command, experimentalPrivilegedNesting: true)
+    # A nested CLI receives only its own spans; one in a session of its own
+    # receives the engine's, the uploads among them.
+    let generated = client.withExec(["python3", "/check-uploads.py"] + command, daggerInDaggerNewSession: true)
       .withExec(["test", "-f", "dagger-module.toml"])
       .withExec(["test", "-f", "src/root_init/__init__.py"])
       .withExec(["test", "-f", "sdk/entrypoint/main.dang"])
@@ -740,20 +742,11 @@ type E2e {
       .cwd rescue {
         err: Error => err.message
       }
-    if (legacy.kind == ModuleSourceKind.GIT_SOURCE) {
-      # A workspace loaded from a ref makes every module in it a Git client,
-      # which the engine serves from the repository rather than the workspace,
-      # and `dagger module migrate` is no answer for one. Generation says
-      # nothing then, which is what this asserts, and the refusal is checked
-      # wherever the workspace is the one on disk, the floor job among them.
-      assertNotContains(generated, "dagger module migrate", "a Git client target was told to migrate in place: " + generated)
-    } else {
-      assertContainsAll(generated, [
-        "the client \"legacy-dep\" loads /" + legacyClientDepPath,
-        "has no dagger-module.toml",
-        "dagger module migrate /" + legacyClientDepPath,
-      ])
-    }
+    assertContainsAll(generated, [
+      "the client \"legacy-dep\" loads /" + legacyClientDepPath,
+      "has no dagger-module.toml",
+      "dagger module migrate /" + legacyClientDepPath,
+    ])
 
     let migrated = pythonSdk
       .generateScope(
