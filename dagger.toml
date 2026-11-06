@@ -1,9 +1,8 @@
 # This checkout as the workspace's python SDK, and the checks CI runs: the e2e
-# checks on engines built from pinned dagger/dagger commits. AGENTS.md has the
-# commands that run the e2e checks on the local engine instead.
+# checks, on the engine that runs them.
 
-[modules.engine-e2e]
-source = ".dagger/modules/engine-e2e"
+[modules.e2e]
+source = ".dagger/modules/e2e"
 
 [modules.python-sdk]
 source = "."

@@ -32,7 +32,7 @@ type PythonSdk {
   pub legacyRuntime: Boolean! = false
 
   """
-  The engine release to generate for, from this SDK's floor to the release
+  The engine release to generate for, from v1.0.0-beta.18 to the release
   this SDK targets; empty generates for the targeted release.
   """
   pub targetVersion: String! = ""
@@ -255,7 +255,7 @@ type PythonSdk {
   The module runs on the Dang entrypoint generated into it, or on one of the
   user's own in its files, and on nothing else: an entrypoint served from
   elsewhere, the one this repository used to share among them, is replaced
-  by the generated one, which needs an engine at this SDK's floor or later.
+  by the generated one, which needs an engine v1.0.0-beta.18 or later.
   The runtime this SDK used to write, `[runtime] source = "python"`, goes,
   and so does what only a runtime reads: engineVersion, since an entrypoint
   runs a module on the engine's own version. Any other runtime is one the
@@ -603,7 +603,7 @@ type PythonSdk {
       pins + target + ", which is later than " + engineTarget + ", the engine release this Python SDK generates for: install the SDK release built for " + target +
         ", or set targetVersion in its dagger.toml settings to " + engineTarget + ", or remove it"
     } else if (releases.precedes(target, engineFloor)) {
-      pins + target + ", which is below " + engineFloor + ", the oldest engine this Python SDK runs on" + remedy
+      pins + target + ", which is below " + engineFloor + ", the oldest release a targetVersion pin may name" + remedy
     } else {
       ""
     }
@@ -615,92 +615,6 @@ type PythonSdk {
       raise refusal
     }
     null
-  }
-
-  """
-  The targetVersion setting of a module generated directly: the one its
-  scope records in the workspace config, or else this SDK's own. The engine
-  applies a scope's settings over the SDK's only when it generates the scope
-  itself, so an SDK called as a module, as `dagger call python-sdk mod` does,
-  never receives them. Only the config file is read, not its includes. The
-  setting's name is matched without regard to case, as the engine matches a
-  setting to a constructor argument.
-  """
-  let recordedTargetVersion(ws: Workspace!, scope: String!): String! {
-    let rooted = ws.withWorkdir(".")
-    let configFile = rooted.configFile
-    if (configFile == "") {
-      targetVersion
-    } else {
-      let recorded = scopeSettings(tomlConfig(rooted.file("/" + configFile).contents), parentPath(configFile), scope)
-        .reduce([] :: [String!]!) { found, settings =>
-          found + settings.fields
-            .filter { key => key.toLower == "targetversion" }
-            .map { key => settings.field([key]).asString }
-        }
-      recorded[0] ?? targetVersion
-    }
-  }
-
-  """
-  The settings a workspace config records for this SDK's scope at a
-  workspace-root-relative path, one per scope key that resolves to it: the
-  engine merges such records and refuses settings that differ, so every
-  record that holds a setting holds the same value. The SDK entry is the one
-  named after this module or naming it as its module, as Workspace.sdk finds
-  it; a config where several are is refused, as the engine refuses it.
-  Mirrors installedSDKSource in dagger/dagger core/schema/workspace_sdk.go at v1.0.0-beta.22.
-  """
-  let scopeSettings(config: JSONValue!, configDir: String!, scope: String!): [JSONValue!]! {
-    if (config.fields.contains("sdks") == false) {
-      [] :: [JSONValue!]!
-    } else {
-      let sdks = config.field(["sdks"])
-      let names = sdks.fields.filter { name => name == currentModule.name or sdkModuleName(sdks.field([name])) == currentModule.name }
-      if (names.length > 1) {
-        raise "SDK lookup name \"" + currentModule.name + "\" is ambiguous: SDKs \"" + (names[0] ?? "") + "\" and \"" + (names[1] ?? "") + "\" both resolve it"
-      }
-      names
-        .map { name => sdks.field([name]) }
-        .filter { sdk => sdk.fields.contains("scopes") }
-        .reduce([] :: [JSONValue!]!) { found, sdk =>
-          let scopes = sdk.field(["scopes"])
-          found + scopes.fields
-            .filter { key => scopeKeyPath(configDir, key) == scope and scopes.field([key]).fields.contains("settings") }
-            .map { key => scopes.field([key, "settings"]) }
-        }
-    }
-  }
-
-  let sdkModuleName(sdk: JSONValue!): String! {
-    if (sdk.fields.contains("module")) { sdk.field(["module"]).asString } else { "" }
-  }
-
-  """
-  The workspace-root-relative path a scope key names: a key with a leading
-  "/" is rooted at the workspace root, any other is relative to the config's
-  directory, and the joined path is cleaned as Go's path.Clean cleans it,
-  with backslashes read as separators.
-  Mirrors ResolveSDKManagedPath in dagger/dagger core/workspace/config.go at v1.0.0-beta.22.
-  """
-  let scopeKeyPath(configDir: String!, key: String!): String! {
-    let slashed = key.replace("\\", "/")
-    let rooted = slashed.hasPrefix("/")
-    let joined = if (rooted) { slashed } else { configDir + "/" + slashed }
-    let segments = joined.split("/").reduce([] :: [String!]!) { kept, segment =>
-      if (segment == "" or segment == ".") {
-        kept
-      } else if (segment != "..") {
-        kept + [segment]
-      } else if (kept.length > 0 and (kept[kept.length - 1] ?? "") != "..") {
-        kept.takeFirst(kept.length - 1)
-      } else if (rooted) {
-        kept
-      } else {
-        kept + [segment]
-      }
-    }
-    if (segments.length == 0) { "." } else { segments.join("/") }
   }
 
   """
@@ -838,7 +752,9 @@ type PythonSdk {
 
   When `findUp` is true, `path` may point inside the module; the nearest
   enclosing module wins. When it is false, `path` is taken as the module root
-  as given, without asking whether this SDK manages it.
+  as given, without asking whether this SDK manages it. Either way the
+  workspace must install this SDK, whose scope settings hold the module's
+  targetVersion.
   """
   pub mod(ws: Workspace!, path: String! = ".", findUp: Boolean! = true): Mod! {
     checkEngine
@@ -847,7 +763,10 @@ type PythonSdk {
     } else {
       normalizePath(path)
     }
-    let setting = recordedTargetVersion(ws, modPath)
+    # The engine applies a scope's settings over this SDK's own only when it
+    # generates the scope itself, so a module generated directly reads them.
+    let recorded = ws.sdk(name: currentModule.name).scopeSetting(path: "/" + modPath, key: "targetVersion")
+    let setting = if (recorded == null) { targetVersion } else { recorded.asString rescue { err: Error => (recorded.contents :: String!) } }
     checkTarget(moduleSubject(ws, modPath), setting)
 
     Mod(

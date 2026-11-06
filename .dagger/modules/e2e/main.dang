@@ -1611,7 +1611,7 @@ type E2e {
     let remedy = ": set targetVersion in its dagger.toml settings to " + target + ", or remove it to generate for " + target
     let refusals = [
       ["v9.0.0", "v9.0.0, which is later than " + target + ", the engine release this Python SDK generates for: install the SDK release built for v9.0.0, or set targetVersion in its dagger.toml settings to " + target + ", or remove it"],
-      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest engine this Python SDK runs on" + remedy],
+      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest release a targetVersion pin may name" + remedy],
       ["latest", "\"latest\", which is no engine release such as " + target + remedy],
     ]
     let plainScope = outputRoot + "/target-version-scope"
@@ -1876,8 +1876,8 @@ type E2e {
 
   """
   The first release that loads a module's files through its entrypoint's
-  sources member. It is this SDK's floor. Its engine image carries its CLI,
-  and git.
+  sources member, and the oldest one a targetVersion pin may name. Its engine
+  image carries its CLI, and git.
   """
   let floorVersion: String! = "1.0.0-beta.18"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
@@ -1886,9 +1886,8 @@ type E2e {
   The image the playground takes its CLI from: the release of the engine
   running the check, so that the CLI it drives and the engine it reaches
   through nesting are one version. A CLI older than that engine waits for an
-  answer it never gets, and the floor is proven by running these checks on the
-  floor engine (engine-e2e's checks), not by pinning an older CLI in here.
-  An engine built from source names the release it came from before the `+`.
+  answer it never gets. An engine built from source names the release it came
+  from before the `+`.
   """
   let playgroundImage: String! {
     "registry.dagger.io/engine:" + (version.split("+")[0] ?? version)
@@ -1898,12 +1897,8 @@ type E2e {
 
   """
   This checkout, with the workspace config that registers it as the python
-  SDK, in a container with the floor release's CLI. The CLI is a nested
-  client of the engine running the checks, and its workspace is this tree.
-
-  So the engine is whichever runs the checks. A pass proves the floor only
-  on the floor's engine, which engine-e2e runs them on and asserts with
-  assertFloorEngine; an ordinary run takes the engine it finds.
+  SDK, in a container with the CLI of the engine running the checks. The CLI
+  is a nested client of that engine, and its workspace is this tree.
   """
   let playground(ws: Workspace!): Container! {
     playgroundOf(playgroundTree(ws))
@@ -1912,8 +1907,8 @@ type E2e {
   """
   The files of a workspace that the playground mounts, with the e2e
   workspace config as its dagger.toml. The checks may run from a workspace
-  whose config registers other modules, such as engine-e2e, which the
-  playground's CLI would then load.
+  whose config registers other modules, which the playground's CLI would then
+  load.
   """
   let playgroundTree(ws: Workspace!): Directory! {
     ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot])
@@ -1930,23 +1925,6 @@ type E2e {
       .withMountedDirectory(playgroundRoot, tree)
       .withWorkdir(playgroundRoot)
       .withExec(["git", "init", "--quiet"])
-  }
-
-  """
-  engine-e2e's precondition, not a check of its own: the engine the
-  playground's CLI talks to is the floor release, by the version it reports
-  itself. A release reports its build after a "+", which is not part of the
-  version; a dev or later build is refused. engine-e2e calls it before each
-  check it runs on the floor, so none can pass on another engine.
-  """
-  pub assertFloorEngine(ws: Workspace!): Void {
-    let answered = playground(ws).withExec(["dagger", "query"], stdin: "{ version }", experimentalPrivilegedNesting: true).stdout
-    let reported = json.withContents((answered :: Dagger.JSON!)).field(["version"]).asString
-    if ((reported.split("+")[0] ?? "") != "v" + floorVersion) {
-      raise "the checks drive the floor release's CLI, v" + floorVersion + ", against the engine running them, which is " +
-        reported + ": a pass would not prove the floor. Run the check as `dagger check engine-e2e:<check>`, which provisions its engine"
-    }
-    null
   }
 
   """
@@ -2049,8 +2027,8 @@ type E2e {
   """
   The client bindings this repository's tests import, as the code generator
   writes them from core and sdk/ruff.toml tidies them. Core is read the way a
-  scope reads it, from the engine running this. The committed file is the
-  floor release's core; refresh it on that engine:
+  scope reads it, from the engine running this. Refresh the committed file
+  with:
 
     dagger call -m .dagger/modules/e2e sdk-bindings export --path sdk/src/dagger/client/gen.py
   """
@@ -2067,25 +2045,6 @@ type E2e {
   }
 
   let sdkBindingsPath: String! = "src/dagger/client/gen.py"
-
-  """
-  The committed client bindings are what sdkBindings writes, so neither a
-  hand edit nor a new core leaves them behind. Each release serves a core of
-  its own, so only the floor release's engine can tell.
-  """
-  pub sdkBindingsCheck(ws: Workspace!): Void @check {
-    let path = "sdk/" + sdkBindingsPath
-    if ((version.split("+")[0] ?? version) != "v" + floorVersion) {
-      note(sdkContainer(ws), "skipped, " + path + " is the core of v" + floorVersion + " and this engine is " + version)
-    } else {
-      assert(
-        ws.file("/" + path).contents == sdkBindings(ws).contents,
-        path + " is not what the code generator writes; refresh it on the v" + floorVersion +
-          " engine with `dagger call -m .dagger/modules/e2e sdk-bindings export --path " + path + "`",
-      )
-    }
-    null
-  }
 
   """
   config.get should reflect pyproject.toml and report unset values as null
@@ -2143,6 +2102,24 @@ type E2e {
     null
   }
 
+
+  """
+  A numeric pin recorded under upper-case tables, which the engine reads, is
+  refused in a module generated directly as dagger generate refuses it.
+
+      dagger call -m .dagger/modules/e2e scope-setting-probe
+  """
+  pub scopeSettingProbe(ws: Workspace!): Void {
+    let path = outputRoot + "/scope-setting-probe"
+    let pinned = ws.withNewFile("/dagger.toml",
+      "[modules.python-sdk]\nsource = \".\"\n\n[SDKS.python]\nmodule = \"python-sdk\"\n\n" +
+      "[SDKS.python.SCOPES.\"" + path + "\".SETTINGS]\ntargetVersion = 18\n")
+    let said = pythonSdk.mod(pinned, path: path, findUp: false).rootPath rescue {
+      err: Error => err.message
+    }
+    assertContains(said, "the module at " + path + " pins targetVersion \"18\", which is no engine release", "the recorded pin was not read or refused: " + said)
+    null
+  }
 
   """
   Whether a cache policy reaches the exec an entrypoint starts: the answers of
