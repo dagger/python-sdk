@@ -2145,6 +2145,24 @@ type E2e {
 
 
   """
+  A numeric pin recorded under upper-case tables, which the engine reads, is
+  refused in a module generated directly as dagger generate refuses it.
+
+      dagger call -m .dagger/modules/e2e scope-setting-probe
+  """
+  pub scopeSettingProbe(ws: Workspace!): Void {
+    let path = outputRoot + "/scope-setting-probe"
+    let pinned = ws.withNewFile("/dagger.toml",
+      "[modules.python-sdk]\nsource = \".\"\n\n[SDKS.python]\nmodule = \"python-sdk\"\n\n" +
+      "[SDKS.python.SCOPES.\"" + path + "\".SETTINGS]\ntargetVersion = 18\n")
+    let said = pythonSdk.mod(pinned, path: path, findUp: false).rootPath rescue {
+      err: Error => err.message
+    }
+    assertContains(said, "the module at " + path + " pins targetVersion \"18\", which is no engine release", "the recorded pin was not read or refused: " + said)
+    null
+  }
+
+  """
   Whether a cache policy reaches the exec an entrypoint starts: the answers of
   a `cache="never"` function twice over, then of a plain one twice over. The
   first pair differs and the second does not once the engine passes callDigest
