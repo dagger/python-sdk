@@ -57,7 +57,7 @@ type Scope {
   is.
   """
   pub generated: Workspace! {
-    let existing = ws.directory(root)
+    let existing = ws.directory(root, gitignore: true)
     let members = clientMembers
     checkNames(members)
     checkClientTargets(members)
@@ -178,7 +178,7 @@ type Scope {
   generation reads the flag.
   """
   let globalClient: Boolean! {
-    let existing = ws.directory(root)
+    let existing = ws.directory(root, gitignore: true)
     let setting = if (existing.exists(scopeFileName)) {
       PyprojectHelper().globalClientSetting(existing.file(scopeFileName))
     } else {
@@ -194,7 +194,7 @@ type Scope {
   its core: a flag turned off afterwards stays off.
   """
   let upgrading: Boolean! {
-    let existing = ws.directory(root)
+    let existing = ws.directory(root, gitignore: true)
     hasLegacySdk(existing) or
       (existing.exists(legacyUserBindingsPath) and generatedKind(existing, clientsDirName + "/" + coreDirName) != "core")
   }
@@ -213,7 +213,7 @@ type Scope {
   """
   let replaced(target: Workspace!, rel: String!, files: Directory!): Workspace! {
     let abs = memberPath(rel)
-    let cleared = if (ws.directory(root).exists(rel)) { target.withoutDirectory(abs) } else { target }
+    let cleared = if (ws.directory(root, gitignore: true).exists(rel)) { target.withoutDirectory(abs) } else { target }
     cleared.withDirectory(abs, files)
   }
 
@@ -290,14 +290,13 @@ type Scope {
   """
   let relocked(existing: Directory!, target: Workspace!): Workspace! {
     if (existing.exists(lockFileName)) {
-      let scopeDir = target.directory(root).filter(exclude: [".venv", "**/.venv", "**/__pycache__"])
+      let scopeDir = target.directory(root, exclude: [".venv", "**/.venv", "**/__pycache__"], gitignore: true)
       # A path dependency of the user's own may sit outside the scope: a
       # package the modules of one repository share. uv reads it to lock, so
       # the workspace comes in behind the scope when the scope reads one,
       # which keeps the lock's inputs to the scope alone for every other.
       let tree = if (PyprojectHelper().outsidePaths(target, path).length > 0) {
-        ws.directory("/")
-          .filter(exclude: [".git", "**/.venv", "**/__pycache__", "**/node_modules"])
+        ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", "**/node_modules"], gitignore: true)
           .withDirectory(path, scopeDir)
       } else {
         directory.withDirectory(path, scopeDir)
@@ -822,7 +821,7 @@ type PyprojectHelper {
     # files may be unreadable; any other directory, one named venv among them,
     # can hold the scope, a path source or a member.
     let derived = tool
-      .withDirectory("/tree", ws.directory("/", include: ["**/pyproject.toml", lockPath], exclude: ["**/.git", "**/.venv", "**/node_modules"]))
+      .withDirectory("/tree", ws.directory("/", include: ["**/pyproject.toml", lockPath], exclude: ["**/.git", "**/.venv", "**/node_modules"], gitignore: true))
       .withExec(["pyproject", "derive-resources", "/tree", scope], expect: ReturnType.ANY)
     if (derived.exitCode != 0) {
       raise derived.stderr.trimSpace

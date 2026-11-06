@@ -312,15 +312,15 @@ type Mod {
       if (links.length > 0) {
         raise named + " goes through the symlink " + (links[0] ?? "") + " in the workspace; outside path sources through a symlink are not supported: point the path source at the directory it names"
       }
-      let selected = target.directory("/", include: [path.rooted], exclude: ["**/.git"])
-      if (files(selected).length == 0) {
+      let entry = target.directory("/", include: [path.rooted], exclude: [path.rooted + "/**"])
+      if (entry.exists(path.rooted) == false) {
         raise named + " holds no file in the workspace"
       }
-      if (selected.exists(path.rooted, expectedType: ExistsType.DIRECTORY_TYPE) == false) {
+      if (entry.exists(path.rooted, expectedType: ExistsType.DIRECTORY_TYPE) == false) {
         raise named + " is a file; outside file sources, such as a wheel, are not supported: point the path source at a directory, such as the project that builds it"
       }
       if (files(target.directory("/", include: [path.rooted], exclude: ["**/.git"], gitignore: true)).length == 0) {
-        raise named + " holds only files that .gitignore ignores"
+        raise named + " holds no file that .gitignore keeps"
       }
       null
     }

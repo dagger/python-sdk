@@ -21,11 +21,8 @@ class {{ .ModuleType }}:
                 exclude=[
                     "**/.dagger",
                     "**/.git",
-                    "**/.venv",
-                    "**/__pycache__",
-                    "**/node_modules",
-                    "**/dist",
                 ],
+                gitignore=True,
             ),
             base_image_address=base_image_address,
         )

@@ -229,6 +229,12 @@ type E2e {
     assertNotContains(defaultPyproject, "[tool.dagger]", "a new module should get no [tool.dagger] table, so no global client")
     assertContains(defaultPyproject, "\"dagger-clients-core\"", "a new module should depend on core")
     assert(generated.directory("/" + scope).exists("sdk/src/" + globalPackage) == false, "a new module got the global client")
+    assertContains(changes.layer.file(scope + "/.gitignore").contents, ".venv/", "a new module got no .gitignore")
+    let ownIgnore = outputRoot + "/scope-init-ignore"
+    let kept = pythonSdk
+      .generateScope(ws.withNewFile("/" + ownIgnore + "/.gitignore", "mine\n").withWorkdir(ownIgnore), isModule: true, name: "scope-init-ignore", clients: [])
+      .withWorkdir(".")
+    assert(kept.file("/" + ownIgnore + "/.gitignore").contents == "mine\n", "initializing a module replaced its .gitignore")
 
     let configuredScope = outputRoot + "/scope-init-configured"
     let configuredScoped = ws.withNewDirectory("/" + configuredScope, directory).withWorkdir(configuredScope)
@@ -2737,6 +2743,13 @@ type E2e {
       .withWorkdir(".")
     assert(again.changes(generated).isEmpty, "a second generation changed a module with an outside library")
 
+    # members/junk is committed, ignored and not valid TOML: the derivation and
+    # uv lock both refuse it if generation reads it.
+    let ignoredMember = resourcesSeeded(ws.withNewFile(resourcesProject, ws.file(resourcesProject).contents
+      .replace("members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"../../members/*\"]")))
+    let withIgnored = resourcesGenerated(pythonSdk, ignoredMember)
+    assertDerived(withIgnored.file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents, "an ignored file changed what generation derives")
+
     let member = ws.withNewFile(resourcesProject, ws.file(resourcesProject).contents
       .replace("members = [\"sdk\", \"clients/core\"]", "members = [\"sdk\", \"clients/core\", \"../../libs/greet\"]")
       .replace(greetSource, "greet = { workspace = true }"))
@@ -2824,7 +2837,7 @@ type E2e {
     # The engine applies .gitignore files from the host only, so the ignored
     # fixture directory is committed rather than written as a workspace edit.
     assertResourcesRefused(ws, "greet = { path = \"../../ignored\" }",
-      "builds with ../../ignored, which holds only files that .gitignore ignores")
+      "builds with ../../ignored, which holds no file that .gitignore keeps")
     # A workspace edit cannot write a symlink, so libs/alias is committed too.
     let throughLink = "goes through the symlink " + resourcesRoot + "/libs/alias in the workspace; outside path sources through a symlink are not supported"
     assertResourcesRefused(ws, "greet = { path = \"../../libs/alias/src\" }", "builds with ../../libs/alias/src, which " + throughLink)
