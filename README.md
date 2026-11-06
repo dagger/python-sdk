@@ -477,9 +477,5 @@ one to a Python scope is refused and the workspace is left unchanged.
 dagger check
 ```
 
-Each e2e check runs as an `engine-e-2-e` check of the same name, on the engine
-of the floor release built from its dagger/dagger commit;
-`engine-e-2-e/floor-coverage-check` checks that every e2e check runs this way,
-and `engine-e-2-e/below-floor-check` checks that the release below the floor
-is refused. AGENTS.md has the commands that run the e2e checks on the local
-engine.
+It runs the e2e checks on the engine that runs them. AGENTS.md has the
+commands that run them by name.
