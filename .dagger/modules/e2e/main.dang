@@ -258,8 +258,8 @@ type E2e {
 
   """
   Initializing a module at the workspace root uploads only template paths.
-  The nested CLI's trace must contain workspace uploads without the ignored
-  cache, which a whole-directory destination baseline would import.
+  The nested CLI must upload workspace files without the ignored cache,
+  which a whole-directory destination baseline would import.
   """
   rootInitIgnoresCheck(ws: Workspace!): Void @check {
     let config = "[modules.python-sdk]\nsource = \".sdk-source\"\ncheck.skip = [\"*\"]\n" +
@@ -270,13 +270,22 @@ type E2e {
       .withFile("/usr/local/bin/dagger", container.from(playgroundImage).file("/usr/local/bin/dagger"))
       .withFile("/check-uploads.py", currentModule.source.file("check_uploads.py"))
       .withDirectory("/repo/.sdk-source", playgroundTree(ws).withoutDirectory(".dagger"))
+      .withDirectory("/repo/.sdk-source/.upload-driver", currentModule.source.directory("upload-driver"))
       .withNewFile("/repo/dagger.toml", config)
       .withNewFile("/repo/.gitignore", "gitignore-upload-poison/\n")
       .withNewFile("/repo/gitignore-upload-poison/keep.txt", "keep\n")
       .withNewFile("/repo/keep.txt", "user file\n")
       .withWorkdir("/repo")
       .withExec(["git", "init", "--quiet"])
-    let generated = client.withExec(["python3", "/check-uploads.py", "dagger", "generate", "python-sdk", "-y"], experimentalPrivilegedNesting: true)
+    # Old engines upload ignored files while loading SDK providers. Measure
+    # generateScope directly there and the full CLI on beta.25 and newer.
+    # Omit --ws: the CLI default Workspace is host-backed.
+    let command = if (version.containsMatch(Regexp("^v1[.]0[.]0-beta[.](1[89]|2[0-4])([+]|$)"))) {
+      ["dagger", "-m", ".sdk-source/.upload-driver", "call", "generate", "export", "--path", "/repo"]
+    } else {
+      ["dagger", "generate", "python-sdk", "-y"]
+    }
+    let generated = client.withExec(["python3", "/check-uploads.py"] + command, experimentalPrivilegedNesting: true)
       .withExec(["test", "-f", "dagger-module.toml"])
       .withExec(["test", "-f", "src/root_init/__init__.py"])
       .withExec(["test", "-f", "sdk/entrypoint/main.dang"])

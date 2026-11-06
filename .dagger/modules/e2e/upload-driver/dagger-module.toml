@@ -1,0 +1,8 @@
+# Copied to .sdk-source/.upload-driver by the host-upload checks.
+name = "upload-driver"
+engineVersion = "v1.0.0-beta.18"
+[runtime]
+source = "dang"
+[[dependencies]]
+name = "python-sdk"
+source = ".."
