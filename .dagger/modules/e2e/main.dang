@@ -2804,11 +2804,11 @@ type E2e {
     ws.withNewFile("/" + resourcesAppPath + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
   }
 
-  let resourcesGenerated(sdk: PythonSdk!, ws: Workspace!): Workspace! {
+  let resourcesGenerated(sdk: PythonSDK!, ws: Workspace!): Workspace! {
     sdk.generateScope(ws.withWorkdir(resourcesAppPath), isModule: true, name: "resources-app", clients: []).withWorkdir(".")
   }
 
-  let resourcesAttempt(sdk: PythonSdk!, ws: Workspace!): String! {
+  let resourcesAttempt(sdk: PythonSDK!, ws: Workspace!): String! {
     resourcesGenerated(sdk, ws).file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents rescue {
       err: Error => err.message
     }
