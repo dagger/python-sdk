@@ -1521,6 +1521,14 @@ type E2e {
       assertNotContains(contents, "./schema", "generation kept the Dagger import's path: " + contents)
       assertNotContains(contents, "dang = \"2.0\"", "generation kept another Dang version: " + contents)
     }
+    let ignoredConfig = generated
+      .withNewFile("/" + root + "/.gitignore", "/sdk/entrypoint/dang.toml\n/cache/\n")
+      .withNewFile("/" + root + "/cache/keep.txt", "ignored")
+      .withNewFile(configPath, owned)
+    [dangConfigGenerate(ignoredConfig), dangConfigDirect(ignoredConfig)].each { kept =>
+      assertContainsAll(kept.file(configPath).contents, ["[imports.Lib]", "path = \"./lib\""])
+      assert(kept.file("/" + root + "/cache/keep.txt").contents == "ignored", "generation changed an unrelated ignored file")
+    }
     let endpoint = generated.withNewFile(configPath, "[imports.Dagger]\nendpoint = \"http://example\"\n")
     let scopeRefused = dangConfigGenerate(endpoint).cwd rescue {
       err: Error => err.message

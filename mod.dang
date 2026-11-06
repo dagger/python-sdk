@@ -116,7 +116,13 @@ type Mod {
       let entrypointPath = vendorDirName + "/" + entrypointDirName
       # The entrypoint's dang.toml may hold the user's settings, so it outlives a
       # move to another runner.
-      let scoped = scope.generated.withDirectory("/", ws.directory("/", include: [modulePath(entrypointPath + "/dang.toml")]))
+      let configPath = modulePath(entrypointPath + "/dang.toml")
+      let existingConfig = ws.directory("/", include: [configPath])
+      let scoped = if (existingConfig.exists(configPath)) {
+        scope.generated.withFile("/" + configPath, existingConfig.file(configPath))
+      } else {
+        scope.generated
+      }
       if (entrypointMode == "generated") {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)

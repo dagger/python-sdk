@@ -269,7 +269,7 @@ type Scope {
   """
   let checkClientTargets(members: [ClientMember!]!): Void {
     let objections = members.reduce([] :: [String!]!) { found, member =>
-      if (member.local and ws.directory(member.ref).exists("dagger-module.toml") == false) {
+      if (member.local and ws.directory(member.ref, include: ["dagger-module.toml"]).exists("dagger-module.toml") == false) {
         found + ["the client \"" + member.name + "\" loads " + member.ref +
           ", which has no dagger-module.toml: run dagger module migrate " + member.ref + ", then generate again"]
       } else {
