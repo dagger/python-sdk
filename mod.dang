@@ -320,9 +320,7 @@ type Mod {
         raise named + " is a file; outside file sources, such as a wheel, are not supported: point the path source at a directory, such as the project that builds it"
       }
       if (files(target.directory("/", include: [path.rooted], exclude: ["**/.git"], gitignore: true)).length == 0) {
-        let names = target.glob(path.rooted + "/**").filter { name => name.hasSuffix("/") == false }
-        let reason = if (names.length == 0) { " holds no file in the workspace" } else { " holds only files that .gitignore ignores" }
-        raise named + reason
+        raise named + " holds no file that .gitignore keeps"
       }
       null
     }

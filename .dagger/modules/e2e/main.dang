@@ -2837,7 +2837,7 @@ type E2e {
     # The engine applies .gitignore files from the host only, so the ignored
     # fixture directory is committed rather than written as a workspace edit.
     assertResourcesRefused(ws, "greet = { path = \"../../ignored\" }",
-      "builds with ../../ignored, which holds only files that .gitignore ignores")
+      "builds with ../../ignored, which holds no file that .gitignore keeps")
     # A workspace edit cannot write a symlink, so libs/alias is committed too.
     let throughLink = "goes through the symlink " + resourcesRoot + "/libs/alias in the workspace; outside path sources through a symlink are not supported"
     assertResourcesRefused(ws, "greet = { path = \"../../libs/alias/src\" }", "builds with ../../libs/alias/src, which " + throughLink)

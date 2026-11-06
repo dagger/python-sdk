@@ -57,7 +57,7 @@ type Scope {
   is.
   """
   pub generated: Workspace! {
-    let existing = ws.directory(root)
+    let existing = ws.directory(root, gitignore: true)
     let members = clientMembers
     checkNames(members)
     checkClientTargets(members)
@@ -178,7 +178,7 @@ type Scope {
   generation reads the flag.
   """
   let globalClient: Boolean! {
-    let existing = ws.directory(root)
+    let existing = ws.directory(root, gitignore: true)
     let setting = if (existing.exists(scopeFileName)) {
       PyprojectHelper().globalClientSetting(existing.file(scopeFileName))
     } else {
@@ -194,7 +194,7 @@ type Scope {
   its core: a flag turned off afterwards stays off.
   """
   let upgrading: Boolean! {
-    let existing = ws.directory(root)
+    let existing = ws.directory(root, gitignore: true)
     hasLegacySdk(existing) or
       (existing.exists(legacyUserBindingsPath) and generatedKind(existing, clientsDirName + "/" + coreDirName) != "core")
   }
@@ -213,7 +213,7 @@ type Scope {
   """
   let replaced(target: Workspace!, rel: String!, files: Directory!): Workspace! {
     let abs = memberPath(rel)
-    let cleared = if (ws.directory(root).exists(rel)) { target.withoutDirectory(abs) } else { target }
+    let cleared = if (ws.directory(root, gitignore: true).exists(rel)) { target.withoutDirectory(abs) } else { target }
     cleared.withDirectory(abs, files)
   }
 
