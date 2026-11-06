@@ -15,6 +15,20 @@ pytestmark = [
     pytest.mark.anyio,
 ]
 
+# What the engine names the module's declarations.
+POND_NAMES = {
+    "typeNames": {"Duck": "PondDuck", "Goose": "PondGoose"},
+    "fieldNames": {
+        "speak": "speak",
+        "quack": "quack",
+        "get_self": "getSelf",
+        "get_mob": "getMob",
+        "with_origin": "withOrigin",
+        "from": "from",
+        "destination": "destination",
+    },
+}
+
 
 @pytest.fixture
 def mod() -> Module:
@@ -36,6 +50,13 @@ def mod() -> Module:
         @m.function
         def get_mob(self) -> list[Self]: ...
 
+        @m.function
+        def with_origin(
+            self,
+            from_: str,
+            to: typing.Annotated[str, dagger.Name("destination")],
+        ) -> Self: ...
+
         def get_private(self) -> bool: ...
 
     @m.object_type
@@ -46,7 +67,9 @@ def mod() -> Module:
 
 
 @pytest.fixture
-async def duck(mod: Module):
+async def duck(mod: Module, engine):
+    engine.names = POND_NAMES
+    await mod.load_names()
     r, t = await mod.get_structured_result(
         "Pond",
         {"duck": "123456"},
@@ -77,3 +100,10 @@ async def test_generated_implementation(duck):
 async def test_interface_object_chain(duck):
     r, _ = duck
     assert type(r.get_self()) is type(r)
+
+
+async def test_interface_call_arguments(duck):
+    """Arguments are bound by Python name and sent by their schema name."""
+    r, _ = duck
+    query = r.with_origin(from_="a", to="b")._ctx.build()
+    assert 'withOrigin(from: "a", destination: "b")' in query

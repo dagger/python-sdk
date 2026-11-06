@@ -49,13 +49,10 @@ from graphql import (
     get_named_type,
     is_leaf_type,
 )
-from graphql.pyutils import camel_to_snake, snake_to_camel
 from graphql.type.schema import TypeMap
 
+from codegen.naming import snake
 from codegen.partition import own_fields
-
-ACRONYM_RE = re.compile(r"([A-Z\d]+)(?=[A-Z\d]|$)")
-"""Pattern for grouping initialisms."""
 
 DEPRECATION_RE = re.compile(r"`([a-zA-Z\d_]+)`")
 """Pattern for extracting replaced references in deprecations."""
@@ -501,10 +498,13 @@ def rewrite_notice(reason: str | None, prefix='"', suffix='"') -> str | None:
 
 
 def format_name(s: str) -> str:
-    """Format a GraphQL field or argument name into Python."""
-    # rewrite acronyms, initialisms and abbreviations
-    s = ACRONYM_RE.sub(lambda m: m.group(0).title(), s)
-    s = camel_to_snake(s)
+    """Format a GraphQL field or argument name into Python.
+
+    The engine spells it in snake_case (see codegen.naming); a name that
+    would shadow a keyword or a builtin the bindings use gets a trailing
+    underscore.
+    """
+    s = snake(s)
     if iskeyword(s) or s in _reserved_builtins:
         s += "_"
     return s
@@ -1119,13 +1119,10 @@ class Input(ObjectHandler[GraphQLInputObjectType]):
             )
         )
 
-        # The query builder derives GraphQL names from the Python ones; record
-        # only those it can't.
-        names = {
-            f.name: f.graphql_name
-            for f in fields
-            if snake_to_camel(f.name, upper=False) != f.graphql_name
-        }
+        # The query builder sends a field by the GraphQL name recorded here:
+        # the Python name is the engine's spelling, which nothing converts
+        # back.
+        names = {f.name: f.graphql_name for f in fields}
         if names:
             yield ""
             yield f"_graphql_names = {tuple(names.items())!r}"

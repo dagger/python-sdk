@@ -161,7 +161,6 @@ type PythonSdk {
   entrypoint served from elsewhere is replaced by the generated one.
   """
   pub generateScope(ws: Workspace!, isModule: Boolean!, name: String!, clients: [ModuleSource!]!): Workspace! {
-    checkEngine
     let scope = normalizePath(ws.cwd)
     checkTarget(if (isModule) { "module \"" + name + "\"" } else { "scope " + scope }, targetVersion)
     # Resolve local client paths from the workspace root.
@@ -173,7 +172,7 @@ type PythonSdk {
       let initialized = if (hadConfig) {
         rooted
       } else {
-        let files = moduleTemplate(name, template, pythonVersion, useUv, baseImage)
+        let files = moduleTemplate(name, mainTypeName(rooted, scope, name), template, pythonVersion, useUv, baseImage)
         # A module directory's own .gitignore is the user's.
         let kept = if (scopeHasFile(ws, scope, ".gitignore")) { files.withoutFile(".gitignore") } else { files }
         rooted.withDirectory("/" + scope, kept)
@@ -288,7 +287,7 @@ type PythonSdk {
         # generator reads core in; what only a runtime can honour stays as
         # written. Inline at each site: sdk-helpers' type names change with its
         # own declared engineVersion (SdkHelpers… vs SDKHelpers… from the
-        # v1.0.0-beta.22 naming rules), so this module must not spell them.
+        # v1.0.0-beta.26 naming rules), so this module must not spell them.
         sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest))
           .withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else if (ours) {
@@ -521,10 +520,10 @@ type PythonSdk {
   let staticEntrypointSource: String! = "./" + staticEntrypointPath
 
   """
-  The first engine release this SDK runs on: the first that loads a
-  module's files through its entrypoint's sources member.
+  The oldest generated API target supported by this SDK. Independent of the
+  newer engine required to run its naming queries.
   """
-  let engineFloor: String! = "v1.0.0-beta.18"
+  let targetFloor: String! = "v1.0.0-beta.18"
 
   """
   The engine release this SDK release targets: the one it generates for,
@@ -532,53 +531,6 @@ type PythonSdk {
   release's view, and the generated entrypoint and the library announce it.
   """
   let engineTarget: String! = "v1.0.0-beta.24"
-
-  """
-  The last release of this SDK that runs on an engine below engineFloor.
-  """
-  let lastReleaseBelowFloor: String! = "v1.1.1"
-
-  """
-  The first engine release lastReleaseBelowFloor runs on, as its manifest
-  declares.
-  """
-  let lastReleaseEngineFloor: String! = "v1.0.0-beta.14"
-
-  """
-  Why this SDK refuses an engine of the given version, or the empty string
-  when it runs on it. Only a release older than the floor is refused: a
-  version this cannot read passes, so an unexpected format never blocks a
-  user, and a build of dagger's main passes as the release it reports,
-  `v<release>+<commit>`. The engine's own gate cannot do this: it treats
-  every prerelease of v1.0.0 as v1.0.0. The refusal offers the last release
-  below the floor only to an engine that release runs on.
-  """
-  pub engineRefusal(engineVersion: String!): String! {
-    if (Releases().precedes(engineVersion, engineFloor) == false) {
-      ""
-    } else {
-      let needs = "this Python SDK needs Dagger engine " + engineFloor + " or later, and this engine is " +
-        engineVersion + ". "
-      if (Releases().precedes(engineVersion, lastReleaseEngineFloor)) {
-        needs + "Upgrade the engine."
-      } else {
-        needs + "Upgrade the engine, or pin the last release of this SDK that runs on it: " +
-          "dagger module install github.com/dagger/python-sdk@" + lastReleaseBelowFloor
-      }
-    }
-  }
-
-  """
-  Refuse an engine older than the floor before generation reads or writes
-  anything, so the user reads why instead of an unknown field later.
-  """
-  let checkEngine: Void {
-    let refusal = engineRefusal(version)
-    if (refusal != "") {
-      raise refusal
-    }
-    null
-  }
 
   """
   The engine release a scope generates for: the targetVersion setting as a
@@ -605,8 +557,8 @@ type PythonSdk {
     } else if (releases.precedes(engineTarget, target)) {
       pins + target + ", which is later than " + engineTarget + ", the engine release this Python SDK generates for: install the SDK release built for " + target +
         ", or set targetVersion in its dagger.toml settings to " + engineTarget + ", or remove it"
-    } else if (releases.precedes(target, engineFloor)) {
-      pins + target + ", which is below " + engineFloor + ", the oldest engine this Python SDK runs on" + remedy
+    } else if (releases.precedes(target, targetFloor)) {
+      pins + target + ", which is below " + targetFloor + ", the oldest API target this Python SDK generates for" + remedy
     } else {
       ""
     }
@@ -844,7 +796,6 @@ type PythonSdk {
   as given, without asking whether this SDK manages it.
   """
   pub mod(ws: Workspace!, path: String! = ".", findUp: Boolean! = true): Mod! {
-    checkEngine
     let modPath = if (findUp) {
       managedModuleAtOrAbove(ws, path)
     } else {
@@ -881,11 +832,35 @@ type PythonSdk {
   }
 
   """
+  The main class name of a new module: the module's type name as the engine
+  will name the module, asked of the module as generation writes it, before
+  it has any code. The engine names a module by its version's rules, which
+  spell an acronym differently on either side of the identifier casing cut.
+  """
+  let mainTypeName(ws: Workspace!, scope: String!, name: String!): String! {
+    let staged = Mod(
+      rootPath: scope,
+      ws: generateScopeManifest(ws, scope, name),
+      entrypointMode: entrypointModeOf(ws, scope),
+      migrating: false,
+      engineVersion: "",
+      targetVersion: targetVersionOf(targetVersion),
+      clients: [] :: [ModuleSource!]!,
+    )
+    let names = staged.naming.typeNames(names: [name])
+    if (names.length != 1) {
+      raise "the engine named " + toString(names.length) + " types for module \"" + name + "\""
+    } else {
+      names[0] ?? ""
+    }
+  }
+
+  """
   The files of a new module: the named template rendered for the module name,
   with the pyproject.toml settings applied. An empty template name selects the
   default.
   """
-  let moduleTemplate(name: String!, template: String!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
+  let moduleTemplate(name: String!, typeName: String!, template: String!, pythonVersion: String!, useUv: Boolean!, baseImage: String!): Directory! {
     let selectedTemplate = if (template == "") { "default" } else { template }
 
     let known = currentModule.source.directory("templates").entries.map { entry => entry.trimSuffix("/") }
@@ -893,14 +868,15 @@ type PythonSdk {
     if (known.filter { entry => entry == selectedTemplate }.length == 0) {
       raise "unknown init template: " + template
     } else {
-      configuredTemplate(renderedTemplate(name, selectedTemplate), pythonVersion, useUv, baseImage)
+      configuredTemplate(renderedTemplate(name, typeName, selectedTemplate), pythonVersion, useUv, baseImage)
     }
   }
 
   """
-  Render a Python template with the requested module name.
+  Render a Python template with the requested module name, its main class
+  named typeName.
   """
-  let renderedTemplate(name: String!, templateName: String!): Directory! {
+  let renderedTemplate(name: String!, typeName: String!, templateName: String!): Directory! {
     container
       .from("golang:1.25-alpine")
       .withoutEntrypoint
@@ -910,7 +886,7 @@ type PythonSdk {
       .withDirectory("/template", currentModule.source.directory("templates/" + templateName))
       .withWorkdir("/helper")
       .withExec(["go", "build", "-o", "/usr/local/bin/render-template", "."])
-      .withExec(["render-template", name, "/template", "/rendered"])
+      .withExec(["render-template", name, typeName, "/template", "/rendered"])
       .directory("/rendered")
   }
 

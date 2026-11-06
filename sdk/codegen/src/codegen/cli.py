@@ -5,7 +5,7 @@ import sys
 
 import graphql
 
-from codegen import ast, generator, packages, partition
+from codegen import ast, generator, naming, packages, partition
 
 
 def main(argv: list[str] | None = None):
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None):
     # TODO: Add argument for module init.
     try:
         args.run(args)
-    except partition.ClientError as e:
+    except (partition.ClientError, naming.NamingError) as e:
         parser.error(str(e))
 
 
@@ -137,9 +137,15 @@ def read_schema(introspection: pathlib.Path) -> tuple[graphql.GraphQLSchema, str
     return schema, result.get("__schemaVersion", "")
 
 
+def styled(schema: graphql.GraphQLSchema, version: str):
+    """Style the schema's identifiers as the engine names them at its version."""
+    return naming.styled_by(naming.engine_names([schema], version))
+
+
 def codegen(introspection: pathlib.Path, output: pathlib.Path | None):
     schema, schema_version = read_schema(introspection)
-    code = generator.generate(schema, schema_version=schema_version)
+    with styled(schema, schema_version):
+        code = generator.generate(schema, schema_version=schema_version)
 
     if output:
         output.write_text(code)
@@ -150,21 +156,23 @@ def codegen(introspection: pathlib.Path, output: pathlib.Path | None):
 
 def core(introspection: pathlib.Path, output: pathlib.Path):
     schema, schema_version = read_schema(introspection)
-    files = packages.core_package(schema, schema_version)
+    with styled(schema, schema_version):
+        files = packages.core_package(schema, schema_version)
     root = packages.write_package(output, partition.CORE, files)
     sys.stdout.write(f"Core generated successfully to {root}\n")
 
 
 def client(args: argparse.Namespace):
     schema, schema_version = read_schema(args.introspection)
-    package, files = packages.client_package(
-        schema,
-        args.name,
-        args.ref,
-        args.pin,
-        core_digest=args.core_digest,
-        schema_version=schema_version,
-    )
+    with styled(schema, schema_version):
+        package, files = packages.client_package(
+            schema,
+            args.name,
+            args.ref,
+            args.pin,
+            core_digest=args.core_digest,
+            schema_version=schema_version,
+        )
     root = packages.write_package(args.output, package, files)
     sys.stdout.write(f"Client generated successfully to {root}\n")
 
@@ -176,6 +184,7 @@ def global_client(introspections: list[pathlib.Path], output: pathlib.Path):
     if len(set(versions)) > 1:
         msg = f"the schemas have different versions: {', '.join(sorted(set(versions)))}"
         raise partition.ClientError(msg)
-    files = packages.global_package(schemas, versions[0])
+    with naming.styled_by(naming.engine_names(schemas, versions[0])):
+        files = packages.global_package(schemas, versions[0])
     root = packages.write_global(output, files)
     sys.stdout.write(f"Global client generated successfully to {root}\n")

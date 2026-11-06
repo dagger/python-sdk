@@ -49,26 +49,26 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a path in the module>` | a Dang entrypoint of the user's own, kept as written |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.18` or later, the first release that
-loads a module's files through its entrypoint's `sources` member. An
-entrypoint runs a module on the engine's own version, so an entrypoint
-manifest keeps no `engineVersion`.
+This SDK needs an engine `v1.0.0-beta.26` or later, the first release that
+names identifiers by its naming rules and answers for them: generation asks
+it how to spell the Python names of the schema's identifiers, and a module
+asks it what it named the module's own declarations. An entrypoint manifest
+keeps no `engineVersion` (see "The Dagger version of a generated entrypoint").
+The final config and manifest are staged before naming or main-object
+selection, so those answers describe the module generation actually writes.
+The engine normalizes a pre-beta.22 target to its shared beta.21 naming view.
 
-On an older engine, `dagger module init` and `dagger generate` stop before
-they write anything, with a message that names the engine's version. A
-generated entrypoint fails to load on an older engine with `field "types":
-missing argument "workspace" required by interface`. To stay on an engine from
-v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
-there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
-`dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint of that
-release. An engine older than v1.0.0-beta.14 runs neither release, and needs
-an upgrade.
+The SDK's modules declare `engineVersion` v1.0.0-beta.26. Engines compare
+only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.25
+still loads them, and fails wherever the SDK uses what it lacks. To stay on
+such an engine, pin a release from before this floor, such as `v1.6.0`:
+`dagger module install github.com/dagger/python-sdk@v1.6.0`, and
+`dagger.io/sdk/python/entrypoint@v1.6.0` for the shared entrypoint.
 
 An entrypoint served from elsewhere, such as the shared one this repository
 used to serve as `dagger.io/sdk/python/entrypoint@v1`, a pin of it or a fork,
 is replaced by the generated entrypoint at the module's next
-`dagger generate`. A module moved this way needs an engine `v1.0.0-beta.18` or
-later, which generation already requires.
+`dagger generate`.
 
 Generating a module that has a manifest already keeps the kind it names:
 
@@ -129,7 +129,10 @@ for and announces:
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
-release, from this SDK's floor to the targeted release;
+release, from the oldest supported API target, beta.18, to the targeted release.
+This target range is independent of the beta.26 engine required for the
+SDK's naming queries; targeting an older view does not make the naming SDK
+run on that older engine.
 `dagger module init python --target-version <release>` writes it. Any other
 value stops generation before it writes anything, with a message that names
 the module and says why.
@@ -250,12 +253,15 @@ settings are read again if the module moves back.
 
 The two declarations reach an engine in different ways:
 
-- `dang.toml`: no release so far, v1.0.0-beta.25 included, takes the module's
-  Dagger version from the file.
-  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902), not
-  merged, would. It also refuses an entrypoint whose imports declare different
-  Dagger versions, and proposes a fixed default release for an entrypoint whose
-  `dang.toml` declares no Dagger version.
+- `dang.toml`: released engines through v1.0.0-beta.25 do not select the
+  module's Dagger version from the file, though they may read its language
+  settings. The v1.0.0-beta.26 engine this SDK needs, not released yet and
+  built from dagger/dagger `7e9eaacc` until it is, carries
+  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902): it takes
+  the module's Dagger version from the file, and refuses a file whose imports
+  declare different Dagger versions, so generation stops with that error. An
+  entrypoint whose `dang.toml` declares no Dagger version is served
+  v1.0.0-beta.25, the last release before the identifier-casing cut.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.
@@ -267,12 +273,13 @@ than v2.2.0 refuses the file's import.
 
 `entrypoint/` is the `ModuleEntrypoint`, written in Dang, that this repository
 used to serve to every Python module as `dagger.io/sdk/python/entrypoint@v1`,
-before each module got one generated into it. It is frozen: generation no
-longer writes a manifest that names it, a module whose manifest names it, a
-pin of it or a fork moves to the generated entrypoint at its next
-`dagger generate`, and its copies of `runtime/build.dang` and
-`runtime/workspace_reader.py` no longer follow the runtime's. It stays in the
-repository, with the tags that serve it, so a module pinned to it in git
+before each module got one generated into it. Generation no longer writes a
+manifest that names it; a module whose manifest names it, a pin of it or a
+fork moves to the generated entrypoint at its next `dagger generate`.
+The naming port still maintains its copies of `runtime/build.dang` and
+`runtime/workspace_reader.py`, with a check keeping them synchronized, for
+modules explicitly loading that entrypoint. It stays in the repository,
+with the tags that serve it, so a module pinned to it in git
 still loads: `@v1` selects the greatest `entrypoint/v1.*` tag, then the
 greatest plain `v1.*` tag. The Python process it starts belongs to no module
 on the engine's side, as with the static entrypoint.
@@ -473,7 +480,6 @@ dagger check
 
 Each e2e check runs as an `engine-e-2-e` check of the same name, on the engine
 of the floor release built from its dagger/dagger commit;
-`engine-e-2-e/floor-coverage-check` checks that every e2e check runs this way,
-and `engine-e-2-e/below-floor-check` checks that the release below the floor
-is refused. AGENTS.md has the commands that run the e2e checks on the local
+`engine-e-2-e/floor-coverage-check` checks that every e2e check runs this way.
+AGENTS.md has the commands that run the e2e checks on the local
 engine.

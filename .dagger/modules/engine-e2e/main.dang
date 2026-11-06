@@ -1,28 +1,19 @@
 """
 The e2e checks of the Python SDK on engines built from pinned dagger/dagger
 commits, so a run proves the floor whatever engine runs it. Each e2e check
-runs on the floor as a check of its own, under its own name, and the checks
-of the targeted release also run on that release. Keep each commit aligned
-with its engine-dev dependency in dagger-module.toml.
+runs on the floor as a check of its own, under its own name. Target behavior
+is checked in older API views on that engine: the naming SDK cannot run on
+the older target engine itself. Keep the commit aligned with its dependency.
 """
 type EngineE2e {
   """
-  Commit of v1.0.0-beta.18, this SDK's floor.
+  Commit of v1.0.0-beta.26, this SDK's floor. Until that release is out, the
+  dagger/dagger main commit that merged the naming stack the floor needs
+  (through dagger/dagger#14996).
   """
-  let floorCommit: String! = "249edbd646e63c5181053c8af72623ed9bdf030d"
+  let floorCommit: String! = "7e9eaacc376e5c3bed3efdca9e1ba750bc8d9233"
 
-  """
-  Commit of v1.0.0-beta.17, the last release below the floor.
-  """
-  let belowFloorCommit: String! = "0da36c8da9cb6a682c7d27eca9bd2c125de5ed09"
-
-  """
-  Commit of v1.0.0-beta.24, the release this SDK targets. Move it, and
-  targetRelease, with engineTarget in python-sdk.dang.
-  """
-  let targetCommit: String! = "b32e84b60b99b68e836408d4318f0818982ea86d"
-
-  let targetRelease: String! = "v1.0.0-beta.24"
+  let floorRelease: String! = "v1.0.0-beta.26"
 
   let assert(condition: Boolean!, message: String!): Void {
     if (condition == false) {
@@ -69,8 +60,14 @@ type EngineE2e {
   release. Every check below starts from this one client.
   """
   let floorClient(ws: Workspace!): Container! {
-    sdkClient(ws, engineDev(ws: daggerSource(floorCommit)).installClient(client: clientBase))
-      .withExec(withoutOuterSession(["call", "-m", ".dagger/modules/e2e", "assert-floor-engine"]))
+    let client = sdkClient(ws, engineDev(ws: daggerSource(floorCommit)).installClient(client: clientBase))
+    # Verify the installed source CLI's actual connection, not a CLI pulled
+    # from the unpublished release image. Only build metadata is ignored.
+    let answered = client.withExec(withoutOuterSession(["query"]), stdin: "{ version }").stdout
+    let reported = json.withContents((answered :: Dagger.JSON!)).field(["version"]).asString
+    assert((reported.split("+")[0] ?? reported) == floorRelease,
+      "the source engine reports " + reported + ", not " + floorRelease)
+    client
   }
 
   """
@@ -80,32 +77,6 @@ type EngineE2e {
   """
   let onFloor(ws: Workspace!, check: String!): Void {
     floorClient(ws)
-      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", check]))
-      .sync
-    null
-  }
-
-  """
-  A client of the targeted release's engine that has confirmed it reaches
-  that release: on another engine, the checks below would skip what only that
-  release serves and pass.
-  """
-  let targetClient(ws: Workspace!): Container! {
-    let client = sdkClient(ws, targetEngineDev(ws: daggerSource(targetCommit)).installClient(client: clientBase))
-    let reported = client.withExec(withoutOuterSession(["query"]), stdin: "{ version }").stdout
-    let quoted = "\"" + targetRelease
-    assert(reported.contains(quoted + "\"") or reported.contains(quoted + "+"), "the target engine reports " + reported.trimSpace + ", not " + targetRelease)
-    client
-  }
-
-  """
-  One e2e check on the targeted release's engine, which serves a module or a
-  session the view of the release it announces. The floor's engine serves its
-  own view whatever they announce, so what the release's view adds is only
-  asserted here.
-  """
-  let onTarget(ws: Workspace!, check: String!): Void {
-    targetClient(ws)
       .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", check]))
       .sync
     null
@@ -150,6 +121,8 @@ type EngineE2e {
   pub findClientRootCheck(ws: Workspace!): Void @check { onFloor(ws, "find-client-root-check") }
 
   pub generateScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-init-check") }
+
+  pub initNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "init-naming-check") }
 
   pub generateScopeExistingCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-existing-check") }
 
@@ -207,7 +180,7 @@ type EngineE2e {
 
   pub entrypointClientCallCheck(ws: Workspace!): Void @check { onFloor(ws, "entrypoint-client-call-check") }
 
-  pub runtimeNamingCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-naming-check") }
+  pub sharedEntrypointBuildCheck(ws: Workspace!): Void @check { onFloor(ws, "shared-entrypoint-build-check") }
 
   pub sdkTestCheck(ws: Workspace!): Void @check { onFloor(ws, "sdk-test-check") }
 
@@ -220,8 +193,6 @@ type EngineE2e {
   pub configCheck(ws: Workspace!): Void @check { onFloor(ws, "config-check") }
 
   pub staticScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "static-scope-init-check") }
-
-  pub engineFloorRefusalCheck(ws: Workspace!): Void @check { onFloor(ws, "engine-floor-refusal-check") }
 
   pub collectionsCheck(ws: Workspace!): Void @check { onFloor(ws, "collections-check") }
 
@@ -259,20 +230,5 @@ type EngineE2e {
 
   pub gitWorkspaceGenerateCheck(ws: Workspace!): Void @check { onFloor(ws, "git-workspace-generate-check") }
 
-  pub targetVersionOnTargetCheck(ws: Workspace!): Void @check { onTarget(ws, "target-version-check") }
-
-  pub targetVersionCliOnTargetCheck(ws: Workspace!): Void @check { onTarget(ws, "target-version-cli-check") }
-
-  """
-  The release below the floor is refused: on its engine, generation names the
-  floor and the release to pin instead.
-  """
-  pub belowFloorCheck(ws: Workspace!): Void @check {
-    let checked = sdkClient(ws, belowFloorEngineDev(ws: daggerSource(belowFloorCommit)).installClient(client: clientBase))
-      .withExec(withoutOuterSession(["check", "-m", ".dagger/modules/e2e", "engine-floor-refusal-check"]))
-    # A pattern that matches no check passes too.
-    let said = checked.stdout + checked.stderr
-    assert(said.contains("1 passed"), "engine-floor-refusal-check did not run on the engine below the floor:\n" + said)
-    null
-  }
+  pub namingCheck(ws: Workspace!): Void @check { onFloor(ws, "naming-check") }
 }

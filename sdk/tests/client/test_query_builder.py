@@ -3,8 +3,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from dagger._exceptions import ClientError
-from dagger.client._core import Arg, Context, EnumName, snake_to_camel, to_literal
+from dagger._exceptions import ClientError, InvalidQueryError
+from dagger.client._core import Arg, Context, EnumName, to_literal
 from dagger.client.base import Enum, Input, Scalar, Type
 
 
@@ -22,7 +22,7 @@ class Block(Input):
     call_id: str | None = None
     ssh_url: str | None = None
 
-    _graphql_names = (("ssh_url", "sshURL"),)
+    _graphql_names = (("kind", "kind"), ("call_id", "callId"), ("ssh_url", "sshURL"))
 
 
 @dataclass(slots=True)
@@ -30,6 +30,8 @@ class Message(Input):
     kind: str
     text: str | None = ""
     errored: bool | None = False
+
+    _graphql_names = (("kind", "kind"), ("text", "text"), ("errored", "errored"))
 
 
 class Container(Type):
@@ -187,17 +189,13 @@ def test_get_value_rejects_null_for_required():
     assert ctx.get_value({"version": None}, str | None) is None
 
 
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ("call_id", "callId"),
-        ("ssh_url", "sshUrl"),
-        ("name", "name"),
-    ],
-)
-def test_snake_to_camel(value, expected):
-    assert snake_to_camel(value, upper=False) == expected
-    assert snake_to_camel(value) == expected[:1].upper() + expected[1:]
+def test_input_field_without_a_graphql_name():
+    @dataclass(slots=True)
+    class Bare(Input):
+        kind: str
+
+    with pytest.raises(InvalidQueryError, match="no GraphQL name for 'kind'"):
+        to_literal(Bare(kind="x"))
 
 
 def test_enum_literal_before_str():
