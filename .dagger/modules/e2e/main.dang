@@ -229,6 +229,12 @@ type E2e {
     assertNotContains(defaultPyproject, "[tool.dagger]", "a new module should get no [tool.dagger] table, so no global client")
     assertContains(defaultPyproject, "\"dagger-clients-core\"", "a new module should depend on core")
     assert(generated.directory("/" + scope).exists("sdk/src/" + globalPackage) == false, "a new module got the global client")
+    assertContains(changes.layer.file(scope + "/.gitignore").contents, ".venv/", "a new module got no .gitignore")
+    let ownIgnore = outputRoot + "/scope-init-ignore"
+    let kept = pythonSdk
+      .generateScope(ws.withNewFile("/" + ownIgnore + "/.gitignore", "mine\n").withWorkdir(ownIgnore), isModule: true, name: "scope-init-ignore", clients: [])
+      .withWorkdir(".")
+    assert(kept.file("/" + ownIgnore + "/.gitignore").contents == "mine\n", "initializing a module replaced its .gitignore")
 
     let configuredScope = outputRoot + "/scope-init-configured"
     let configuredScoped = ws.withNewDirectory("/" + configuredScope, directory).withWorkdir(configuredScope)
