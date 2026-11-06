@@ -49,13 +49,16 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a path in the module>` | a Dang entrypoint of the user's own, kept as written |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.18` or later, the first release that
-loads a module's files through its entrypoint's `sources` member. An
-entrypoint runs a module on the engine's own version, so an entrypoint
-manifest keeps no `engineVersion`.
+This SDK needs an engine `v1.0.0-beta.26` or later: it reads a scope's
+settings through `WorkspaceSDK.scopeSetting`, which
+[dagger/dagger#15084](https://github.com/dagger/dagger/pull/15084) adds in that
+release. The entrypoint it generates into a module needs an engine
+`v1.0.0-beta.18` or later, the first release that loads a module's files
+through its entrypoint's `sources` member. An entrypoint runs a module on the
+engine's own version, so an entrypoint manifest keeps no `engineVersion`.
 
-On an older engine, `dagger module init` and `dagger generate` stop before
-they write anything, with a message that names the engine's version. A
+On an engine without that field, `dagger module init` and `dagger generate`
+fail while they load the SDK, before they write anything. A
 generated entrypoint fails to load on an older engine with `field "types":
 missing argument "workspace" required by interface`. To stay on an engine from
 v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
@@ -68,7 +71,7 @@ An entrypoint served from elsewhere, such as the shared one this repository
 used to serve as `dagger.io/sdk/python/entrypoint@v1`, a pin of it or a fork,
 is replaced by the generated entrypoint at the module's next
 `dagger generate`. A module moved this way needs an engine `v1.0.0-beta.18` or
-later, which generation already requires.
+later to run, and generating it needs `v1.0.0-beta.26` or later.
 
 Generating a module that has a manifest already keeps the kind it names:
 
@@ -452,6 +455,9 @@ recorded, pass the module root as `--path` and add `--find-up=false`:
 ```sh
 dagger call python-sdk mod --path my-module --find-up=false generate
 ```
+
+Either way, `mod` needs the SDK registered under `[sdks]` in `dagger.toml`,
+and a `targetVersion` the module's scope records wins over `--target-version`.
 
 ## Module clients
 
