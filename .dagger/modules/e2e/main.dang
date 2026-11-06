@@ -379,6 +379,22 @@ type E2e {
   }
 
   """
+  A local client whose manifest is a symlink generates without importing the
+  manifest's target into the metadata probe.
+  """
+  pub linkedClientManifestCheck: Void @check {
+    let tree = directory
+      .withNewFile("dep/config.toml", "name = \"linked-dep\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"dang\"\n")
+      .withSymlink("config.toml", "dep/dagger-module.toml")
+      .withNewFile("dep/main.dang", "type LinkedDep { pub hello: String! { \"hello\" } }\n")
+      .withNewFile("app/pyproject.toml", "[project]\nname = \"linked-client-app\"\nversion = \"0.0.0\"\ndependencies = []\n")
+    let generated = pythonSdk.generateScope(tree.asWorkspace.withWorkdir("app"),
+      isModule: false, name: "linked-client-app", clients: [tree.asModuleSource(sourceRootPath: "dep")])
+    assert(generated.directory(".").exists("clients/linked-dep/pyproject.toml"), "the linked-manifest client was not generated")
+    null
+  }
+
+  """
   A client whose target refuses to load with the advice of an SDK older than
   this layout: generation says which client cannot load, that `dagger
   generate` cannot help, and the two ways out. Another refusal from the same
@@ -1572,6 +1588,31 @@ type E2e {
     let keptOwn = dangConfigGenerate(own)
     assert(keptOwn.file("/" + root + "/custom/dang.toml").contents == custom, "generation changed the dang.toml of an entrypoint of the user's own")
     assert(keptOwn.directory("/" + root).exists("sdk/entrypoint") == false, "a module on its own entrypoint got a generated one")
+    null
+  }
+
+  """
+  A module generated for the runtime keeps a linked entrypoint configuration
+  and its target outside sdk/, including on repeated generation.
+  """
+  pub linkedEntrypointConfigCheck: Void @check {
+    let settings = "# preserved user configuration\n"
+    let tree = directory
+      .withNewFile("app/dagger-module.toml", "name = \"linked-config-app\"\nengineVersion = \"v1.0.0-0\"\n\n[runtime]\nsource = \"python\"\n")
+      .withNewFile("app/pyproject.toml", "[project]\nname = \"linked-config-app\"\nversion = \"0.0.0\"\ndependencies = []\n")
+      .withNewFile("app/sdk/pyproject.toml", "[tool.dagger]\ngenerated = \"runtime\"\n")
+      .withNewFile("app/dang-settings.toml", settings)
+      .withSymlink("../../dang-settings.toml", "app/sdk/entrypoint/dang.toml")
+    let sdk = pythonSdk(legacyRuntime: true)
+    let generated = sdk.generateScope(tree.asWorkspace.withWorkdir("app"),
+      isModule: true, name: "linked-config-app", clients: [])
+    let again = sdk.generateScope(generated, isModule: true, name: "linked-config-app", clients: [])
+    [generated, again].each { workspace =>
+      let files = workspace.directory(".")
+      assert(files.exists("sdk/entrypoint/dang.toml", expectedType: ExistsType.SYMLINK_TYPE), "generation lost the entrypoint configuration symlink")
+      assert(files.file("sdk/entrypoint/dang.toml").contents == settings, "the preserved configuration symlink no longer resolves")
+      assert(files.file("dang-settings.toml").contents == settings, "generation changed the configuration symlink's target")
+    }
     null
   }
 
