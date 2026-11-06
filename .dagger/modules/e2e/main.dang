@@ -1886,9 +1886,8 @@ type E2e {
   The image the playground takes its CLI from: the release of the engine
   running the check, so that the CLI it drives and the engine it reaches
   through nesting are one version. A CLI older than that engine waits for an
-  answer it never gets, and the floor is proven by running these checks on the
-  floor engine (engine-e2e's checks), not by pinning an older CLI in here.
-  An engine built from source names the release it came from before the `+`.
+  answer it never gets. An engine built from source names the release it came
+  from before the `+`.
   """
   let playgroundImage: String! {
     "registry.dagger.io/engine:" + (version.split("+")[0] ?? version)
@@ -1898,12 +1897,8 @@ type E2e {
 
   """
   This checkout, with the workspace config that registers it as the python
-  SDK, in a container with the floor release's CLI. The CLI is a nested
-  client of the engine running the checks, and its workspace is this tree.
-
-  So the engine is whichever runs the checks. A pass proves the floor only
-  on the floor's engine, which engine-e2e runs them on and asserts with
-  assertFloorEngine; an ordinary run takes the engine it finds.
+  SDK, in a container with the CLI of the engine running the checks. The CLI
+  is a nested client of that engine, and its workspace is this tree.
   """
   let playground(ws: Workspace!): Container! {
     playgroundOf(playgroundTree(ws))
@@ -1912,8 +1907,8 @@ type E2e {
   """
   The files of a workspace that the playground mounts, with the e2e
   workspace config as its dagger.toml. The checks may run from a workspace
-  whose config registers other modules, such as engine-e2e, which the
-  playground's CLI would then load.
+  whose config registers other modules, which the playground's CLI would then
+  load.
   """
   let playgroundTree(ws: Workspace!): Directory! {
     ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot])
@@ -1930,23 +1925,6 @@ type E2e {
       .withMountedDirectory(playgroundRoot, tree)
       .withWorkdir(playgroundRoot)
       .withExec(["git", "init", "--quiet"])
-  }
-
-  """
-  engine-e2e's precondition, not a check of its own: the engine the
-  playground's CLI talks to is the floor release, by the version it reports
-  itself. A release reports its build after a "+", which is not part of the
-  version; a dev or later build is refused. engine-e2e calls it before each
-  check it runs on the floor, so none can pass on another engine.
-  """
-  pub assertFloorEngine(ws: Workspace!): Void {
-    let answered = playground(ws).withExec(["dagger", "query"], stdin: "{ version }", experimentalPrivilegedNesting: true).stdout
-    let reported = json.withContents((answered :: Dagger.JSON!)).field(["version"]).asString
-    if ((reported.split("+")[0] ?? "") != "v" + floorVersion) {
-      raise "the checks drive the floor release's CLI, v" + floorVersion + ", against the engine running them, which is " +
-        reported + ": a pass would not prove the floor. Run the check as `dagger check engine-e2e:<check>`, which provisions its engine"
-    }
-    null
   }
 
   """
