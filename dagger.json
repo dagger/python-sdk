@@ -12,7 +12,7 @@
   "dependencies": [
     {
       "name": "sdk-helpers",
-      "source": "github.com/dagger/sdk-helpers@26fb2fbcd356710c0b261a2da3acb66b7165a319"
+      "source": "dagger.io/sdk/helpers@26fb2fbcd356710c0b261a2da3acb66b7165a319"
     },
     {
       "name": "python-sdk-runtime",
