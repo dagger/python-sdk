@@ -257,6 +257,37 @@ type E2e {
   }
 
   """
+  Initializing a module at the workspace root uploads only template paths.
+  The nested CLI's trace must contain workspace uploads without the ignored
+  cache, which a whole-directory destination baseline would import.
+  """
+  rootInitIgnoresCheck(ws: Workspace!): Void @check {
+    let config = "[modules.python-sdk]\nsource = \".sdk-source\"\ncheck.skip = [\"*\"]\n" +
+      "[sdks.python]\nmodule = \"python-sdk\"\n" +
+      "[sdks.python.scopes.\".\"]\nis-module = true\nname = \"root-init\"\n"
+    let client = container.from("python:3.13-alpine").withoutEntrypoint
+      .withExec(["apk", "add", "--no-cache", "git"])
+      .withFile("/usr/local/bin/dagger", container.from(playgroundImage).file("/usr/local/bin/dagger"))
+      .withFile("/check-uploads.py", currentModule.source.file("check_uploads.py"))
+      .withDirectory("/repo/.sdk-source", playgroundTree(ws).withoutDirectory(".dagger"))
+      .withNewFile("/repo/dagger.toml", config)
+      .withNewFile("/repo/.gitignore", "gitignore-upload-poison/\n")
+      .withNewFile("/repo/gitignore-upload-poison/keep.txt", "keep\n")
+      .withNewFile("/repo/keep.txt", "user file\n")
+      .withWorkdir("/repo")
+      .withExec(["git", "init", "--quiet"])
+    let generated = client.withExec(["python3", "/check-uploads.py", "dagger", "generate", "python-sdk", "-y"], experimentalPrivilegedNesting: true)
+      .withExec(["test", "-f", "dagger-module.toml"])
+      .withExec(["test", "-f", "src/root_init/__init__.py"])
+      .withExec(["test", "-f", "sdk/entrypoint/main.dang"])
+      .withExec(["test", "-f", "clients/core/pyproject.toml"])
+    assert(generated.file("/repo/keep.txt").contents == "user file\n", "root initialization changed a user file")
+    assert(generated.file("/repo/.gitignore").contents == "gitignore-upload-poison/\n", "root initialization replaced .gitignore")
+    assert(generated.file("/repo/gitignore-upload-poison/keep.txt").contents == "keep\n", "root initialization changed the ignored cache")
+    null
+  }
+
+  """
   generateScope preserves a current manifest. It migrates a pre-1.0
   dagger.json to dagger-module.toml. Both cases get the scope tree, and the
   vendored source of the layout before it becomes a workspace source.
