@@ -176,7 +176,9 @@ type PythonSdk {
         let files = moduleTemplate(name, template, pythonVersion, useUv, baseImage)
         # A module directory's own .gitignore is the user's.
         let kept = if (scopeHasFile(ws, scope, ".gitignore")) { files.withoutFile(".gitignore") } else { files }
-        rooted.withDirectory("/" + scope, kept)
+        # An additive changeset names only template paths. Merging a whole
+        # directory reads the destination baseline, including ignored files.
+        rooted.withChanges(directory.withDirectory(scope, kept).changes(directory))
       }
       # Read before the manifest is written: that write resets the entrypoint
       # table, and a module keeps the kind it came with.

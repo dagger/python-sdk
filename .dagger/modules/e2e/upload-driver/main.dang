@@ -1,0 +1,10 @@
+"""
+Call the SDK directly so the floor engine's unfiltered SDK provider loader
+cannot upload the fixture before the operation this check measures.
+"""
+type UploadDriver {
+  generate(ws: Workspace!): Changeset! {
+    pythonSdk.generateScope(ws, isModule: true, name: "root-init", clients: [])
+      .withWorkdir(".").changes(ws.withWorkdir("."))
+  }
+}

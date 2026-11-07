@@ -116,7 +116,16 @@ type Mod {
       let entrypointPath = vendorDirName + "/" + entrypointDirName
       # The entrypoint's dang.toml may hold the user's settings, so it outlives a
       # move to another runner.
-      let scoped = scope.generated.withDirectory("/", ws.directory("/", include: [modulePath(entrypointPath + "/dang.toml")]))
+      let entrypointRoot = modulePath(entrypointPath)
+      let configPath = entrypointRoot + "/dang.toml"
+      let existingConfig = ws.directory("/", include: [configPath])
+      let scoped = if (existingConfig.exists(configPath, doNotFollowSymlinks: true)) {
+        # A filtered snapshot can hold a dangling link whose target remains
+        # elsewhere in the workspace. Copy the link without dereferencing it.
+        scope.generated.withDirectory("/" + entrypointRoot, existingConfig.directory(entrypointRoot))
+      } else {
+        scope.generated
+      }
       if (entrypointMode == "generated") {
         let outside = PyprojectHelper().outsidePaths(scoped, rootPath)
         checkResourcesLoad(scoped, outside)

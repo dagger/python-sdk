@@ -151,9 +151,13 @@ type EngineE2e {
 
   pub generateScopeInitCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-init-check") }
 
+  rootInitIgnoresCheck(ws: Workspace!): Void @check { onFloor(ws, "root-init-ignores-check") }
+
   pub generateScopeExistingCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-existing-check") }
 
   pub generateScopeClientsCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-clients-check") }
+
+  pub linkedClientManifestCheck(ws: Workspace!): Void @check { onFloor(ws, "linked-client-manifest-check") }
 
   pub generateScopeStaleTargetCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-stale-target-check") }
 
@@ -234,6 +238,8 @@ type EngineE2e {
   pub legacyRuntimeCheck(ws: Workspace!): Void @check { onFloor(ws, "legacy-runtime-check") }
 
   pub dangConfigCheck(ws: Workspace!): Void @check { onFloor(ws, "dang-config-check") }
+
+  pub linkedEntrypointConfigCheck(ws: Workspace!): Void @check { onFloor(ws, "linked-entrypoint-config-check") }
 
   pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check { onFloor(ws, "remote-entrypoint-replaced-check") }
 
