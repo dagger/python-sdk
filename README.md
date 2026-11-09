@@ -25,7 +25,6 @@ It uses the engine's native `Workspace` and `ModuleSource` APIs. It uses
 | `python-sdk.dang`, `mod.dang`, `templates/` | authoring: `findClientRoot`, `generateScope`, `mod` (generate, config), templates |
 | `sdk/` | the `dagger-io` client library and code generator |
 | `runtime/` | the container build both entrypoints share, and a module runtime for a manifest that names it |
-| `entrypoint/` | the shared Dang `ModuleEntrypoint` this repository used to serve, frozen; see "Shared entrypoint" |
 
 Code generation happens at `dagger generate`, which calls `generateScope` for
 every recorded scope. It runs the code generator in `sdk/` and vendors the
@@ -265,17 +264,21 @@ than v2.2.0 refuses the file's import.
 
 ## Shared entrypoint
 
-`entrypoint/` is the `ModuleEntrypoint`, written in Dang, that this repository
-used to serve to every Python module as `dagger.io/sdk/python/entrypoint@v1`,
-before each module got one generated into it. It is frozen: generation no
-longer writes a manifest that names it, a module whose manifest names it, a
-pin of it or a fork moves to the generated entrypoint at its next
-`dagger generate`, and its copies of `runtime/build.dang` and
-`runtime/workspace_reader.py` no longer follow the runtime's. It stays in the
-repository, with the tags that serve it, so a module pinned to it in git
-still loads: `@v1` selects the greatest `entrypoint/v1.*` tag, then the
-greatest plain `v1.*` tag. The Python process it starts belongs to no module
-on the engine's side, as with the static entrypoint.
+Up to `v1.7.0`, this repository served a `ModuleEntrypoint`, written in Dang,
+to every Python module as `dagger.io/sdk/python/entrypoint@v1`, before each
+module got one generated into it. Later releases no longer carry it, so `@v1`
+stops loading it once a release without it is tagged; a module that must keep
+it pins a release that has it, such as
+`dagger.io/sdk/python/entrypoint@v1.7.0`.
+
+A module whose manifest names it, a pin of it or a fork moves to the generated
+entrypoint at its next `dagger generate`, even when the entrypoint no longer
+loads: the engine skips loading the module but still generates its scope. The
+module must be a scope of this SDK in the workspace's `dagger.toml`; the engine
+does not tell a module's SDK from its entrypoint, so `dagger generate` changes
+nothing in a module that is not.
+`dagger module init python --name <name> --path <dir>` registers such a module
+and moves it in one step, keeping its code.
 
 ## Static entrypoint
 
