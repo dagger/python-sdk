@@ -79,8 +79,6 @@ func run(args []string) error {
 		return runEditScope(path, data, args[2:])
 	case "set-global-client":
 		return runSetGlobalClient(path, data, args)
-	case "remove-table":
-		return runRemoveTable(path, data, args)
 	case "get-generated":
 		fmt.Print(generatedKind(data))
 		return nil
@@ -209,25 +207,6 @@ func (r *repeated) String() string { return strings.Join(*r, ",") }
 func (r *repeated) Set(v string) error {
 	*r = append(*r, v)
 	return nil
-}
-
-// runRemoveTable cuts one table out of a file, and leaves the file alone
-// when it has no such table.
-//
-// usage: pyproject remove-table <file> <table>
-func runRemoveTable(path string, data []byte, args []string) error {
-	name, err := value(args)
-	if err != nil {
-		return err
-	}
-	out, err := removeTable(data, name)
-	if err != nil {
-		return err
-	}
-	if string(out) == string(data) {
-		return nil
-	}
-	return os.WriteFile(path, out, 0o644)
 }
 
 func value(args []string) (string, error) {

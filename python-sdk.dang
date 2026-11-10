@@ -284,20 +284,21 @@ type PythonSdk {
       # SDK writes is not, nor one served from elsewhere, nor none at all.
       let usersEntrypoint = toml.entrypointKind == "dang" and ours == false and isOwnEntrypointSource(ws, scope, toml.entrypointSource)
       if (keepsItsRuntime(config)) {
-        sdkHelpers.moduleManifest(loadToml: withoutReplacedEntrypoint(ws, scope, manifest))
+        # checkOneRunner refuses an entrypoint beside this runtime, so none is loaded.
+        sdkHelpers.moduleManifest(loadToml: manifest)
       } else if (legacyRuntime or (needsRuntimeSettings(config) and usersEntrypoint == false)) {
         # Moved onto the runtime this SDK publishes, with the version the
         # generator reads core in; what only a runtime can honour stays as
         # written. Inline at each site: sdk-helpers' type names change with its
         # own declared engineVersion (SdkHelpers… vs SDKHelpers… from the
         # v1.0.0-beta.22 naming rules), so this module must not spell them.
-        sdkHelpers.moduleManifest(loadToml: withoutAnyEntrypoint(manifest))
+        sdkHelpers.moduleManifest(loadToml: manifest).withoutEntrypoint
           .withLegacyRuntime(runtime: sdkRuntimeSource, engineVersion: sdkEngineVersion)
       } else if (ours) {
         # This SDK's entrypoint manifest holds nothing a loaded one keeps.
         sdkHelpers.moduleManifest.withDangEntrypoint(source: staticEntrypointSource)
       } else {
-        let loaded = sdkHelpers.moduleManifest(loadToml: withoutReplacedEntrypoint(ws, scope, manifest))
+        let loaded = sdkHelpers.moduleManifest(loadToml: manifest)
         EntrypointManifest(config, "dagger-module.toml").checkEntrypointOnly
         let entrypointed = if (usersEntrypoint) {
           loaded
@@ -436,33 +437,6 @@ type PythonSdk {
         "Remove [entrypoint] to run on your runtime, or [runtime] to run on the entrypoint"
     }
     null
-  }
-
-  """
-  The manifest without any entrypoint table, for a module moving to a runtime:
-  the engine follows an entrypoint over a runtime, so one left behind would
-  take every call.
-  """
-  let withoutAnyEntrypoint(manifest: File!): File! {
-    let toml = ManifestToml(manifest.contents)
-    if (toml.hasEntrypoint) { toml.withoutEntrypoint } else { manifest }
-  }
-
-  """
-  Drop an entrypoint table generation replaces, before the manifest is read:
-  a module-kind one an earlier SDK wrote for its runtime module, which an
-  engine that loads manifest version 2 rejects, or a Dang one served from
-  elsewhere. sdk-helpers keeps every table it loads with no way to clear
-  one, so the table goes here instead. A Dang entrypoint in the user's files
-  is kept.
-  """
-  let withoutReplacedEntrypoint(ws: Workspace!, scope: String!, manifest: File!): File! {
-    let toml = ManifestToml(manifest.contents)
-    if (toml.hasEntrypoint == false or (toml.entrypointKind == "dang" and isOwnEntrypointSource(ws, scope, toml.entrypointSource))) {
-      manifest
-    } else {
-      toml.withoutEntrypoint
-    }
   }
 
   """
@@ -950,8 +924,7 @@ type PythonSdk {
 A dagger-module.toml, read for its entrypoint table.
 
 Values are read with a TOML parser, because the manifest is the user's
-content: quoting, spacing and key order are theirs. The pyproject helper
-removes the table and keeps every other byte as it was.
+content: quoting, spacing and key order are theirs.
 """
 type ManifestToml {
   pub toml: String!
@@ -973,13 +946,6 @@ type ManifestToml {
   pub entrypointSource: String! {
     entrypointValue("source")
   }
-
-  """The manifest with its entrypoint table removed."""
-  pub withoutEntrypoint: File! {
-    PyprojectHelper().withoutTable(directory.withNewFile(fileName, toml).file(fileName), "entrypoint")
-  }
-
-  let fileName: String! = "dagger-module.toml"
 
   let config: JSONValue! {
     json.withContents((JSON.encode(TOML.decode(toml)) :: Dagger.JSON!))

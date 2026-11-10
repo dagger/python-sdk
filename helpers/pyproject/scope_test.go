@@ -594,37 +594,3 @@ dagger-io = { workspace = true }
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
-
-func TestRemoveTableKeepsEveryOtherByte(t *testing.T) {
-	for name, tc := range map[string]struct {
-		src  string
-		want string
-	}{
-		"between tables": {
-			"name = \"demo\"  # the user's comment\nengineVersion = 'v1.0.0'\n\n[entrypoint]\nkind = \"module\"\nsource = \"../runtime\"\n\n[runtime]\nsource = \"python\"\n",
-			"name = \"demo\"  # the user's comment\nengineVersion = 'v1.0.0'\n\n[runtime]\nsource = \"python\"\n",
-		},
-		"last, with a quoted header": {
-			"name = \"demo\"\n\n[ \"entrypoint\" ]  # static\nkind = \"dang\"\nsource = \"./sdk/entrypoint\"\n",
-			"name = \"demo\"\n\n",
-		},
-		"a header inside a multiline string is no table": {
-			"name = \"demo\"\nnotes = \"\"\"\n[entrypoint]\nkind = \"dang\"\n\"\"\"\n\n[entrypoint]\nkind = \"module\"\n",
-			"name = \"demo\"\nnotes = \"\"\"\n[entrypoint]\nkind = \"dang\"\n\"\"\"\n\n",
-		},
-		"no such table": {
-			"name = \"demo\"\n\n[runtime]\nsource = \"python\"\n",
-			"name = \"demo\"\n\n[runtime]\nsource = \"python\"\n",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := removeTable([]byte(tc.src), "entrypoint")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != tc.want {
-				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
-			}
-		})
-	}
-}
