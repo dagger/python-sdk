@@ -262,18 +262,3 @@ global-client = true
 		})
 	}
 }
-
-func TestRunRemoveTable(t *testing.T) {
-	src := "name = 'demo'\n\n[entrypoint]\nkind = \"module\"\nsource = \"../runtime\"\n\n[runtime]\nsource = \"python\"\n"
-	p := writeTemp(t, src)
-	if err := run([]string{"remove-table", p, "entrypoint"}); err != nil {
-		t.Fatalf("remove-table: %v", err)
-	}
-	want := "name = 'demo'\n\n[runtime]\nsource = \"python\"\n"
-	if data, _ := os.ReadFile(p); string(data) != want {
-		t.Errorf("got:\n%s\nwant:\n%s", data, want)
-	}
-	if err := run([]string{"remove-table", p}); err == nil {
-		t.Error("expected an error when the table is missing")
-	}
-}

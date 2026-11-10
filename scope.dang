@@ -844,14 +844,6 @@ type PyprojectHelper {
   }
 
   """
-  The file with one table cut out and every other byte kept.
-  """
-  pub withoutTable(file: File!, table: String!): File! {
-    let at = "/work/" + file.name
-    tool.withFile(at, file).withExec(["pyproject", "remove-table", at, table]).file(at)
-  }
-
-  """
   Why a module directory asks for a Python older than this SDK runs on, or
   empty when it does not.
   """

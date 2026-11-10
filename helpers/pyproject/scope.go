@@ -491,23 +491,6 @@ func (d *document) replace(start, end int, with string) {
 	d.text = d.text[:start] + with + d.text[end:]
 }
 
-// removeTable cuts one table, its header and body up to the next header, out
-// of a file the user wrote, and keeps every other byte. The result is parsed
-// back, so a layout the line model misreads fails here instead of reaching
-// the caller as a different file.
-func removeTable(src []byte, name string) ([]byte, error) {
-	d := &document{text: string(src)}
-	sec := d.section(name)
-	if sec == nil || sec.headerStart < 0 {
-		return src, nil
-	}
-	d.replace(sec.headerStart, sec.bodyEnd, "")
-	if _, err := load([]byte(d.text)); err != nil {
-		return nil, fmt.Errorf("removing [%s] leaves a file that is not TOML: %w", name, err)
-	}
-	return []byte(d.text), nil
-}
-
 func quote(s string) string {
 	return strconv.Quote(s)
 }

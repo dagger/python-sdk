@@ -238,8 +238,7 @@ type Mod {
   """
   let staging(target: Workspace!, outside: [String!]!): Workspace! {
     if (hasEntrypointManifest) {
-      let staged = ManifestToml(ws.file("/" + manifestPath).contents).withoutEntrypoint
-      let loaded = sdkHelpers.moduleManifest(loadToml: staged)
+      let loaded = sdkHelpers.moduleManifest(loadToml: ws.file("/" + manifestPath)).withoutEntrypoint
       # A static entrypoint manifest holds no runtime to fall back on.
       let runnable = if (manifestConfig.fields.contains("runtime")) {
         loaded
