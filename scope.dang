@@ -809,7 +809,7 @@ type PyprojectHelper {
 type PyprojectToml {
   pub toml: String!
 
-  new(toml: String! = "") {
+  new(toml: String!) {
     self.toml = toml
     self
   }
