@@ -94,12 +94,7 @@ type Scope {
       let read = pythonSdkRuntime.scopeMembers(file).join("\n") rescue {
         err: Error => "\n" + err.message
       }
-      let uvReads = PyprojectHelper().tool
-        .withFile(toolPath, file)
-        .withExec(["pyproject", "get-members", toolPath])
-        .stdout
-        .split("\n")
-        .filter { line => line != "" }
+      let uvReads = PyprojectToml(file.contents).members
       let form = "Write members as an array of strings, not a nested array or other values, then run dagger generate again"
       # The runtime reads [project] dependencies with the members, and names
       # the key it refuses.
@@ -180,7 +175,7 @@ type Scope {
   let globalClient: Boolean! {
     let existing = ws.directory(root, gitignore: true)
     let setting = if (existing.exists(scopeFileName)) {
-      PyprojectHelper().globalClientSetting(existing.file(scopeFileName))
+      PyprojectToml(existing.file(scopeFileName).contents).globalClient
     } else {
       null
     }
@@ -344,33 +339,17 @@ type Scope {
 
   """
   What `[tool.dagger] generated` says in a member's pyproject.toml, or empty.
-  The helper reads it as TOML, so text that only looks like the marker, in a
+  It is read as TOML, so text that only looks like the marker, in a
   string, is not one; and only the kinds the SDK writes count, so a member
   marked with anything else is the user's, never deleted or written over.
   """
   let generatedKind(existing: Directory!, rel: String!): String! {
-    let prefix = rel + " "
-    memberKinds(existing)
-      .filter { line => line.hasPrefix(prefix) }
-      .takeFirst(1)
-      .join("")
-      .trimPrefix(prefix)
-  }
-
-  """
-  One "<member> <kind>" line for sdk/ and each directory under clients/ that
-  carries a known marker.
-  """
-  let memberKinds(existing: Directory!): [String!]! {
-    PyprojectHelper().tool
-      .withDirectory("/scope", existing, include: [
-        sdkDirName + "/" + scopeFileName,
-        clientsDirName + "/*/" + scopeFileName,
-      ])
-      .withExec(["pyproject", "get-member-kinds", "/scope"])
-      .stdout
-      .split("\n")
-      .filter { line => line != "" }
+    let file = rel + "/" + scopeFileName
+    if (existing.exists(rel, expectedType: ExistsType.DIRECTORY_TYPE, doNotFollowSymlinks: true) and existing.exists(file)) {
+      PyprojectToml(existing.file(file).contents).generatedKind
+    } else {
+      ""
+    }
   }
 
   """
@@ -802,14 +781,6 @@ type PyprojectHelper {
   }
 
   """
-  The kind a generated member's marker names, or empty for a file that is no
-  member of the SDK's.
-  """
-  pub generatedKind(pyproject: File!): String! {
-    tool.withFile(path, pyproject).withExec(["pyproject", "get-generated", path]).stdout
-  }
-
-  """
   What the build of the scope at a workspace path reads outside it, as uv
   follows the scope's pyproject.toml: its path sources, its workspace members,
   and theirs in turn, then what its uv.lock adds. Generation locks with these
@@ -832,26 +803,136 @@ type PyprojectHelper {
       }
     }
   }
+}
 
-  """
-  What a scope file says about the global client, or null when it says
-  nothing: a file that turns it off keeps it off whatever the module looks
-  like.
-  """
-  pub globalClientSetting(pyproject: File!): Boolean {
-    let value = tool.withFile(path, pyproject).withExec(["pyproject", "get-global-client", path]).stdout
-    if (value == "true") { true } else if (value == "false") { false } else { null }
+"""A pyproject.toml read as TOML; a mistyped value reads as unset."""
+type PyprojectToml {
+  pub toml: String!
+
+  new(toml: String! = "") {
+    self.toml = toml
+    self
+  }
+
+  """requires-python without its comparison operator, as this SDK writes it."""
+  pub pythonVersion: String! {
+    let spec = stringAt(["project", "requires-python"]).trimSpace
+    let op = [">=", "<=", "==", "!=", "~=", ">", "<"].filter { op => spec.hasPrefix(op) }.takeFirst(1).join("")
+    spec.trimPrefix(op).trimSpace
+  }
+
+  pub useUv: Boolean { booleanAt(["tool", "dagger", "use-uv"]) }
+
+  pub baseImage: String! { stringAt(["tool", "dagger", "base-image"]) }
+
+  """A file that turns it off keeps it off whatever the module looks like."""
+  pub globalClient: Boolean { booleanAt(["tool", "dagger", "global-client"]) }
+
+  pub members: [String!]! {
+    let doc = config
+    let items = doc.field(["tool", "uv", "workspace", "members"]).asArray.{{contents}} rescue { err: Error => [] }
+    items.reduce([] :: [String!]!) { found, item =>
+      found + ([json.withContents(item.contents).asString] rescue { err: Error => [] :: [String!]! })
+    }
   }
 
   """
-  Why a module directory asks for a Python older than this SDK runs on, or
-  empty when it does not.
+  Empty for a file that does not parse or names a kind the SDK does not
+  write: such a member is the user's.
   """
-  pub pythonRefusal(module: Directory!): String! {
-    tool.withDirectory("/module", module).withExec(["pyproject", "python-refusal", "/module"]).stdout
+  pub generatedKind: String! {
+    let kind = stringAt(["tool", "dagger", "generated"]) rescue { err: Error => "" }
+    if (kind == "client" or kind == "core" or kind == "runtime") { kind } else { "" }
   }
 
-  let path: String! = "/work/pyproject.toml"
+  """
+  uv locks the module to the SDK's floor, but the runtime builds it on the
+  Python the module asks for, where the install then fails. The Python is
+  read the way runtime/build.dang picks the base image; keep them in step.
+  """
+  pub pythonRefusal(pin: String): String! {
+    let floor = PyprojectToml(currentModule.source.file("sdk/pyproject.toml").contents).pythonVersion
+    if (baseImage != "") {
+      ""
+    } else if (pin != null) {
+      let v = pin.trimSpace
+      if (below(v, floor)) {
+        "this Python SDK needs Python " + floor + " or later, and .python-version pins Python " + v + ". " +
+          remedy("Set it to Python " + floor + " or later", v)
+      } else {
+        ""
+      }
+    } else {
+      let spec = stringAt(["project", "requires-python"]).trimSpace
+      let op = [">=", "=="].filter { op => spec.hasPrefix(op) }.takeFirst(1).join("")
+      let lowest = (spec.trimPrefix(op).split(",")[0] ?? "").trimSpace
+      if (op != "" and below(lowest, floor)) {
+        let quoted = "\"" + spec.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r") + "\""
+        "this Python SDK needs Python " + floor + " or later, and requires-python = " + quoted + " asks for Python " + lowest + ". " +
+          remedy("Ask for Python " + floor + " or later", lowest)
+      } else {
+        ""
+      }
+    }
+  }
+
+  """Offered only to a Python the last release runs on, as engineRefusal does for engines."""
+  let lastReleaseBelowPythonFloor: String! = "v1.2.0"
+  let lastReleasePythonFloor: String! = "3.10"
+
+  let remedy(fix: String!, v: String!): String! {
+    if (below(v, lastReleasePythonFloor)) { fix } else { fix + ", or pin the last release of this SDK that runs on it: dagger module install github.com/dagger/python-sdk@" + lastReleaseBelowPythonFloor }
+  }
+
+  """A version it cannot read is not below, so an unexpected format never blocks."""
+  let below(v: String!, floor: String!): Boolean! {
+    let pattern: Regexp! = "^(\\d+)(?:\\.(\\d+)(?:\\.(\\d+))?)?(a|b|rc|\\.?dev)?"
+    let m = v.match(pattern)
+    if (m == null) {
+      false
+    } else {
+      let parts = m.captures
+      let floorParts = floor.match(pattern).captures
+      let major = number(parts[0] ?? "")
+      let floorMajor = number(floorParts[0] ?? "")
+      if (major != floorMajor or (parts[1] ?? "") == "") {
+        major < floorMajor
+      } else {
+        let minor = number(parts[1] ?? "")
+        let floorMinor = number(floorParts[1] ?? "")
+        if (minor != floorMinor) {
+          minor < floorMinor
+        } else {
+          let patch = parts[2] ?? ""
+          (parts[3] ?? "") != "" and (patch == "" or patch == "0")
+        }
+      }
+    }
+  }
+
+  let number(digits: String!): Int! {
+    let significant = digits.trimLeft("0")
+    JSON.decode(if (significant == "") { "0" } else { significant }) :: Int!
+  }
+
+  """
+  A whitespace-only file is an empty document; a file that does not parse
+  raises here, outside the rescues of the reads.
+  """
+  let config: JSONValue! {
+    let contents = if (toml.trimSpace == "") { "{}" } else { JSON.encode(TOML.decode(toml)) }
+    json.withContents((contents :: Dagger.JSON!))
+  }
+
+  let stringAt(path: [String!]!): String! {
+    let doc = config
+    doc.field(path).asString rescue { err: Error => "" }
+  }
+
+  let booleanAt(path: [String!]!): Boolean {
+    let doc = config
+    doc.field(path).asBoolean rescue { err: Error => null }
+  }
 }
 
 type OutsidePath {

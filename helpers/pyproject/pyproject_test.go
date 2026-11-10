@@ -36,36 +36,6 @@ func mustLoad(t *testing.T, s string) map[string]any {
 	return doc
 }
 
-func TestGetPythonVersion(t *testing.T) {
-	if got := getPythonVersion(mustLoad(t, sample)); got != "3.14" {
-		t.Errorf("sample: got %q, want 3.14", got)
-	}
-	if got := getPythonVersion(mustLoad(t, configured)); got != "3.12" {
-		t.Errorf("configured: got %q, want 3.12", got)
-	}
-	if got := getPythonVersion(mustLoad(t, "")); got != "" {
-		t.Errorf("empty: got %q, want \"\"", got)
-	}
-}
-
-func TestGetUseUv(t *testing.T) {
-	if _, ok := getUseUv(mustLoad(t, sample)); ok {
-		t.Error("sample: use-uv should report unset when absent")
-	}
-	if v, ok := getUseUv(mustLoad(t, configured)); !ok || v {
-		t.Errorf("configured: use-uv should report set and false, got value=%v ok=%v", v, ok)
-	}
-}
-
-func TestGetBaseImage(t *testing.T) {
-	if got := getBaseImage(mustLoad(t, sample)); got != "" {
-		t.Errorf("sample: got %q, want \"\"", got)
-	}
-	if got := getBaseImage(mustLoad(t, configured)); got != "python:3.12-slim" {
-		t.Errorf("configured: got %q, want python:3.12-slim", got)
-	}
-}
-
 func TestSetPythonVersionPreservesData(t *testing.T) {
 	doc := mustLoad(t, sample)
 	setPythonVersion(doc, "3.13")
@@ -97,11 +67,12 @@ func TestSetUseUvFalseWritesKey(t *testing.T) {
 func TestSetUseUvTrueRemovesKey(t *testing.T) {
 	doc := mustLoad(t, configured)
 	setUseUv(doc, true)
-	if _, ok := getUseUv(doc); ok {
-		t.Error("use-uv should report unset after reset to the default true")
+	dagger := table(table(doc, "tool"), "dagger")
+	if _, ok := dagger["use-uv"]; ok {
+		t.Error("use-uv should be unset after reset to the default true")
 	}
 	// removing use-uv must not drop the sibling base-image key.
-	if got := getBaseImage(doc); got != "python:3.12-slim" {
+	if got := dagger["base-image"]; got != "python:3.12-slim" {
 		t.Errorf("setUseUv(true) clobbered base-image, got %q", got)
 	}
 	out, err := dump(doc)
@@ -130,29 +101,7 @@ use-uv = false
 func TestSetBaseImage(t *testing.T) {
 	doc := mustLoad(t, sample)
 	setBaseImage(doc, "python:3.13-slim")
-	if got := getBaseImage(doc); got != "python:3.13-slim" {
+	if got := table(table(doc, "tool"), "dagger")["base-image"]; got != "python:3.13-slim" {
 		t.Errorf("got %q", got)
-	}
-}
-
-func TestGetGlobalClient(t *testing.T) {
-	if _, ok := getGlobalClient(mustLoad(t, sample)); ok {
-		t.Error("sample: global-client should report unset when absent")
-	}
-	doc := mustLoad(t, "[tool.dagger]\nglobal-client = true\nuse-uv = false\n")
-	if v, ok := getGlobalClient(doc); !ok || !v {
-		t.Errorf("should report set and true, got value=%v ok=%v", v, ok)
-	}
-}
-
-func TestGetMembers(t *testing.T) {
-	doc := mustLoad(t, `["tool"."uv"."workspace"]
-members = ["sdk", "clients/core", ["clients/unowned"]]
-`)
-	if got := getMembers(doc); got != "sdk\nclients/core\n" {
-		t.Errorf("got %q", got)
-	}
-	if got := getMembers(mustLoad(t, sample)); got != "" {
-		t.Errorf("a file without a workspace: got %q", got)
 	}
 }

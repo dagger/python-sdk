@@ -833,6 +833,7 @@ type E2e {
       .withNewFile("/" + scope + "/tools/mine/pyproject.toml", "[project]\nname = \"mine\"\n")
       .withNewFile("/" + scope + "/clients/tools/pyproject.toml", "[project]\nname = \"tools\"\n")
       .withNewFile("/" + scope + "/clients/notes/README.md", "not a member\n")
+      .withNewFile("/" + scope + "/clients/README.md", "not a member either\n")
       .withNewFile("/" + scope + "/clients/handmade/pyproject.toml", "[project]\nname = \"handmade\"\ndescription = \"\"\"\n[tool.dagger]\ngenerated = \"client\"\n\"\"\"\n")
       .withNewFile("/" + scope + "/clients/handmade/secret.txt", "mine\n")
       # A marker that cannot be read never licenses a delete.
@@ -865,6 +866,9 @@ type E2e {
       null
     }
     assert(removed.directory("/" + scope).exists(clientDepMember) == false, "a removed client's member was left behind")
+    let aliased = generated.withDirectory("/" + scope + "/clients", directory.withSymlink("client-dep", "alias")).withWorkdir(scope)
+    let aliasKept = pythonSdk.generateScope(aliased, isModule: false, name: "user-content", clients: []).withWorkdir(".")
+    assert(aliasKept.directory("/" + scope).exists("clients/alias", expectedType: ExistsType.SYMLINK_TYPE, doNotFollowSymlinks: true), "a symlink under clients/ was taken for the generated client it points to")
     let removedFile = removed.file("/" + scope + "/pyproject.toml").contents
     assertNotContains(removedFile, "\"" + clientDepMember + "\"", "a removed client stayed a workspace member")
     assertContains(removedFile, "\"clients/tools\"", "removing a client dropped the user's member under clients/")
@@ -2218,6 +2222,11 @@ type E2e {
     assert(configuredValues.baseImage == "python:3.12-slim", "configured baseImage should read the override")
 
     let pyproj = configModulePath + "/pyproject.toml"
+
+    let mistypedToml = "[project]\nrequires-python = \" ~= 3.12 \"\n\n[tool.dagger]\nuse-uv = \"false\"\nbase-image = 3\nglobal-client = [true]\n"
+    let mistyped = pythonSdk.mod(ws.withNewFile("/" + pyproj, mistypedToml), path: configModulePath).config.get
+    assert(mistyped.pythonVersion == "3.12", "pythonVersion should read without its operator, got " + (mistyped.pythonVersion ?? "null"))
+    assert(mistyped.useUv == null and mistyped.baseImage == null and mistyped.globalClient == null, "a mistyped setting should read as unset")
 
     let py = app.set(pythonVersion: "3.13")
     assert(contains(py.modifiedPaths, pyproj), "set should modify pyproject.toml")
