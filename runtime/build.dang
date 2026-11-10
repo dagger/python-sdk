@@ -142,6 +142,15 @@ type PythonModuleBuild {
 
     let ctr = container
       .from(baseImage)
+      # Most base images ship the standard library without its bytecode, and a
+      # call's writes do not last, so each call compiled what it imports.
+      # Best effort, for `python` on PATH only: a custom image without it or
+      # with a read-only standard library must still build.
+      .withExec(["python", "-c",
+        "import compileall, py_compile, re, sysconfig\n" +
+        "compileall.compile_dir(sysconfig.get_path('stdlib'), quiet=2, force=True, rx=re.compile('/site-packages/'),\n" +
+        "    invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)\n",
+      ], expect: ReturnType.ANY)
       # Informational only, in case a module finds them useful.
       .withEnvVariable("DAGGER_BASE_IMAGE", baseImage)
       .withEnvVariable("PYTHONUNBUFFERED", "1")

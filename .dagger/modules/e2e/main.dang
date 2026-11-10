@@ -1054,7 +1054,23 @@ type E2e {
     let called = cli(playground(ws), ["-m", runtimeModulePath, "call", "greeting"]).stdout
     assertContains(called, runtimeGreeting, "the module did not run on this repository's runtime")
 
+    let sourcePath = "/" + runtimeModulePath + "/src/runtime_app/__init__.py"
+    let edited = ws.withNewFile(sourcePath, ws.file(sourcePath).contents + "\n")
+    assert(stdlibCompiledAt(edited) == stdlibCompiledAt(ws), "an edit of the module's code compiled the standard library again")
+
     null
+  }
+
+  """
+  When the runtime's build compiled the standard library, with checked-hash
+  bytecode. The generated entrypoint compiles it once per source state instead.
+  """
+  let stdlibCompiledAt(ws: Workspace!): String! {
+    pythonSdkRuntime
+      .moduleRuntime(modSource: ws.moduleSource("/" + runtimeModulePath), introspectionJson: null)
+      .withExec(["python", "-c", "import json, os; b = open(json.__cached__, 'rb').read(8); assert int.from_bytes(b[4:8], 'little') == 3, b; print(os.stat(json.__cached__).st_mtime_ns)"])
+      .stdout
+      .trimSpace
   }
 
   """
