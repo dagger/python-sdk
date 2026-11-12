@@ -61,9 +61,15 @@ class ConnectParams:
             raise ClientConnectionError(msg) from e
 
 
+# A module server sets these per call, so that each call's requests reach the
+# engine as that call's client, whichever session sends them.
+request_headers: dict[str, str] = {}
+
+
 class TelemetryTransport(httpx.AsyncHTTPTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         propagate.inject(request.headers)
+        request.headers.update(request_headers)
         return await super().handle_async_request(request)
 
 
@@ -365,6 +371,7 @@ class Session(BaseConnection):
         # set up: the session the generated global client builds is over it.
         self.connection = SharedConnection() if connection is None else connection
         self._loads: dict[str, _Load] = {}
+        self._generation = _load_generation
 
     @property
     def session(self) -> ClientSession:  # type: ignore[override]
@@ -406,6 +413,9 @@ class Session(BaseConnection):
 
     async def load(self, target: "Target") -> None:
         """Serve the module a target names, once per session."""
+        if self._generation != _load_generation:
+            self.forget()
+            self._generation = _load_generation
         entry = self._loads.setdefault(target.name, _Load(target))
         if entry.target != target:
             # Whole descriptors: the two may differ only by pin, and the
@@ -428,6 +438,17 @@ class Session(BaseConnection):
                 msg = f"Failed to load client {target.name!r} from {target.ref!r}: {e}"
                 raise ClientLoadError(msg, target=target) from e
             entry.done = True
+
+
+# A module server runs each call as another engine client, which has loaded
+# nothing, so it makes every session forget its loads between calls.
+_load_generation = 0
+
+
+def forget_loads() -> None:
+    """Make every session load its targets again."""
+    global _load_generation  # noqa: PLW0603
+    _load_generation += 1
 
 
 _module_runtime = False
