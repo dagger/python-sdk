@@ -1,8 +1,10 @@
 import json
 import logging
+import re
+import sys
 import traceback
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Final
 
 import cattrs
 from opentelemetry.semconv.attributes.exception_attributes import (
@@ -123,6 +125,52 @@ def log_exception_only(
     if note and hasattr(exc, "add_note"):
         exc.add_note(note)
     logger.error(msg, *args, exc_info=(type(exc), exc, None))
+
+
+FUNCTION_ERROR_MARKER: Final = "::dagger-function-error::"
+"""Starts the line on which a call reports the function's error.
+
+The generated entrypoint raises the text after it as the function's error.
+"""
+
+# A failed exec gives the entrypoint only the last 100 KiB of its stderr. JSON
+# escapes a character in at most six bytes, so 16 Ki characters fit.
+_REPORTED_ERROR_LIMIT: Final = 16 << 10
+
+# The engine finds where an error comes from by these, at the message's end.
+_ERROR_ORIGIN: Final = re.compile(r"\s*\[traceparent:[0-9a-f]{32}-[0-9a-f]{16}\]")
+
+
+def function_error_message(exc: BaseException) -> str:
+    """The error a failed call reports: the function's own, not its wrapper.
+
+    An API error's message is kept whole, with the origin it names. Each
+    error of a group is reported, as a task group raises them.
+    """
+    if isinstance(exc, FunctionError) and exc.__cause__ is not None:
+        exc = exc.__cause__
+    if isinstance(exc, BaseExceptionGroup):
+        return "; ".join(function_error_message(e) for e in exc.exceptions)
+    if isinstance(exc, ModuleError | QueryError):
+        return str(exc) or type(exc).__name__
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
+def report_function_error(message: str) -> None:
+    """Report a failed call's error as the last line of stderr.
+
+    The process that runs a call has no current function call to return its
+    error to, so its exec fails, and the generated entrypoint raises the
+    message from this line instead of the exec's exit code. An API error's
+    message names the call that failed, so that call becomes the error's
+    origin, not the process.
+    """
+    if len(message) > _REPORTED_ERROR_LIMIT:
+        origins = "".join(_ERROR_ORIGIN.findall(message[_REPORTED_ERROR_LIMIT:]))
+        message = message[:_REPORTED_ERROR_LIMIT] + "..." + origins
+    encoded = json.dumps(message, ensure_ascii=False)
+    sys.stderr.write(f"\n{FUNCTION_ERROR_MARKER}{encoded}\n")
+    sys.stderr.flush()
 
 
 async def record_exception(exc: Exception):
