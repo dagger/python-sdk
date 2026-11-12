@@ -440,6 +440,28 @@ dagger call python-sdk mod --path my-module config set \
     --base-image python:3.13-slim
 ```
 
+### Serve calls from one process
+
+A module can ask the engine to run its calls in one warm process per session,
+which skips the interpreter start and the imports of every call after the
+first:
+
+```toml
+[tool.dagger]
+serve = true
+```
+
+The setting takes effect at the next `dagger generate`, which adds a `serve`
+member to the module's generated entrypoint. Only an engine that includes
+module server support serves calls this way. On any other engine the module
+keeps working, and every call runs in a new process.
+
+The process runs one call at a time. Before each call ends, it restores
+`os.environ` and the working directory. Everything else persists into the
+later calls of the same session and module: module globals, files written to
+the container, and secrets a global holds. A call that finds the process busy
+runs in a new process, so a call cannot rely on what an earlier call left.
+
 ## Generate SDK files
 
 `dagger generate` regenerates every recorded scope. A recorded module can also

@@ -4,6 +4,7 @@ import argparse
 import json
 import pathlib
 import sys
+import tomllib
 from typing import Any
 
 import anyio
@@ -81,7 +82,15 @@ def _entrypoint(args: argparse.Namespace) -> None:
         client_version=args.client_version,
         output=args.output,
         outside=args.outside,
+        serve=_opts_in_to_serve(pathlib.Path("pyproject.toml")),
     )
+
+
+def _opts_in_to_serve(pyproject: pathlib.Path) -> bool:
+    if not pyproject.is_file():
+        return False
+    config = tomllib.loads(pyproject.read_text()).get("tool", {}).get("dagger", {})
+    return config.get("serve") is True
 
 
 def _describe(args: argparse.Namespace) -> None:
