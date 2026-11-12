@@ -5,8 +5,16 @@ import sys
 
 import pytest
 
+from dagger import QueryError
+from dagger._exceptions import QueryErrorValue
 from dagger.mod import Module
-from dagger.mod._exceptions import InvalidInputError
+from dagger.mod._exceptions import (
+    FUNCTION_ERROR_MARKER,
+    FunctionError,
+    InvalidInputError,
+    function_error_message,
+    report_function_error,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -135,3 +143,74 @@ def test_command_failure_writes_nothing(module_dir: pathlib.Path):
     assert proc.returncode == 2
     assert "boom" in proc.stderr
     assert not (module_dir / "out").exists()
+
+
+def test_command_failure_reports_error_last(module_dir: pathlib.Path):
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "boom",
+        "fnArgs": "{}",
+    }
+    proc = _call(module_dir, request)
+    last = proc.stderr.rstrip("\n").split("\n")[-1]
+    assert last.startswith(FUNCTION_ERROR_MARKER), proc.stderr
+    assert json.loads(last.removeprefix(FUNCTION_ERROR_MARKER)) == "RuntimeError: boom"
+
+
+ORIGIN = " [traceparent:" + "a" * 32 + "-" + "b" * 16 + "]"
+
+
+def _query_error(message: str) -> QueryError:
+    return QueryError([QueryErrorValue(message)], "query")
+
+
+@pytest.mark.parametrize(
+    ("exc", "message"),
+    [
+        (_query_error("exit code: 3" + ORIGIN), "exit code: 3" + ORIGIN),
+        (InvalidInputError("bad input"), "bad input"),
+        (KeyError("k"), "KeyError: 'k'"),
+        (ValueError(), "ValueError"),
+        (FunctionError(""), "FunctionError"),
+    ],
+)
+def test_function_error_message(exc: BaseException, message: str):
+    assert function_error_message(exc) == message
+
+
+def _wrapped(cause: BaseException) -> FunctionError:
+    # As Module.call wraps what a function raises.
+    wrapper = FunctionError(str(cause))
+    wrapper.__cause__ = cause
+    return wrapper
+
+
+def test_function_error_message_names_the_function_error():
+    assert function_error_message(_wrapped(ValueError("boom"))) == "ValueError: boom"
+
+
+def test_function_error_message_reports_a_group_error_by_error():
+    group = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [_query_error("exit code: 3" + ORIGIN), KeyError("k")],
+    )
+    assert function_error_message(_wrapped(group)) == (
+        "exit code: 3" + ORIGIN + "; KeyError: 'k'"
+    )
+
+
+def test_report_keeps_origin(capsys: pytest.CaptureFixture[str]):
+    report_function_error("exit code: 1\nline two" + ORIGIN)
+    last = capsys.readouterr().err.rstrip("\n").split("\n")[-1]
+    reported = json.loads(last.removeprefix(FUNCTION_ERROR_MARKER))
+    assert reported == "exit code: 1\nline two" + ORIGIN
+
+
+def test_report_truncates_but_keeps_origin(capsys: pytest.CaptureFixture[str]):
+    report_function_error("\x01" * 100_000 + ORIGIN)
+    err = capsys.readouterr().err
+    last = err.rstrip("\n").split("\n")[-1]
+    assert len(last.encode()) < 100 << 10
+    reported = json.loads(last.removeprefix(FUNCTION_ERROR_MARKER))
+    assert reported.endswith("..." + ORIGIN)
