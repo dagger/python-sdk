@@ -29,5 +29,6 @@
 ["","oci-sha",["registry.dagger.io/engine:v1.0.0-beta.18"],"sha256:bdba5a56b1286e38244ad060c21fb4a5db6d30abc0077d79677f7450c737ae48"]
 ["","oci-sha",["registry.dagger.io/engine:v1.0.0-beta.24"],"sha256:3ad2b0b80942bb5044e57c1765710a5fab0b913557b6ab7d7f4e81700ac4da35"]
 ["","oci-sha",["registry.dagger.io/engine:v1.0.0-beta.25"],"sha256:39abecfe0eba4c91035dcfc9f72c8a3963ae60481326082b48d78f2230202834"]
+["","oci-sha",["registry.dagger.io/engine:v1.0.0-beta.27"],"sha256:ad121f720ed9bfb8e740f99dd783fa8472965a5e262fc64ff3ef2634cea1e6dd"]
 ["","vanity-url",["https://dagger.io/linux/alpine"],"https://github.com/dagger/alpine"]
 ["","vanity-url",["https://dagger.io/sdk/helpers"],"https://github.com/dagger/sdk-helpers"]
