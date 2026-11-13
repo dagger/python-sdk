@@ -2,19 +2,16 @@
 
 import argparse
 import json
-import logging
 import pathlib
 import sys
+import tomllib
 from typing import Any
 
 import anyio
 
 from dagger import telemetry
-from dagger._exceptions import QueryError
 from dagger.client._session import mark_module_runtime
-from dagger.mod._exceptions import ModuleError
-
-logger = logging.getLogger(__package__)
+from dagger.mod._exceptions import log_failure
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,15 +55,17 @@ def main(argv: list[str] | None = None) -> int:
     call.add_argument("--output", required=True, type=pathlib.Path)
     call.set_defaults(run=_call)
 
+    serve = commands.add_parser(
+        "serve",
+        help="import the module once and run the calls the engine sends, one at a time",
+    )
+    serve.set_defaults(run=_serve)
+
     args = parser.parse_args(argv)
     try:
         args.run(args)
-    except (ModuleError, QueryError) as e:
-        logger.error(str(e))  # noqa: TRY400 - the message is the whole story
-        return 2
-    except Exception:
-        logger.exception("Unhandled exception")
-        return 1
+    except Exception as e:  # noqa: BLE001 - log_failure logs the traceback
+        return log_failure(e)
     return 0
 
 
@@ -83,7 +82,15 @@ def _entrypoint(args: argparse.Namespace) -> None:
         client_version=args.client_version,
         output=args.output,
         outside=args.outside,
+        serve=_opts_in_to_serve(pathlib.Path("pyproject.toml")),
     )
+
+
+def _opts_in_to_serve(pyproject: pathlib.Path) -> bool:
+    if not pyproject.is_file():
+        return False
+    config = tomllib.loads(pyproject.read_text()).get("tool", {}).get("dagger", {})
+    return config.get("serve") is True
 
 
 def _describe(args: argparse.Namespace) -> None:
@@ -106,6 +113,13 @@ def _call(args: argparse.Namespace) -> None:
         telemetry.shutdown()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result))
+
+
+def _serve(_: argparse.Namespace) -> None:
+    from dagger.mod._serve import serve
+    from dagger.mod.cli import load_module
+
+    serve(load_module())
 
 
 async def _dispatch(request: dict[str, Any]) -> Any:

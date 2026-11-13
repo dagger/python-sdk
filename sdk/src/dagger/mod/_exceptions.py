@@ -18,6 +18,18 @@ from dagger.mod import _api
 logger = logging.getLogger(__package__)
 
 
+def log_failure(e: Exception) -> int:
+    """Log why a call or command failed and return its exit status.
+
+    Call it from the except block, which gives the traceback.
+    """
+    if isinstance(e, ModuleError | QueryError):
+        logger.error(str(e))
+        return 2
+    logger.exception("Unhandled exception")  # noqa: LOG004 - called from an except block
+    return 1
+
+
 class ModuleError(DaggerError):
     """Base class for all errors raised by modules.
 

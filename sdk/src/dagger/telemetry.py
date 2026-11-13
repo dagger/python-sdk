@@ -28,6 +28,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.trace import get_tracer_provider, propagation
 
 __all__ = [
+    "flush",
     "get_tracer",
     "initialize",
     "otel_configured",
@@ -66,6 +67,13 @@ def shutdown():
     if isinstance(tracer_provider, sdktrace.TracerProvider):
         tracer_provider.force_flush()
         tracer_provider.shutdown()
+
+
+def flush():
+    """Export the spans that have ended, keeping the provider running."""
+    tracer_provider = get_tracer_provider()
+    if isinstance(tracer_provider, sdktrace.TracerProvider):
+        tracer_provider.force_flush()
 
 
 def otel_configured() -> bool:

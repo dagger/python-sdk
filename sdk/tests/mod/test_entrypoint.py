@@ -104,6 +104,10 @@ def test_main_outside_golden():
     _assert_golden("main_outside.dang", rendered)
 
 
+def test_main_serve_golden():
+    _assert_golden("main_serve.dang", render_main("main", "v1.0.0-beta.24", serve=True))
+
+
 def test_main_declares_client_version():
     rendered = render_main("main", 'v1.0.0-beta.24+"commit"')
     assert 'let clientVersion: String! = "v1.0.0-beta.24+\\"commit\\""' in rendered
@@ -163,14 +167,27 @@ def test_write_entrypoint(mod: Module, tmp_path: pathlib.Path):
 
 
 @pytest.mark.parametrize(
-    ("args", "outside"),
+    ("args", "outside", "config", "serves"),
     [
-        ([], []),
-        (["--outside=../lib", "--outside=../../shared"], ["../lib", "../../shared"]),
+        ([], [], "", False),
+        (
+            ["--outside=../lib", "--outside=../../shared"],
+            ["../lib", "../../shared"],
+            "",
+            False,
+        ),
+        ([], [], "[tool.dagger]\nserve = true\n", True),
+        ([], [], "[tool.dagger]\nserve = false\n", False),
     ],
 )
-def test_command(tmp_path: pathlib.Path, args: list[str], outside: list[str]):
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "hello"\n')
+def test_command(
+    tmp_path: pathlib.Path,
+    args: list[str],
+    outside: list[str],
+    config: str,
+    serves: bool,
+):
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nname = "hello"\n{config}')
     pkg = tmp_path / "src" / "hello"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(
@@ -210,3 +227,4 @@ def test_command(tmp_path: pathlib.Path, args: list[str], outside: list[str]):
     assert main.count("workspace.directory(") == len(outside) + 1
     for path in outside:
         assert f'workspace.directory("{path}", ' in main
+    assert ("pub serve: Container!" in main) is serves

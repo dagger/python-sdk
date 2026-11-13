@@ -51,6 +51,7 @@ Files = dict[str, str]
 SESSION_NAMES = frozenset(
     {
         "_as_session",
+        "_generation",
         "_loads",
         "_ready",
         "aclose",
