@@ -93,7 +93,7 @@ type PythonSdk {
   """
   let isGeneratedMember(ws: Workspace!, scope: String!): Boolean! {
     scopeHasFile(ws, scope, "pyproject.toml") and
-      PyprojectHelper().generatedKind(ws.file("/" + scopePath(scope, "pyproject.toml"))) != ""
+      PyprojectToml(ws.file("/" + scopePath(scope, "pyproject.toml")).contents).generatedKind != ""
   }
 
   let parentPath(path: String!): String! {
@@ -914,7 +914,7 @@ type PythonSdk {
       let withPy = if (pythonVersion == "") { built } else { built.withExec(["pyproject", "set-python-version", pyproj, pythonVersion]) }
       let withUv = if (useUv) { withPy } else { withPy.withExec(["pyproject", "set-use-uv", pyproj, "false"]) }
       let withImg = if (baseImage == "") { withUv } else { withUv.withExec(["pyproject", "set-base-image", pyproj, baseImage]) }
-      let refusal = withImg.withExec(["pyproject", "python-refusal", "/rendered"]).stdout
+      let refusal = PyprojectToml(withImg.file(pyproj).contents).pythonRefusal(null)
       if (refusal != "") { raise refusal + "." } else { withImg.directory("/rendered") }
     }
   }

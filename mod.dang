@@ -157,7 +157,10 @@ type Mod {
   generation runs it, and config set stays open to fix the module.
   """
   let checkPython: Void {
-    let refusal = PyprojectHelper().pythonRefusal(ws.directory("/" + rootPath, include: ["pyproject.toml", ".python-version"]))
+    let files = ws.directory("/" + rootPath, include: ["pyproject.toml", ".python-version"])
+    let toml = if (files.exists("pyproject.toml")) { files.file("pyproject.toml").contents } else { "" }
+    let pin = if (files.exists(".python-version")) { files.file(".python-version").contents } else { null }
+    let refusal = PyprojectToml(toml).pythonRefusal(pin)
     if (refusal != "") {
       raise "the module at " + rootPath + ": " + refusal + ", then run dagger generate again"
     }

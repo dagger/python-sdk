@@ -189,6 +189,8 @@ type EngineE2e {
 
   pub pythonFloorRefusalCheck(ws: Workspace!): Void @check { onFloor(ws, "python-floor-refusal-check") }
 
+  pub pythonRefusalCasesCheck(ws: Workspace!): Void @check { onFloor(ws, "python-refusal-cases-check") }
+
   pub runtimeCallCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-call-check") }
 
   pub runtimeRequiresGeneratedFilesCheck(ws: Workspace!): Void @check { onFloor(ws, "runtime-requires-generated-files-check") }

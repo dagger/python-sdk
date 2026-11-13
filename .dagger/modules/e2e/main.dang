@@ -833,6 +833,7 @@ type E2e {
       .withNewFile("/" + scope + "/tools/mine/pyproject.toml", "[project]\nname = \"mine\"\n")
       .withNewFile("/" + scope + "/clients/tools/pyproject.toml", "[project]\nname = \"tools\"\n")
       .withNewFile("/" + scope + "/clients/notes/README.md", "not a member\n")
+      .withNewFile("/" + scope + "/clients/README.md", "not a member either\n")
       .withNewFile("/" + scope + "/clients/handmade/pyproject.toml", "[project]\nname = \"handmade\"\ndescription = \"\"\"\n[tool.dagger]\ngenerated = \"client\"\n\"\"\"\n")
       .withNewFile("/" + scope + "/clients/handmade/secret.txt", "mine\n")
       # A marker that cannot be read never licenses a delete.
@@ -865,6 +866,9 @@ type E2e {
       null
     }
     assert(removed.directory("/" + scope).exists(clientDepMember) == false, "a removed client's member was left behind")
+    let aliased = generated.withDirectory("/" + scope + "/clients", directory.withSymlink("client-dep", "alias")).withWorkdir(scope)
+    let aliasKept = pythonSdk.generateScope(aliased, isModule: false, name: "user-content", clients: []).withWorkdir(".")
+    assert(aliasKept.directory("/" + scope).exists("clients/alias", expectedType: ExistsType.SYMLINK_TYPE, doNotFollowSymlinks: true), "a symlink under clients/ was taken for the generated client it points to")
     let removedFile = removed.file("/" + scope + "/pyproject.toml").contents
     assertNotContains(removedFile, "\"" + clientDepMember + "\"", "a removed client stayed a workspace member")
     assertContains(removedFile, "\"clients/tools\"", "removing a client dropped the user's member under clients/")
@@ -1042,6 +1046,79 @@ type E2e {
     }
     assertContains(setRefused, "asks for Python 3.10", "config set wrote Python 3.10")
 
+    null
+  }
+
+  """
+  The Python floor refusal case by case: each version form generation reads,
+  from .python-version or requires-python. A user-owned sdk/ ends generation
+  right after the refusal check, so a case that is not refused costs no
+  generation.
+  """
+  pub pythonRefusalCasesCheck(scope: Workspace!): Void @check {
+    let ws = withScope(scope, tomlGenerateModulePath, "toml-generate-app")
+      .withNewFile("/" + tomlGenerateModulePath + "/sdk/mine.txt", "mine\n")
+    let pyprojectPath = "/" + tomlGenerateModulePath + "/pyproject.toml"
+    let project = "[project]\nname = \"app\"\nrequires-python = \""
+    let newer = project + ">=3.14\"\n"
+    let ownImage = "\n[tool.dagger]\nbase-image = \"python:3.14-slim\"\n"
+    let floorNeeded = "this Python SDK needs Python 3.11 or later, and "
+    let pinRefusal = floorNeeded + ".python-version pins Python "
+    let pinFix = ". Set it to Python 3.11 or later"
+    let requiresRefusal = floorNeeded + "requires-python = \""
+    let requiresFix = ". Ask for Python 3.11 or later"
+    let lastReleaseOffer = ", or pin the last release of this SDK that runs on it: dagger module install github.com/dagger/python-sdk@v1.2.0"
+    # file "" is no pyproject.toml, pin "" no .python-version, want "" no refusal.
+    [
+      {{file: newer, pin: "3.10", want: pinRefusal + "3.10" + pinFix + lastReleaseOffer}},
+      {{file: newer, pin: "3.10.9", want: pinRefusal + "3.10.9" + pinFix + lastReleaseOffer}},
+      {{file: newer, pin: "2.7", want: pinRefusal + "2.7" + pinFix}},
+      {{file: newer, pin: "2", want: pinRefusal + "2" + pinFix}},
+      {{file: newer, pin: "3.11.0rc1", want: pinRefusal + "3.11.0rc1" + pinFix + lastReleaseOffer}},
+      {{file: newer, pin: "3.11rc1", want: pinRefusal + "3.11rc1" + pinFix + lastReleaseOffer}},
+      {{file: newer, pin: "3.11.dev0", want: pinRefusal + "3.11.dev0" + pinFix + lastReleaseOffer}},
+      {{file: newer, pin: "3.11", want: ""}},
+      {{file: newer, pin: "3.11.0", want: ""}},
+      {{file: newer, pin: "3.11.1rc1", want: ""}},
+      {{file: newer, pin: "3.12", want: ""}},
+      {{file: newer, pin: "3.13.0b2", want: ""}},
+      {{file: newer, pin: "3", want: ""}},
+      {{file: newer, pin: "4", want: ""}},
+      {{file: newer, pin: " ", want: ""}},
+      {{file: "", pin: "pypy3.10", want: ""}},
+      {{file: project + ">=3.10\"\n", pin: "3.13", want: ""}},
+      {{file: ownImage, pin: "3.10", want: ""}},
+      {{file: project + ">=3.11\"\n", pin: "", want: ""}},
+      {{file: newer, pin: "", want: ""}},
+      {{file: project + ">=3.10\"\n", pin: "", want: requiresRefusal + ">=3.10\" asks for Python 3.10" + requiresFix + lastReleaseOffer}},
+      {{file: project + ">=3.10,<4\"\n", pin: "", want: requiresRefusal + ">=3.10,<4\" asks for Python 3.10" + requiresFix + lastReleaseOffer}},
+      {{file: project + "==3.10.4\"\n", pin: "", want: requiresRefusal + "==3.10.4\" asks for Python 3.10.4" + requiresFix + lastReleaseOffer}},
+      {{file: project + ">=3.9\"\n", pin: "", want: requiresRefusal + ">=3.9\" asks for Python 3.9" + requiresFix}},
+      {{file: project + ">=2.7\"\n", pin: "", want: requiresRefusal + ">=2.7\" asks for Python 2.7" + requiresFix}},
+      {{file: project + ">=2\"\n", pin: "", want: requiresRefusal + ">=2\" asks for Python 2" + requiresFix}},
+      {{file: project + "~=3.10\"\n", pin: "", want: ""}},
+      {{file: project + ">=3.10\"\n" + ownImage, pin: "", want: ""}},
+      {{file: "[project]\nname = \"app\"\n", pin: "", want: ""}},
+      {{file: "", pin: "", want: ""}},
+    ].each { row =>
+      let files = if (row.file == "") { ws.withoutFile(pyprojectPath) } else { ws.withNewFile(pyprojectPath, row.file) }
+      let module = if (row.pin == "") { files } else { files.withNewFile("/" + tomlGenerateModulePath + "/.python-version", row.pin + "\n") }
+      # checkPython runs before generation, and a user-owned sdk/ makes the next
+      # step raise (scope.dang checkMembers), so a case that passes the refusal
+      # ends there without generating.
+      let got = pythonSdk.mod(module, path: tomlGenerateModulePath, findUp: false).generated.cwd rescue {
+        err: Error => err.message
+      }
+      let pinLabel = if (row.pin == "") { "no .python-version" } else { ".python-version " + row.pin }
+      let fileLabel = if (row.file == "") { "no pyproject.toml" } else { "pyproject.toml " + row.file }
+      let label = pinLabel + ", " + fileLabel + ": "
+      if (row.want == "") {
+        assertContains(got, "sdk/ exists in " + tomlGenerateModulePath, label + "refused or failed otherwise: " + got)
+      } else {
+        assertContains(got, "the module at " + tomlGenerateModulePath + ": " + row.want + ", then run dagger generate again", label + "got " + got)
+      }
+      null
+    }
     null
   }
 
@@ -2218,6 +2295,11 @@ type E2e {
     assert(configuredValues.baseImage == "python:3.12-slim", "configured baseImage should read the override")
 
     let pyproj = configModulePath + "/pyproject.toml"
+
+    let mistypedToml = "[project]\nrequires-python = \" ~= 3.12 \"\n\n[tool.dagger]\nuse-uv = \"false\"\nbase-image = 3\nglobal-client = [true]\n"
+    let mistyped = pythonSdk.mod(ws.withNewFile("/" + pyproj, mistypedToml), path: configModulePath).config.get
+    assert(mistyped.pythonVersion == "3.12", "pythonVersion should read without its operator, got " + (mistyped.pythonVersion ?? "null"))
+    assert(mistyped.useUv == null and mistyped.baseImage == null and mistyped.globalClient == null, "a mistyped setting should read as unset")
 
     let py = app.set(pythonVersion: "3.13")
     assert(contains(py.modifiedPaths, pyproj), "set should modify pyproject.toml")
