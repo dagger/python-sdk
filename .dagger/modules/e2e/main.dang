@@ -1965,6 +1965,53 @@ type E2e {
   }
 
   """
+  A function that fails on a generated entrypoint fails with its own error, not
+  with the exit code of the process that ran it: a raised exception with its
+  message, and a failed API call with that call's error, here the exit code of
+  the exec it ran.
+  """
+  pub entrypointFunctionErrorCheck(ws: Workspace!): Void @check {
+    let name = "ep-fail"
+    let path = ".dagger/modules/" + name
+    let source =
+      "from dagger import function, object_type\n" +
+      "from dagger_clients.core import core\n\n\n" +
+      "@object_type\n" +
+      "class EpFail:\n" +
+      "    @function\n" +
+      "    def boom(self) -> str:\n" +
+      "        raise ValueError(\"raised by the function\")\n\n" +
+      "    @function\n" +
+      "    async def exec_boom(self) -> str:\n" +
+      "        return await (\n" +
+      "            core()\n" +
+      "            .container()\n" +
+      "            .from_(\"alpine:3.22\")\n" +
+      "            .with_exec([\"sh\", \"-c\", \"exit 3\"])\n" +
+      "            .stdout()\n" +
+      "        )\n"
+    let initialized = cli(playground(ws), ["module", "init", "python", "--auto-apply", "--name", name, "--path", path])
+      .withNewFile(path + "/src/ep_fail/__init__.py", source)
+    let ready = cli(initialized, ["-y", "call", "python-sdk", "mod", "--path", path, "generate"])
+    let manifest = ready.file(playgroundRoot + "/" + path + "/dagger-module.toml").contents
+    assertContains(manifest, "[entrypoint]", "the module is not on an entrypoint: " + manifest)
+
+    # Silent, so the output is the call's error. Before, that was the exit code
+    # of the call's process, with its stderr, which holds the function's
+    # traceback too.
+    let raised = ready.withExec(["dagger", "-s", "-m", path, "call", "boom"], experimentalPrivilegedNesting: true, expect: ReturnType.FAILURE)
+    let raisedSaid = raised.stdout + raised.stderr
+    assertContains(raisedSaid, "ValueError: raised by the function", "the call did not fail with the function's error: " + raisedSaid)
+    assertNotContains(raisedSaid, "exit code: 2", "the call failed with the exit code of its process: " + raisedSaid)
+
+    let failed = ready.withExec(["dagger", "-s", "-m", path, "call", "exec-boom"], experimentalPrivilegedNesting: true, expect: ReturnType.FAILURE)
+    let failedSaid = failed.stdout + failed.stderr
+    assertContains(failedSaid, "exit code: 3", "the call did not fail with its exec's error: " + failedSaid)
+    assertNotContains(failedSaid, "exit code: 2", "the call failed with the exit code of its process: " + failedSaid)
+    null
+  }
+
+  """
   What an engine says when it looks for a module where the module is not: the
   caller's workspace holds no `/<path>` for a client the module should find in
   its own tree.

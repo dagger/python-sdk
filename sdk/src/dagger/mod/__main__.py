@@ -12,7 +12,11 @@ import anyio
 from dagger import telemetry
 from dagger._exceptions import QueryError
 from dagger.client._session import mark_module_runtime
-from dagger.mod._exceptions import ModuleError
+from dagger.mod._exceptions import (
+    ModuleError,
+    function_error_message,
+    report_function_error,
+)
 
 logger = logging.getLogger(__package__)
 
@@ -63,11 +67,19 @@ def main(argv: list[str] | None = None) -> int:
         args.run(args)
     except (ModuleError, QueryError) as e:
         logger.error(str(e))  # noqa: TRY400 - the message is the whole story
+        _report(args, e)
         return 2
-    except Exception:
+    except Exception as e:
         logger.exception("Unhandled exception")
+        _report(args, e)
         return 1
     return 0
+
+
+def _report(args: argparse.Namespace, exc: Exception) -> None:
+    """Give the entrypoint a failed call's error, after everything it logged."""
+    if args.run is _call:
+        report_function_error(function_error_message(exc))
 
 
 def _entrypoint(args: argparse.Namespace) -> None:

@@ -314,7 +314,9 @@ runs as edited.
 What a generated entrypoint cannot carry is in the list above: a module whose
 manifest says which files it is, or names a runtime, keeps that runtime
 instead. There is no `debug` terminal on this path, and a function error
-reaches the caller as the exec failure with the process's stderr.
+reaches the caller as its message: an API error keeps the call it names as
+its origin, but no error carries its values, such as an exec's exit code and
+output, past the entrypoint.
 
 Generation writes an entrypoint into a module that has none, or whose manifest
 names one served from elsewhere, and leaves a Dang entrypoint in the module's
