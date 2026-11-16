@@ -33,11 +33,13 @@ type E2e {
   let coreInitPath: String! = "clients/core/src/dagger_clients/core/__init__.py"
   let clientDepMember: String! = "clients/client-dep"
   let clientDepTargetPath: String! = clientDepMember + "/src/dagger_clients/client_dep/_target.py"
+  let ruffSkip: String! = "extend-exclude = [\"*\"]"
   let globalPackage: String! = "dagger_global"
 
   """
   The tree every generated scope has, module or not: the SDK files with no
-  generated code in them, and core, each a member marked as the SDK's.
+  generated code in them, and core, each a member marked as the SDK's and
+  skipped by ruff.
   """
   let assertScopeTree(generated: Workspace!, scope: String!): Void {
     let root = generated.directory("/" + scope)
@@ -46,6 +48,8 @@ type E2e {
     assert(root.exists(legacyBindingsPath) == false, scope + ": sdk/ still holds generated bindings")
     assertContains(root.file(coreMemberFile).contents, "generated = \"core\"", scope + ": clients/core is not marked as core")
     assertContains(root.file(coreInitPath).contents, generatedMarkerContents, scope + ": core was not generated")
+    assertContains(root.file("sdk/ruff.toml").contents, ruffSkip, scope + ": ruff does not skip sdk/")
+    assertContains(root.file("clients/core/ruff.toml").contents, ruffSkip, scope + ": ruff does not skip clients/core")
     let scopeFile = root.file("pyproject.toml").contents
     assertContainsAll(scopeFile, [
       "[tool.uv.workspace]",
@@ -191,6 +195,7 @@ type E2e {
     let scoped = ws
       .withNewDirectory("/" + scope, directory)
       .withNewFile("/" + scope + "/keep.txt", "keep\n")
+      .withNewFile("/" + scope + "/ruff.toml", "line-length = 100\n")
       .withWorkdir(scope)
     let generated = pythonSdk.generateScope(scoped, isModule: true, name: "scope-init", clients: [])
     let changes = generated.withWorkdir(".").changes(scoped.withWorkdir("."))
@@ -203,6 +208,7 @@ type E2e {
     assertAdded(changes, scope + "/" + sdkMemberFile)
     assertAdded(changes, scope + "/" + coreInitPath)
     assertScopeTree(generated.withWorkdir("."), scope)
+    assert(generated.file("/" + scope + "/ruff.toml").contents == "line-length = 100\n", "generating a module replaced its ruff.toml")
     assert(changes.modifiedPaths.length == 0, "initializing a scope modified existing files: " + changes.modifiedPaths.join(", "))
     assert(changes.removedPaths.length == 0, "initializing a scope removed existing files: " + changes.removedPaths.join(", "))
     let manifest = changes.layer.file(scope + "/dagger-module.toml").contents
@@ -402,6 +408,7 @@ type E2e {
       "CORE_DIGEST = \"" + coreDigestOf(with, tomlGenerateModulePath) + "\"",
     ])
     assertContains(with.file(member + "/src/dagger_clients/client_dep/__init__.py").contents, "def client_dep(", "the client has no entry function")
+    assertContains(with.file(member + "/ruff.toml").contents, ruffSkip, "ruff does not skip the client's member")
 
     let scopeDiff = with.file(scopeFilePath).contents
     assertContainsAll(scopeDiff, [
@@ -415,6 +422,27 @@ type E2e {
       .withWorkdir(".")
     assert(removed.changes(without).isEmpty, "removing the client did not undo adding it")
 
+    null
+  }
+
+  """
+  ruff, run from the root of a generated module, checks the module's own code
+  and none of the generated members.
+  """
+  pub generatedRuffSkipCheck(ws: Workspace!): Void @check {
+    let scope = outputRoot + "/generated-ruff-skip"
+    let generated = pythonSdk.generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "generated-ruff-skip", clients: [])
+    let files = sdkContainer(ws)
+      .withDirectory("/mod", generated.directory("/" + scope))
+      .withWorkdir("/mod")
+      .withExec(["uv", "run", "--frozen", "--project", "/sdk", "ruff", "check", "--show-files", "."])
+      .stdout
+      .split("\n")
+      .filter { line => line != "" }
+      .map { line => line.trimPrefix("/mod/") }
+    let generatedFiles = files.filter { file => file.hasPrefix("sdk/") or file.hasPrefix("clients/") }
+    assert(generatedFiles.length == 0, "ruff checks generated files: " + generatedFiles.join(", "))
+    assert(files.filter { file => file.hasPrefix("src/") }.length > 0, "ruff checks no file of src/: " + files.join(", "))
     null
   }
 
