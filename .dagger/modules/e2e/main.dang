@@ -2389,7 +2389,7 @@ type E2e {
   """
   A module declares a collection, on this checkout's shared entrypoint, on
   the one generated into it, and on this checkout's runtime, which registers
-  the types itself. The engine serves keys, list, get, subset and batch on it,
+  the types itself. The engine serves keys, list, get and subset on it,
   and the CLI names an item with a selector, after the collection or in place
   of the path to it.
 
@@ -2405,7 +2405,7 @@ type E2e {
 
   """
   A module calls the collection through the client generated from it. keys,
-  get, list, subset and batch exist only in the engine's projection of the
+  get, list and subset exist only in the engine's projection of the
   collection, so the client has them only if it was generated from that.
   """
   pub collectionsClientCheck(ws: Workspace!): Void @check {
@@ -2458,8 +2458,8 @@ type E2e {
     assert(item.trimSpace == "item:a", form + ": the selector after the collection did not name item a: " + item)
     let rooted = cli(ready, ["-m", path, "call", "--shelf-item=c", "name"]).stdout
     assert(rooted.trimSpace == "item:c", form + ": the selector in place of the path did not name item c: " + rooted)
-    let batch = cli(ready, ["-m", path, "call", "items", "selected", "--shelf-item=c", "--shelf-item=b"]).stdout
-    assert(batch.trimSpace == "b\nc", form + ": repeated selectors did not reach the batch with b and c: " + batch)
+    let subset = cli(ready, ["-m", path, "call", "items", "subset", "--keys=c,b", "selected"]).stdout
+    assert(subset.trimSpace == "b\nc", form + ": subset did not select b and c: " + subset)
     null
   }
 
@@ -2467,29 +2467,29 @@ type E2e {
     "  keys\n" +
     "  list { name }\n" +
     "  get(key: \"a\") { name }\n" +
-    "  batch { selected removed }\n" +
-    "  subset(keys: [\"c\", \"b\"]) { keys batch { selected removed } }\n" +
-    "  changed: batch { change(names: [\"c\", \"d\"]) { keys batch { added removed } } }\n" +
-    "  fresh: subset(keys: [\"c\"]) { batch { fresh { keys batch { added removed } } } }\n" +
+    "  selected removed\n" +
+    "  subset(keys: [\"c\", \"b\"]) { keys selected removed }\n" +
+    "  changed: change(names: [\"c\", \"d\"]) { keys added removed }\n" +
+    "  fresh: subset(keys: [\"c\"]) { fresh { keys added removed } }\n" +
     "} }"
 
   """The answer to collectionQuery, with its keys sorted the way the CLI prints them."""
   let collectionAnswer: String! = "{\"items\":{" +
-    "\"batch\":{\"removed\":[],\"selected\":[\"b\",\"a\",\"c\"]}," +
-    "\"changed\":{\"change\":{\"batch\":{\"added\":[\"d\"],\"removed\":[\"b\",\"a\"]},\"keys\":[\"c\",\"d\"]}}," +
-    "\"fresh\":{\"batch\":{\"fresh\":{\"batch\":{\"added\":[],\"removed\":[]},\"keys\":[\"z\"]}}}," +
+    "\"changed\":{\"added\":[\"d\"],\"keys\":[\"c\",\"d\"],\"removed\":[\"b\",\"a\"]}," +
+    "\"fresh\":{\"fresh\":{\"added\":[],\"keys\":[\"z\"],\"removed\":[]}}," +
     "\"get\":{\"name\":\"item:a\"}," +
     "\"keys\":[\"b\",\"a\",\"c\"]," +
     "\"list\":[{\"name\":\"item:b\"},{\"name\":\"item:a\"},{\"name\":\"item:c\"}]," +
-    "\"subset\":{\"batch\":{\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]},\"keys\":[\"b\",\"c\"]}" +
+    "\"removed\":[]," +
+    "\"selected\":[\"b\",\"a\",\"c\"]," +
+    "\"subset\":{\"keys\":[\"b\",\"c\"],\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]}" +
     "}}"
 
   """
   Collections of every key type the engine takes, in one module: Int, Float,
   Boolean, an enum and a core scalar. The delta names a removed key as text,
-  whatever the key type. An item can be a collection itself. A batch
-  generator replaces its item's generator of the same name and sees only the
-  selected keys; the item's generator raises if it runs.
+  whatever the key type. An item can be a collection itself. An item's
+  generator runs once for each item the selectors name, and for no other.
   """
   pub collectionKindsCheck(ws: Workspace!): Void @check {
     let path = ".dagger/modules/kinds"
@@ -2504,30 +2504,30 @@ type E2e {
     assert(compact == kindsAnswer, "the collections answered " + compact + ", not " + kindsAnswer)
 
     let generated = cli(ready, ["-m", path, "generate", "-y", "items/write?kinds-items-item=a&kinds-items-item=b"])
-    let selected = generated.withExec(["cat", playgroundRoot + "/selected"]).stdout
-    assert(selected == "a,b", "the batch generator wrote " + selected + ", not the selected keys a,b")
+    let selected = generated.withExec(["sh", "-c", "cat " + playgroundRoot + "/selected-*"]).stdout
+    assert(selected == "ab", "the item generators wrote " + selected + ", not the selected items a and b")
     null
   }
 
   let kindsQuery: String! = "{\n" +
-    "  numbers { keys get(key: 2) { name } subset(keys: [3, 1]) { keys batch { removed } } }\n" +
-    "  ratios { keys get(key: 1.5) { name } subset(keys: [1.5]) { batch { removed } } }\n" +
-    "  flags { keys get(key: false) { name } subset(keys: [false]) { batch { removed } } }\n" +
-    "  colors { keys get(key: BLUE) { name } subset(keys: [BLUE]) { batch { removed } } }\n" +
-    "  platforms { keys get(key: \"linux/arm64\") { name } subset(keys: [\"linux/arm64\"]) { batch { removed } } }\n" +
-    "  items { keys batch { selected } }\n" +
-    "  shelves { keys get(key: \"s2\") { keys get(key: \"s2-1\") { name } subset(keys: [\"s2-2\"]) { batch { selected } } } subset(keys: [\"s1\"]) { batch { count } } }\n" +
+    "  numbers { keys get(key: 2) { name } subset(keys: [3, 1]) { keys removed } }\n" +
+    "  ratios { keys get(key: 1.5) { name } subset(keys: [1.5]) { removed } }\n" +
+    "  flags { keys get(key: false) { name } subset(keys: [false]) { removed } }\n" +
+    "  colors { keys get(key: BLUE) { name } subset(keys: [BLUE]) { removed } }\n" +
+    "  platforms { keys get(key: \"linux/arm64\") { name } subset(keys: [\"linux/arm64\"]) { removed } }\n" +
+    "  items { keys selected }\n" +
+    "  shelves { keys get(key: \"s2\") { keys get(key: \"s2-1\") { name } subset(keys: [\"s2-2\"]) { selected } } subset(keys: [\"s1\"]) { count } }\n" +
     "}"
 
   """The answer to kindsQuery, with its keys sorted the way the CLI prints them."""
   let kindsAnswer: String! = "{" +
-    "\"colors\":{\"get\":{\"name\":\"blue\"},\"keys\":[\"RED\",\"BLUE\"],\"subset\":{\"batch\":{\"removed\":[\"RED\"]}}}," +
-    "\"flags\":{\"get\":{\"name\":\"fFalse\"},\"keys\":[true,false],\"subset\":{\"batch\":{\"removed\":[\"true\"]}}}," +
-    "\"items\":{\"batch\":{\"selected\":[\"a\",\"b\",\"c\"]},\"keys\":[\"a\",\"b\",\"c\"]}," +
-    "\"numbers\":{\"get\":{\"name\":\"n2\"},\"keys\":[2,1,3],\"subset\":{\"batch\":{\"removed\":[\"2\"]},\"keys\":[1,3]}}," +
-    "\"platforms\":{\"get\":{\"name\":\"linux/arm64\"},\"keys\":[\"linux/amd64\",\"linux/arm64\"],\"subset\":{\"batch\":{\"removed\":[\"linux/amd64\"]}}}," +
-    "\"ratios\":{\"get\":{\"name\":\"r1.5\"},\"keys\":[0.5,1.5],\"subset\":{\"batch\":{\"removed\":[\"0.5\"]}}}," +
-    "\"shelves\":{\"get\":{\"get\":{\"name\":\"s2-1\"},\"keys\":[\"s2-1\",\"s2-2\"],\"subset\":{\"batch\":{\"selected\":[\"s2-2\"]}}},\"keys\":[\"s1\",\"s2\"],\"subset\":{\"batch\":{\"count\":1}}}" +
+    "\"colors\":{\"get\":{\"name\":\"blue\"},\"keys\":[\"RED\",\"BLUE\"],\"subset\":{\"removed\":[\"RED\"]}}," +
+    "\"flags\":{\"get\":{\"name\":\"fFalse\"},\"keys\":[true,false],\"subset\":{\"removed\":[\"true\"]}}," +
+    "\"items\":{\"keys\":[\"a\",\"b\",\"c\"],\"selected\":[\"a\",\"b\",\"c\"]}," +
+    "\"numbers\":{\"get\":{\"name\":\"n2\"},\"keys\":[2,1,3],\"subset\":{\"keys\":[1,3],\"removed\":[\"2\"]}}," +
+    "\"platforms\":{\"get\":{\"name\":\"linux/arm64\"},\"keys\":[\"linux/amd64\",\"linux/arm64\"],\"subset\":{\"removed\":[\"linux/amd64\"]}}," +
+    "\"ratios\":{\"get\":{\"name\":\"r1.5\"},\"keys\":[0.5,1.5],\"subset\":{\"removed\":[\"0.5\"]}}," +
+    "\"shelves\":{\"get\":{\"get\":{\"name\":\"s2-1\"},\"keys\":[\"s2-1\",\"s2-2\"],\"subset\":{\"selected\":[\"s2-2\"]}},\"keys\":[\"s1\",\"s2\"],\"subset\":{\"count\":1}}" +
     "}"
 
   """

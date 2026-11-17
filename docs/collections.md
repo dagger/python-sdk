@@ -10,6 +10,8 @@ resolves ([dagger/dagger#14447](https://github.com/dagger/dagger/pull/14447))
 and item selectors on `dagger call`
 ([dagger/dagger#14590](https://github.com/dagger/dagger/pull/14590),
 [dagger/dagger#14602](https://github.com/dagger/dagger/pull/14602)).
+v1.0.0-beta.22 removes the `batch` operation
+([dagger/dagger#14802](https://github.com/dagger/dagger/pull/14802)).
 
 ## Declare a collection
 
@@ -76,15 +78,12 @@ collection:
 | `list` | Every item |
 | `get` | The item with the given key |
 | `subset` | A collection of the items with the given keys |
-| `batch` | The collection's other functions |
 
-Every function other than the get function is a batch function. The engine
-calls a batch function on a copy of the collection whose keys field holds only
-the selected keys. In the example, `selected` returns those keys. The engine
-adds `batch` only when the collection has a batch function.
+The collection keeps its other functions. The engine calls them on a copy of
+the collection whose keys field holds only the selected keys. In the example,
+`selected` returns those keys.
 
-A batch check or generator replaces the check or generator with the same name
-on the item type. Without one, the item's check runs once per selected item.
+A check or generator on the item type runs once per selected item.
 
 A client generated from a module with a collection has the same functions.
 The Python client names `list` as `list_`, so it does not shadow the builtin:
@@ -94,7 +93,7 @@ from dagger_clients.shelf import shelf
 
 items = shelf().items()
 names = [await item.name() for item in await items.list_()]
-selected = await items.subset(["c"]).batch().selected()
+selected = await items.subset(["c"]).selected()
 ```
 
 ## Select items on the command line
@@ -105,13 +104,14 @@ module and the item type, so `Item` in the `shelf` module adds `--shelf-item`:
 ```shell
 dagger call items name --shelf-item=a
 dagger call --shelf-item=a name
-dagger call items selected --shelf-item=a --shelf-item=c
+dagger call items subset --keys=a,c selected
 dagger call items get --key=a name
 ```
 
 A selector after the collection selects within it. A selector before the first
-function starts the pipeline at the item. A repeated selector selects a subset
-for a batch function. `get` and `subset` remain available by name.
+function starts the pipeline at the item. `get` and `subset` remain available
+by name, and `subset` selects several items for the collection's other
+functions.
 
 When more than one function returns the collection, each flag also names its
 function. If `items` and `others` both return `Items`, the flags are
@@ -122,8 +122,8 @@ The help of a command after the collection lists the flags under `SELECTION`,
 for example `dagger call items selected --help`. `dagger call --help` does not
 list them.
 
-`dagger check` takes the flags for a module that the workspace registers. For
-a check `verify` on `Items`:
+`dagger check` takes the flags for a module that the workspace registers. A
+check `verify` on `Item` runs once for each selected item:
 
 ```shell
 dagger check --shelf --check=verify --shelf-item=a --shelf-item=b
