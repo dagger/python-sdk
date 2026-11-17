@@ -42,54 +42,6 @@ func ensureTable(doc map[string]any, key string) map[string]any {
 	return t
 }
 
-// getPythonVersion returns the version from a single requires-python specifier,
-// stripping a leading comparison operator (e.g. ">=3.14" -> "3.14"). It assumes
-// the simple form this SDK writes; a multi-clause range is returned as-is after
-// the leading operator.
-func getPythonVersion(doc map[string]any) string {
-	rp, _ := table(doc, "project")["requires-python"].(string)
-	rp = strings.TrimSpace(rp)
-	for _, op := range []string{">=", "<=", "==", "!=", "~=", ">", "<"} {
-		if strings.HasPrefix(rp, op) {
-			return strings.TrimSpace(strings.TrimPrefix(rp, op))
-		}
-	}
-	return rp
-}
-
-// getUseUv reports the [tool.dagger].use-uv setting and whether it was set at
-// all. Reporting unset (ok == false) lets callers distinguish "not configured"
-// from an explicit choice instead of guessing the uv default.
-func getUseUv(doc map[string]any) (value bool, ok bool) {
-	value, ok = table(table(doc, "tool"), "dagger")["use-uv"].(bool)
-	return value, ok
-}
-
-// getMembers lists the [tool.uv.workspace] members uv reads, one a line.
-// What is not a string, such as a nested array, is not a member.
-func getMembers(doc map[string]any) string {
-	members, _ := table(table(table(doc, "tool"), "uv"), "workspace")["members"].([]any)
-	var out strings.Builder
-	for _, m := range members {
-		if s, ok := m.(string); ok {
-			out.WriteString(s + "\n")
-		}
-	}
-	return out.String()
-}
-
-// getGlobalClient reports the [tool.dagger].global-client flag and whether it
-// was set at all, like getUseUv.
-func getGlobalClient(doc map[string]any) (value bool, ok bool) {
-	value, ok = table(table(doc, "tool"), "dagger")["global-client"].(bool)
-	return value, ok
-}
-
-func getBaseImage(doc map[string]any) string {
-	s, _ := table(table(doc, "tool"), "dagger")["base-image"].(string)
-	return s
-}
-
 func setPythonVersion(doc map[string]any, v string) {
 	ensureTable(doc, "project")["requires-python"] = ">=" + v
 }

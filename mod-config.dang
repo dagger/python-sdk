@@ -58,11 +58,14 @@ type ModConfig {
   null rather than guessed.
   """
   pub get: ModConfigValues! {
+    let pyproject = PyprojectToml(ws.file("/" + pyprojectPath).contents)
+    let pythonVersion = pyproject.pythonVersion
+    let baseImage = pyproject.baseImage
     ModConfigValues(
-      pythonVersion: readPythonVersion,
-      useUv: readUseUv,
-      baseImage: readBaseImage,
-      globalClient: readGlobalClient,
+      pythonVersion: if (pythonVersion == "") { null } else { pythonVersion },
+      useUv: pyproject.useUv,
+      baseImage: if (baseImage == "") { null } else { baseImage },
+      globalClient: pyproject.globalClient,
     )
   }
 
@@ -98,52 +101,19 @@ type ModConfig {
       withImage
     }
 
-    let refusal = if (pythonVersion != null) { withGlobal.withExec(["pyproject", "python-refusal", toolDir]).stdout } else { "" }
+    let edited = withGlobal.file(toolPath).contents
+    let refusal = if (pythonVersion != null) { PyprojectToml(edited).pythonRefusal(null) } else { "" }
     if (refusal != "") {
       raise refusal + "."
     }
-    let edited = withGlobal.file(toolPath).contents
     ws.withNewFile("/" + pyprojectPath, edited).changes(ws)
-  }
-
-  """
-  The required Python version from requires-python, or null when unset.
-  """
-  let readPythonVersion: String {
-    let value = tool.withExec(["pyproject", "get-python-version", toolPath]).stdout
-    if (value == "") { null } else { value }
-  }
-
-  """
-  Whether the module builds with uv, or null when unset.
-  """
-  let readUseUv: Boolean {
-    let value = tool.withExec(["pyproject", "get-use-uv", toolPath]).stdout
-    if (value == "true") { true } else if (value == "false") { false } else { null }
-  }
-
-  """
-  The base container image override, or null when unset.
-  """
-  let readBaseImage: String {
-    let value = tool.withExec(["pyproject", "get-base-image", toolPath]).stdout
-    if (value == "") { null } else { value }
-  }
-
-  """
-  Whether generation emits the global client, or null when unset.
-  """
-  let readGlobalClient: Boolean {
-    let value = tool.withExec(["pyproject", "get-global-client", toolPath]).stdout
-    if (value == "true") { true } else if (value == "false") { false } else { null }
   }
 
   let pyprojectPath: String! {
     if (path == ".") { "pyproject.toml" } else { path + "/pyproject.toml" }
   }
 
-  let toolDir: String! = "/work"
-  let toolPath: String! = toolDir + "/pyproject.toml"
+  let toolPath: String! = "/work/pyproject.toml"
 
   """
   Container with the pyproject helper built and the module's pyproject.toml

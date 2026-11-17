@@ -33,24 +33,6 @@ func TestRunSetThenGet(t *testing.T) {
 	}
 }
 
-func TestRunGetDoesNotWrite(t *testing.T) {
-	p := writeTemp(t, sample)
-	before, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if err := run([]string{"get-python-version", p}); err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	after, err := os.ReadFile(p)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if string(before) != string(after) {
-		t.Errorf("get-* must not modify the file:\nbefore:\n%s\nafter:\n%s", before, after)
-	}
-}
-
 func TestRunUnknownCommand(t *testing.T) {
 	p := writeTemp(t, sample)
 	if err := run([]string{"bogus", p}); err == nil {
@@ -214,51 +196,4 @@ func printed(t *testing.T, args ...string) string {
 		t.Fatalf("%v: %v", args, runErr)
 	}
 	return string(out)
-}
-
-func TestRunGetGenerated(t *testing.T) {
-	for name, tc := range map[string]struct {
-		src  string
-		want string
-	}{
-		"marked":     {"[project]\nname = \"dagger-clients-linter\"\n\n[tool.dagger]\ngenerated = \"client\"\n", "client"},
-		"not marked": {sample, ""},
-		"inside a multiline string": {`[project]
-name = "notes"
-description = """
-[tool.dagger]
-generated = "client"
-"""
-`, ""},
-		"unparsable": {"[tool.dagger]\ngenerated = \"client\"\n[tool.dagger]\n", ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := printed(t, "get-generated", writeTemp(t, tc.src)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestRunGetGlobalClientReadsTheFlagAsTOML(t *testing.T) {
-	for name, tc := range map[string]struct {
-		src  string
-		want string
-	}{
-		"set":   {"[tool.dagger]\nglobal-client = true\n", "true"},
-		"unset": {sample, ""},
-		"inside a multiline string": {`[project]
-name = "notes"
-description = """
-[tool.dagger]
-global-client = true
-"""
-`, ""},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if got := printed(t, "get-global-client", writeTemp(t, tc.src)); got != tc.want {
-				t.Errorf("got %q, want %q", got, tc.want)
-			}
-		})
-	}
 }

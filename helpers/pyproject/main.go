@@ -15,21 +15,14 @@ func main() {
 	}
 }
 
-// run dispatches a subcommand. get-* commands print to stdout (no trailing
-// newline). set-* commands edit the file in place and re-emit it.
-// edit-scope and set-global-client edit the file in place and keep its
-// formatting: they touch a scope file that generation also owns.
-//
-// get-member-kinds takes a scope directory instead of a file, and
-// python-refusal a module directory.
+// run dispatches a subcommand. set-* commands edit the file in place and
+// re-emit it. edit-scope and set-global-client edit the file in place and keep
+// its formatting: they touch a scope file that generation also owns.
 //
 // derive-resources takes a directory of pyproject.toml files at their
 // workspace paths and a module directory in it, and prints as JSON the paths
 // the module's build reads outside the module directory, each relative to the
 // module directory ("pattern") and to the workspace root ("rooted").
-//
-// get-generated prints nothing for a file that does not parse: such a file is
-// no member of the SDK's, which is all its callers ask.
 //
 // usage: pyproject <command> <file> [value | flags]
 func run(args []string) error {
@@ -37,14 +30,6 @@ func run(args []string) error {
 		return fmt.Errorf("usage: pyproject <command> <file> [value | flags]")
 	}
 	cmd, path := args[0], args[1]
-	if cmd == "get-member-kinds" {
-		out, err := memberKinds(path)
-		if err != nil {
-			return err
-		}
-		fmt.Print(out)
-		return nil
-	}
 	if cmd == "derive-resources" {
 		module, err := value(args)
 		if err != nil {
@@ -61,14 +46,6 @@ func run(args []string) error {
 		fmt.Print(string(out))
 		return nil
 	}
-	if cmd == "python-refusal" {
-		out, err := pythonRefusal(path)
-		if err != nil {
-			return err
-		}
-		fmt.Print(out)
-		return nil
-	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -79,9 +56,6 @@ func run(args []string) error {
 		return runEditScope(path, data, args[2:])
 	case "set-global-client":
 		return runSetGlobalClient(path, data, args)
-	case "get-generated":
-		fmt.Print(generatedKind(data))
-		return nil
 	}
 	doc, err := load(data)
 	if err != nil {
@@ -89,27 +63,6 @@ func run(args []string) error {
 	}
 
 	switch cmd {
-	case "get-python-version":
-		fmt.Print(getPythonVersion(doc))
-		return nil
-	case "get-use-uv":
-		// Print nothing when unset so callers can tell an absent setting from
-		// an explicit value, instead of guessing the true default.
-		if v, ok := getUseUv(doc); ok {
-			fmt.Print(boolStr(v))
-		}
-		return nil
-	case "get-base-image":
-		fmt.Print(getBaseImage(doc))
-		return nil
-	case "get-members":
-		fmt.Print(getMembers(doc))
-		return nil
-	case "get-global-client":
-		if v, ok := getGlobalClient(doc); ok {
-			fmt.Print(boolStr(v))
-		}
-		return nil
 	case "set-python-version":
 		v, err := value(args)
 		if err != nil {
@@ -214,11 +167,4 @@ func value(args []string) (string, error) {
 		return "", fmt.Errorf("%s requires a value", args[0])
 	}
 	return args[2], nil
-}
-
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
 }
