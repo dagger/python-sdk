@@ -52,9 +52,9 @@ type Scope {
 
   """
   The workspace with the scope generated: sdk/, clients/core and one member
-  per client written whole, a client that is no longer declared deleted, and
-  the SDK-owned entries of the scope file set. Everything else is left as it
-  is.
+  per client written whole, each with a ruff.toml that keeps ruff out of it,
+  a client that is no longer declared deleted, and the SDK-owned entries of
+  the scope file set. Everything else is left as it is.
   """
   pub generated: Workspace! {
     let existing = ws.directory(root, gitignore: true)
@@ -209,13 +209,17 @@ type Scope {
 
   """
   A member is written whole, so nothing of an earlier generation survives in
-  it; merging would keep a file the generator no longer writes.
+  it; merging would keep a file the generator no longer writes. Its ruff.toml
+  goes in the member, not the module root, so the author's ruff config stays
+  untouched.
   """
   let replaced(target: Workspace!, rel: String!, files: Directory!): Workspace! {
     let abs = memberPath(rel)
     let cleared = if (ws.directory(root, gitignore: true).exists(rel)) { target.withoutDirectory(abs) } else { target }
-    cleared.withDirectory(abs, files)
+    cleared.withDirectory(abs, files.withNewFile("ruff.toml", generatedRuffConfig))
   }
+
+  let generatedRuffConfig: String! = "# Rewritten on every generation: do not edit.\nextend-exclude = [\"*\"]\n"
 
   """
   A directory where a member goes, that is not a member, is the user's: the

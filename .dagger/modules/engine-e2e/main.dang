@@ -157,6 +157,8 @@ type EngineE2e {
 
   pub generateScopeClientsCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-clients-check") }
 
+  pub generatedRuffSkipCheck(ws: Workspace!): Void @check { onFloor(ws, "generated-ruff-skip-check") }
+
   pub linkedClientManifestCheck(ws: Workspace!): Void @check { onFloor(ws, "linked-client-manifest-check") }
 
   pub generateScopeStaleTargetCheck(ws: Workspace!): Void @check { onFloor(ws, "generate-scope-stale-target-check") }
