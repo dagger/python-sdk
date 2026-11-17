@@ -305,49 +305,42 @@ type E2e {
   }
 
   """
-  A new module's main class is named as the engine names the module, whose
-  rules spell an acronym differently on either side of the identifier casing
-  cut: http-server is HttpServer by the legacy rules a module without a
-  dang.toml is named by, and HTTPServer past the cut; k8s-tools, which strcase
-  spells differently when it reads its own spelling again, is K8STools before
-  the cut. Generation fails when the engine takes the class for no main
-  object, and the module loads.
+  A new module's main class follows the final generated config, at the SDK's
+  released target and at the oldest release a pin may name. Both are past the
+  identifier casing cut, so http-server is HTTPServer at each.
   """
   pub initNamingCheck(ws: Workspace!): Void @check {
     [
-      {{name: "http-server", pkg: "http_server", pinned: false, main: "HttpServer"}},
-      {{name: "http-server", pkg: "http_server", pinned: true, main: "HTTPServer"}},
-      {{name: "k8s-tools", pkg: "k8s_tools", pinned: false, main: "K8STools"}},
-      {{name: "k8s-tools", pkg: "k8s_tools", pinned: true, main: "K8sTools"}},
-      {{name: "e2e-test", pkg: "e2e_test", pinned: false, main: "E2ETest"}},
-      {{name: "e2e-test", pkg: "e2e_test", pinned: true, main: "E2ETest"}},
+      {{name: "http-server", pkg: "http_server", main: "HTTPServer"}},
+      {{name: "k8s-tools", pkg: "k8s_tools", main: "K8sTools"}},
+      {{name: "e2e-test", pkg: "e2e_test", main: "E2ETest"}},
     ].each { want =>
-      let label = want.name + (if (want.pinned) { " at v1.0.0-beta.26" } else { " without a version" })
-      let scope = outputRoot + "/" + want.name
-      let seeded = if (want.pinned) {
-        ws.withNewFile("/" + scope + "/dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.26\"\n")
-      } else {
-        ws.withNewDirectory("/" + scope, directory)
+      ["", "v" + floorVersion].each { pin =>
+        let target = pythonSdk.targetVersionOf(pin)
+        let label = want.name + " at " + target
+        let scope = outputRoot + "/" + want.name
+        let seeded = ws.withNewDirectory("/" + scope, directory)
+        let generated = pythonSdk(targetVersion: pin).generateScope(seeded.withWorkdir(scope), isModule: true, name: want.name, clients: [])
+          .withWorkdir(".")
+        assertContains(generated.file("/" + scope + "/src/" + want.pkg + "/__init__.py").contents, "class " + want.main + ":", label + ": the main class is not " + want.main)
+        assertContains(generated.file("/" + scope + "/sdk/entrypoint/dang.toml").contents, "dagger = \"" + target + "\"", label + ": config target differs")
+        let source = generated.moduleSource("/" + scope)
+        let names = source.naming.typeNames(names: [want.name])
+        assert((names[0] ?? "") == want.main, label + ": served naming differs from the generated class")
+        let objects = source.asModule.objects.{{ asObject.{{ name }} }}
+        assert(objects.filter { o => o.asObject.name == want.main }.length == 1, label + ": the module does not load with its main object " + want.main)
+        null
       }
-      let generated = pythonSdk.generateScope(seeded.withWorkdir(scope), isModule: true, name: want.name, clients: [])
-        .withWorkdir(".")
-      assertContains(generated.file("/" + scope + "/src/" + want.pkg + "/__init__.py").contents, "class " + want.main + ":", label + ": the main class is not " + want.main)
-      let objects = generated.moduleSource("/" + scope).asModule.objects.{{ asObject.{{ name }} }}
-      assert(objects.filter { o => o.asObject.name == want.main }.length == 1, label + ": the module does not load with its main object " + want.main)
-      null
     }
 
-    # The other kinds of entrypoint name a new module by its manifest alone.
-    [
-      {{label: "on the shared entrypoint", sdk: pythonSdk(remoteEntrypoint: true)}},
-      {{label: "on the runtime", sdk: pythonSdk(legacyRuntime: true)}},
-    ].each { kind =>
-      let scope = outputRoot + "/http-server"
-      let generated = kind.sdk.generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "http-server", clients: [])
-        .withWorkdir(".")
-      assertContains(generated.file("/" + scope + "/src/http_server/__init__.py").contents, "class HttpServer:", "http-server " + kind.label + ": the main class is not HttpServer")
-      null
-    }
+    # A runtime module is named by its manifest, not a generated config.
+    let scope = outputRoot + "/http-server-runtime"
+    let generated = pythonSdk(legacyRuntime: true).generateScope(ws.withNewDirectory("/" + scope, directory).withWorkdir(scope), isModule: true, name: "http-server", clients: [])
+      .withWorkdir(".")
+    let names = generated.moduleSource("/" + scope).naming.typeNames(names: ["http-server"])
+    let main = names[0] ?? ""
+    assert(main != "", "runtime module has no main name")
+    assertContains(generated.file("/" + scope + "/src/http_server/__init__.py").contents, "class " + main + ":", "runtime main class differs from the engine's name")
 
     null
   }
@@ -1624,7 +1617,7 @@ type E2e {
         "--use-uv=false",
         "--base-image", "python:3.13-slim",
       ])
-      .withExec(["grep", "-q", "class SdkSettings:", ".dagger/modules/sdk-settings/src/sdk_settings/__init__.py"])
+      .withExec(["grep", "-q", "class SDKSettings:", ".dagger/modules/sdk-settings/src/sdk_settings/__init__.py"])
       .withExec(["grep", "-q", ">=3.13", ".dagger/modules/sdk-settings/pyproject.toml"])
       .withExec(["grep", "-q", "use-uv = false", ".dagger/modules/sdk-settings/pyproject.toml"])
       .withExec(["grep", "-q", "python:3.13-slim", ".dagger/modules/sdk-settings/pyproject.toml"])
@@ -1781,9 +1774,8 @@ type E2e {
     let floorPinned = pythonSdk(targetVersion: floor).generateScope(scoped, isModule: true, name: name, clients: []).withWorkdir(".")
     assertContains(floorPinned.file("/" + scope + "/sdk/entrypoint/main.dang").contents, "let clientVersion: String! = \"" + floor + "\"", "the entrypoint does not declare the pinned release")
     assertContains(floorPinned.file("/" + scope + "/sdk/entrypoint/dang.toml").contents, "dagger = \"" + floor + "\"", "dang.toml does not follow the targetVersion pin")
-    if (version.contains(target)) {
-      assertContains(pinned.file("/" + scope + "/" + coreInitPath).contents, newInBeta22, "core was not read in the view of the targeted release")
-    }
+    # The engine running the checks serves the targeted release's view.
+    assertContains(pinned.file("/" + scope + "/" + coreInitPath).contents, newInBeta22, "core was not read in the view of the targeted release")
 
     let remedy = ": set targetVersion in its dagger.toml settings to " + target + ", or remove it to generate for " + target
     let refusals = [
@@ -3115,22 +3107,21 @@ type E2e {
 
   """
   naming-app generated as a static entrypoint module, and naming-caller
-  generated with a client of it, in a workspace of their own. With pinned,
-  naming-app's dang.toml declares v1.0.0-beta.26, which the engine names it
-  by; without one, the engine names it by v1.0.0-beta.25, the legacy rules.
+  generated with a client of it, in a workspace of their own. Both use the
+  SDK's released target, past the identifier casing cut. With pinned, an old
+  leaf config is replaced before naming.
   """
   let namingScope(ws: Workspace!, pinned: Boolean!): Workspace! {
     let app = ws.directory("/" + namingFixturePath + "/app")
-    let appSource = if (pinned) {
-      app.withNewFile("dang.toml", "[imports.Dagger]\ndagger = \"v1.0.0-beta.26\"\n")
-    } else {
-      app
-    }
     let tree = directory
-      .withDirectory("naming-app", appSource)
+      .withDirectory("naming-app", app)
       .withDirectory("naming-caller", ws.directory("/" + namingFixturePath + "/caller"))
-    let withApp = pythonSdk.generateScope(tree.asWorkspace.withWorkdir("naming-app"), isModule: true, name: "naming-app", clients: [])
+    let fresh = pythonSdk.generateScope(tree.asWorkspace.withWorkdir("naming-app"), isModule: true, name: "naming-app", clients: [])
       .withWorkdir(".")
+    let withApp = if (pinned) {
+      let older = fresh.withNewFile("/naming-app/sdk/entrypoint/dang.toml", "[imports.Dagger]\ndagger = \"v" + floorVersion + "\"\n")
+      pythonSdk.generateScope(older.withWorkdir("naming-app"), isModule: true, name: "naming-app", clients: []).withWorkdir(".")
+    } else { fresh }
     pythonSdk.generateScope(withApp.withWorkdir("naming-caller"), isModule: true, name: "naming-caller", clients: [withApp.moduleSource("/naming-app")])
       .withWorkdir(".")
   }
@@ -3142,13 +3133,12 @@ type E2e {
 
   """
   The engine names a module's declarations by the version it names the module
-  by, and the SDK follows it on both sides of the identifier casing cut:
+  by, and the SDK follows the config generation actually writes:
 
   - generation spells the Python names of every schema identifier as the
     engine does (experimental_with_all_gpus in core, whatever the version);
   - the client generated for naming-app names its declarations as the
-    engine does at naming-app's version (NamingAppHttpFetcher and ARM_64
-    before the cut, NamingAppHTTPFetcher and ARM64 past it);
+    engine does at the released target (NamingAppHTTPFetcher and ARM64);
   - naming-app's runtime, called through that client, calls its own
     interface by the names the engine gave it (the namespaced type and its
     function), so the call returns.
@@ -3158,11 +3148,14 @@ type E2e {
   """
   pub namingCheck(ws: Workspace!): Void @check {
     [
-      {{pinned: false, iface: "NamingAppHttpFetcher", member: "ARM_64"}},
+      {{pinned: false, iface: "NamingAppHTTPFetcher", member: "ARM64"}},
       {{pinned: true, iface: "NamingAppHTTPFetcher", member: "ARM64"}},
     ].each { want =>
-      let label = if (want.pinned) { "naming-app at v1.0.0-beta.26" } else { "naming-app without a version" }
+      let label = if (want.pinned) { "naming-app with an upgraded config" } else { "naming-app with a new config" }
       let generated = namingScope(ws, want.pinned)
+      let target = pythonSdk.targetVersionOf("")
+      assertContains(generated.file("/naming-app/sdk/entrypoint/dang.toml").contents, "dagger = \"" + target + "\"", label + ": wrong generated config")
+      assert(generated.moduleSource("/naming-app").naming.version == target, label + ": naming does not match the final config")
       let core = pyFiles(generated, "naming-caller/clients/core/src")
       assertContains(core, "def experimental_with_all_gpus(", label + ": core's Python names are not the engine's")
       let client = pyFiles(generated, "naming-caller/clients/naming-app/src")

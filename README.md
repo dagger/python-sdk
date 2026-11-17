@@ -54,10 +54,10 @@ settings through `WorkspaceSDK.scopeSetting`, which
 release. It also needs the first release that names identifiers by its naming
 rules and answers for them: generation asks it how to spell the Python names of
 the schema's identifiers, and a module asks it what it named the module's own
-declarations. An entrypoint runs a module on the engine's own version, so an
-entrypoint manifest keeps no `engineVersion`. The engine names the module's own
-declarations by the version the entrypoint's `dang.toml` imports, and by the
-rules of v1.0.0-beta.25, before the identifier casing cut, without one.
+declarations. An entrypoint manifest keeps no `engineVersion` (see "The Dagger
+version of a generated entrypoint"). The final config and manifest are staged
+before naming or main-object selection, so those answers describe the module
+generation actually writes.
 
 The SDK's modules declare `engineVersion` v1.0.0-beta.26. Engines compare
 only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.25 does
@@ -256,9 +256,10 @@ The two declarations reach an engine in different ways:
 - `dang.toml`: [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902),
   first released in v1.0.0-beta.26, makes an engine take the module's Dagger
   version from the file. Engines up to v1.0.0-beta.25 do not read it. It also
-  refuses an entrypoint whose imports declare different Dagger versions, and
-  serves v1.0.0-beta.25 to an entrypoint whose `dang.toml` declares no Dagger
-  version.
+  refuses an entrypoint whose imports declare different Dagger versions, so
+  generation stops with that error, and serves v1.0.0-beta.25, the last release
+  before the identifier casing cut, to an entrypoint whose `dang.toml` declares
+  no Dagger version.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.

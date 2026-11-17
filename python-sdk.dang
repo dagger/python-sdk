@@ -740,6 +740,7 @@ type PythonSdk {
       entrypointMode: entrypointModeOf(ws, scope),
       migrating: false,
       engineVersion: "",
+      targetVersion: targetVersionOf(targetVersion),
       clients: [] :: [ModuleSource!]!,
     )
     let names = staged.naming.typeNames(names: [name])
