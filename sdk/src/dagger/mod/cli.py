@@ -15,9 +15,8 @@ from dagger._exceptions import QueryError
 from dagger.client._connection import connect
 from dagger.client._descriptor import registering_types
 from dagger.client._session import mark_module_runtime
-from dagger.mod import default_module
 from dagger.mod._exceptions import ModuleError, ModuleLoadError, record_exception
-from dagger.mod._module import Module
+from dagger.mod._module import MAIN_OBJECT, Module
 
 logger = logging.getLogger(__package__)
 
@@ -61,26 +60,14 @@ async def main(mod: Module | None = None, register: bool = False) -> int | None:
 
 
 def load_module() -> Module:
-    """Load the dagger.Module instance the module's code registers with.
-
-    The code is imported through the main object entry point when the
-    project names one, and else as the default package, whose import
-    registers its types. Which class is the main object the engine says,
-    once the module is loaded (Module.load_naming).
-    """
-    ep = configured_entry_point()
-    target = ep.module if ep else default_package()
+    """Load the dagger.Module instance via the main object entry point."""
+    ep = get_entry_point()
     try:
-        if ep is None:
-            importlib.import_module(target)
-            return default_module()
         cls = ep.load()
-    except ModuleLoadError:
-        raise
     except Exception as e:
         logger.exception(
             "Error while importing Python module '%s' with Dagger functions",
-            target,
+            ep.module,
         )
         raise ModuleLoadError(str(e)) from e
     try:
@@ -93,27 +80,33 @@ def load_module() -> Module:
         raise ModuleLoadError(msg) from None
 
 
-def configured_entry_point() -> importlib.metadata.EntryPoint | None:
-    """The main object entry point the project configures, if any."""
+def get_entry_point() -> importlib.metadata.EntryPoint:
+    """Get the entry point for the main object."""
     sel = importlib.metadata.entry_points(
         group=ENTRY_POINT_GROUP,
         name=ENTRY_POINT_NAME,
     )
-    return next(iter(sel), None)
+    if ep := next(iter(sel), None):
+        return ep
 
+    import_pkg = IMPORT_PKG
 
-def default_package() -> str:
-    """The package that holds the module's code by default."""
-    if importlib.util.find_spec(IMPORT_PKG):
-        return IMPORT_PKG
     # Fallback for modules that still use the "main" package name.
-    if importlib.util.find_spec("main"):
-        return "main"
-    msg = (
-        "Main object not found. You can configure it explicitly by adding "
-        "an entry point to your pyproject.toml file. For example:\n"
-        "\n"
-        f'[project.entry-points."{ENTRY_POINT_GROUP}"]\n'
-        f"{ENTRY_POINT_NAME} = '{IMPORT_PKG}:MyModule'\n"
+    if not importlib.util.find_spec(import_pkg):
+        import_pkg = "main"
+
+        if not importlib.util.find_spec(import_pkg):
+            msg = (
+                "Main object not found. You can configure it explicitly by adding "
+                "an entry point to your pyproject.toml file. For example:\n"
+                "\n"
+                f'[project.entry-points."{ENTRY_POINT_GROUP}"]\n'
+                f"{ENTRY_POINT_NAME} = '{IMPORT_PKG}:{MAIN_OBJECT}'\n"
+            )
+            raise ModuleLoadError(msg)
+
+    return importlib.metadata.EntryPoint(
+        group=ENTRY_POINT_GROUP,
+        name=ENTRY_POINT_NAME,
+        value=f"{import_pkg}:{MAIN_OBJECT}",
     )
-    raise ModuleLoadError(msg)

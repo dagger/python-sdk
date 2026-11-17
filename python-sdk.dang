@@ -259,7 +259,7 @@ type PythonSdk {
   The module runs on the Dang entrypoint generated into it, or on one of the
   user's own in its files, and on nothing else: an entrypoint served from
   elsewhere, the one this repository used to share among them, is replaced
-  by the generated one, which needs an engine v1.0.0-beta.18 or later.
+  by the generated one, which needs an engine v1.0.0-beta.26 or later.
   The runtime this SDK used to write, `[runtime] source = "python"`, goes,
   and so does what only a runtime reads: engineVersion, since an entrypoint
   runs a module on the engine's own version. Any other runtime is one the

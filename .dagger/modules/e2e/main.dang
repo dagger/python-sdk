@@ -2141,7 +2141,7 @@ type E2e {
     let core = ws.directory("/helpers/core-schema").asModuleSource
     sdkContainer(ws)
       .withFile("/core-only.py", ws.file("/helpers/core-schema/core_only.py"))
-      .withFile("/schema.json", core.withEngineVersion(core.engineVersion).clientSchemaIntrospectionJSON)
+      .withFile("/schema.json", core.withEngineVersion(core.engineVersion).clientSchemaIntrospectionJson)
       .withExec(["python", "/core-only.py", "/schema.json", "/core.json"])
       .withExec(["uv", "run", "--frozen", "python", "-m", "codegen", "generate", "-i", "/core.json", "-o", sdkBindingsPath], experimentalPrivilegedNesting: true)
       .withExec(["uv", "run", "--frozen", "ruff", "check", "--fix-only", sdkBindingsPath])
@@ -2553,8 +2553,8 @@ type E2e {
   sdk/entrypoint, whether the path exists or not. A module generated
   directly refuses what the written manifest cannot carry, a [clients]
   table, disableDefaultFunctionCaching or a [codegen] table, as the scope
-  path does, rather than dropping it. The moved module runs on
-  v1.0.0-beta.18 or later, and generating it needs v1.0.0-beta.26 or later.
+  path does, rather than dropping it. Running the moved module and generating
+  it both need v1.0.0-beta.26 or later.
   """
   pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check {
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
