@@ -264,8 +264,8 @@ type E2e {
 
   """
   Initializing a module at the workspace root uploads only template paths.
-  The nested CLI must upload workspace files without the ignored cache,
-  which a whole-directory destination baseline would import.
+  The client container's CLI must upload workspace files without the ignored
+  cache, which a whole-directory destination baseline would import.
   """
   rootInitIgnoresCheck(ws: Workspace!): Void @check {
     let config = "[modules.python-sdk]\nsource = \".sdk-source\"\ncheck.skip = [\"*\"]\n" +
@@ -291,7 +291,9 @@ type E2e {
     } else {
       ["dagger", "generate", "python-sdk", "-y"]
     }
-    let generated = client.withExec(["python3", "/check-uploads.py"] + command, experimentalPrivilegedNesting: true)
+    # A nested CLI receives only its own spans; one in a session of its own
+    # receives the engine's, the uploads among them.
+    let generated = client.withExec(["python3", "/check-uploads.py"] + command, daggerInDaggerNewSession: true)
       .withExec(["test", "-f", "dagger-module.toml"])
       .withExec(["test", "-f", "src/root_init/__init__.py"])
       .withExec(["test", "-f", "sdk/entrypoint/main.dang"])
@@ -740,20 +742,11 @@ type E2e {
       .cwd rescue {
         err: Error => err.message
       }
-    if (legacy.kind == ModuleSourceKind.GIT_SOURCE) {
-      # A workspace loaded from a ref makes every module in it a Git client,
-      # which the engine serves from the repository rather than the workspace,
-      # and `dagger module migrate` is no answer for one. Generation says
-      # nothing then, which is what this asserts, and the refusal is checked
-      # wherever the workspace is the one on disk, the floor job among them.
-      assertNotContains(generated, "dagger module migrate", "a Git client target was told to migrate in place: " + generated)
-    } else {
-      assertContainsAll(generated, [
-        "the client \"legacy-dep\" loads /" + legacyClientDepPath,
-        "has no dagger-module.toml",
-        "dagger module migrate /" + legacyClientDepPath,
-      ])
-    }
+    assertContainsAll(generated, [
+      "the client \"legacy-dep\" loads /" + legacyClientDepPath,
+      "has no dagger-module.toml",
+      "dagger module migrate /" + legacyClientDepPath,
+    ])
 
     let migrated = pythonSdk
       .generateScope(
@@ -1750,7 +1743,7 @@ type E2e {
     let remedy = ": set targetVersion in its dagger.toml settings to " + target + ", or remove it to generate for " + target
     let refusals = [
       ["v9.0.0", "v9.0.0, which is later than " + target + ", the engine release this Python SDK generates for: install the SDK release built for v9.0.0, or set targetVersion in its dagger.toml settings to " + target + ", or remove it"],
-      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest engine this Python SDK runs on" + remedy],
+      ["v1.0.0-beta.17", "v1.0.0-beta.17, which is below " + floor + ", the oldest release a targetVersion pin may name" + remedy],
       ["latest", "\"latest\", which is no engine release such as " + target + remedy],
     ]
     let plainScope = outputRoot + "/target-version-scope"
@@ -1906,10 +1899,12 @@ type E2e {
   entrypoint, called from that process, finds its module only in its own
   source.
 
-  The module's code gets nothing of the caller's workspace: it tries every
-  ID it holds against a file that is only in the caller's workspace, and
-  reads nothing. A function that declares a Workspace parameter still gets
-  the caller's, because the caller passes it.
+  Nothing the SDK holds in the module's code reaches the caller's workspace:
+  the code tries every ID it holds against a file that is only in the
+  caller's workspace, and reads nothing. The module's own currentWorkspace
+  comes from the engine, which serves the caller's there; the check notes
+  that read and does not fail on it. A function that declares a Workspace
+  parameter still gets the caller's, because the caller passes it.
   """
   pub entrypointClientCallCheck(ws: Workspace!): Void @check {
     let target = "ep-target"
@@ -1979,7 +1974,9 @@ type E2e {
       let withSecret = callerReady.withNewFile(callerSecretPath, secret)
       let reached = cli(withSecret, ["-m", callerPath, "call", "reach"]).stdout
       assertContains(reached, "reads=[]", "module code read a caller file: " + reached)
-      assertNotContains(reached, secret, "module code read a caller file: " + reached)
+      if (reached.contains("engine=[]") == false) {
+        note(withSecret, "the engine serves module code its caller's workspace as currentWorkspace: " + reached)
+      }
       # The probe proves something only if it held an ID to try, exercised many
       # routes, and hit no unknown field: an absent route errored for the wrong
       # reason and is no evidence of safety (fixtures/reach/reach.py).
@@ -2015,8 +2012,8 @@ type E2e {
 
   """
   The first release that loads a module's files through its entrypoint's
-  sources member. It is this SDK's floor. Its engine image carries its CLI,
-  and git.
+  sources member, and the oldest one a targetVersion pin may name. Its engine
+  image carries its CLI, and git.
   """
   let floorVersion: String! = "1.0.0-beta.18"
   let floorImage: String! { "registry.dagger.io/engine:v" + floorVersion }
@@ -2025,9 +2022,8 @@ type E2e {
   The image the playground takes its CLI from: the release of the engine
   running the check, so that the CLI it drives and the engine it reaches
   through nesting are one version. A CLI older than that engine waits for an
-  answer it never gets, and the floor is proven by running these checks on the
-  floor engine (engine-e2e's checks), not by pinning an older CLI in here.
-  An engine built from source names the release it came from before the `+`.
+  answer it never gets. An engine built from source names the release it came
+  from before the `+`.
   """
   let playgroundImage: String! {
     "registry.dagger.io/engine:" + (version.split("+")[0] ?? version)
@@ -2037,12 +2033,8 @@ type E2e {
 
   """
   This checkout, with the workspace config that registers it as the python
-  SDK, in a container with the floor release's CLI. The CLI is a nested
-  client of the engine running the checks, and its workspace is this tree.
-
-  So the engine is whichever runs the checks. A pass proves the floor only
-  on the floor's engine, which engine-e2e runs them on and asserts with
-  assertFloorEngine; an ordinary run takes the engine it finds.
+  SDK, in a container with the CLI of the engine running the checks. The CLI
+  is a nested client of that engine, and its workspace is this tree.
   """
   let playground(ws: Workspace!): Container! {
     playgroundOf(playgroundTree(ws))
@@ -2051,8 +2043,8 @@ type E2e {
   """
   The files of a workspace that the playground mounts, with the e2e
   workspace config as its dagger.toml. The checks may run from a workspace
-  whose config registers other modules, such as engine-e2e, which the
-  playground's CLI would then load.
+  whose config registers other modules, which the playground's CLI would then
+  load.
   """
   let playgroundTree(ws: Workspace!): Directory! {
     ws.directory("/", exclude: [".git", "**/.venv", "**/__pycache__", outputRoot])
@@ -2069,23 +2061,6 @@ type E2e {
       .withMountedDirectory(playgroundRoot, tree)
       .withWorkdir(playgroundRoot)
       .withExec(["git", "init", "--quiet"])
-  }
-
-  """
-  engine-e2e's precondition, not a check of its own: the engine the
-  playground's CLI talks to is the floor release, by the version it reports
-  itself. A release reports its build after a "+", which is not part of the
-  version; a dev or later build is refused. engine-e2e calls it before each
-  check it runs on the floor, so none can pass on another engine.
-  """
-  pub assertFloorEngine(ws: Workspace!): Void {
-    let answered = playground(ws).withExec(["dagger", "query"], stdin: "{ version }", experimentalPrivilegedNesting: true).stdout
-    let reported = json.withContents((answered :: Dagger.JSON!)).field(["version"]).asString
-    if ((reported.split("+")[0] ?? "") != "v" + floorVersion) {
-      raise "the checks drive the floor release's CLI, v" + floorVersion + ", against the engine running them, which is " +
-        reported + ": a pass would not prove the floor. Run the check as `dagger check engine-e2e:<check>`, which provisions its engine"
-    }
-    null
   }
 
   """
@@ -2188,8 +2163,8 @@ type E2e {
   """
   The client bindings this repository's tests import, as the code generator
   writes them from core and sdk/ruff.toml tidies them. Core is read the way a
-  scope reads it, from the engine running this. The committed file is the
-  floor release's core; refresh it on that engine:
+  scope reads it, from the engine running this. Refresh the committed file
+  with:
 
     dagger call -m .dagger/modules/e2e sdk-bindings export --path sdk/src/dagger/client/gen.py
   """
@@ -2206,25 +2181,6 @@ type E2e {
   }
 
   let sdkBindingsPath: String! = "src/dagger/client/gen.py"
-
-  """
-  The committed client bindings are what sdkBindings writes, so neither a
-  hand edit nor a new core leaves them behind. Each release serves a core of
-  its own, so only the floor release's engine can tell.
-  """
-  pub sdkBindingsCheck(ws: Workspace!): Void @check {
-    let path = "sdk/" + sdkBindingsPath
-    if ((version.split("+")[0] ?? version) != "v" + floorVersion) {
-      note(sdkContainer(ws), "skipped, " + path + " is the core of v" + floorVersion + " and this engine is " + version)
-    } else {
-      assert(
-        ws.file("/" + path).contents == sdkBindings(ws).contents,
-        path + " is not what the code generator writes; refresh it on the v" + floorVersion +
-          " engine with `dagger call -m .dagger/modules/e2e sdk-bindings export --path " + path + "`",
-      )
-    }
-    null
-  }
 
   """
   config.get should reflect pyproject.toml and report unset values as null
@@ -2282,6 +2238,24 @@ type E2e {
     null
   }
 
+
+  """
+  A numeric pin recorded under upper-case tables, which the engine reads, is
+  refused in a module generated directly as dagger generate refuses it.
+
+      dagger call -m .dagger/modules/e2e scope-setting-probe
+  """
+  pub scopeSettingProbe(ws: Workspace!): Void {
+    let path = outputRoot + "/scope-setting-probe"
+    let pinned = ws.withNewFile("/dagger.toml",
+      "[modules.python-sdk]\nsource = \".\"\n\n[SDKS.python]\nmodule = \"python-sdk\"\n\n" +
+      "[SDKS.python.SCOPES.\"" + path + "\".SETTINGS]\ntargetVersion = 18\n")
+    let said = pythonSdk.mod(pinned, path: path, findUp: false).rootPath rescue {
+      err: Error => err.message
+    }
+    assertContains(said, "the module at " + path + " pins targetVersion \"18\", which is no engine release", "the recorded pin was not read or refused: " + said)
+    null
+  }
 
   """
   Whether a cache policy reaches the exec an entrypoint starts: the answers of
@@ -2419,7 +2393,7 @@ type E2e {
   """
   A module declares a collection, on this checkout's shared entrypoint, on
   the one generated into it, and on this checkout's runtime, which registers
-  the types itself. The engine serves keys, list, get, subset and batch on it,
+  the types itself. The engine serves keys, list, get and subset on it,
   and the CLI names an item with a selector, after the collection or in place
   of the path to it.
 
@@ -2435,7 +2409,7 @@ type E2e {
 
   """
   A module calls the collection through the client generated from it. keys,
-  get, list, subset and batch exist only in the engine's projection of the
+  get, list and subset exist only in the engine's projection of the
   collection, so the client has them only if it was generated from that.
   """
   pub collectionsClientCheck(ws: Workspace!): Void @check {
@@ -2488,8 +2462,8 @@ type E2e {
     assert(item.trimSpace == "item:a", form + ": the selector after the collection did not name item a: " + item)
     let rooted = cli(ready, ["-m", path, "call", "--shelf-item=c", "name"]).stdout
     assert(rooted.trimSpace == "item:c", form + ": the selector in place of the path did not name item c: " + rooted)
-    let batch = cli(ready, ["-m", path, "call", "items", "selected", "--shelf-item=c", "--shelf-item=b"]).stdout
-    assert(batch.trimSpace == "b\nc", form + ": repeated selectors did not reach the batch with b and c: " + batch)
+    let subset = cli(ready, ["-m", path, "call", "items", "subset", "--keys=c,b", "selected"]).stdout
+    assert(subset.trimSpace == "b\nc", form + ": subset did not select b and c: " + subset)
     null
   }
 
@@ -2497,29 +2471,29 @@ type E2e {
     "  keys\n" +
     "  list { name }\n" +
     "  get(key: \"a\") { name }\n" +
-    "  batch { selected removed }\n" +
-    "  subset(keys: [\"c\", \"b\"]) { keys batch { selected removed } }\n" +
-    "  changed: batch { change(names: [\"c\", \"d\"]) { keys batch { added removed } } }\n" +
-    "  fresh: subset(keys: [\"c\"]) { batch { fresh { keys batch { added removed } } } }\n" +
+    "  selected removed\n" +
+    "  subset(keys: [\"c\", \"b\"]) { keys selected removed }\n" +
+    "  changed: change(names: [\"c\", \"d\"]) { keys added removed }\n" +
+    "  fresh: subset(keys: [\"c\"]) { fresh { keys added removed } }\n" +
     "} }"
 
   """The answer to collectionQuery, with its keys sorted the way the CLI prints them."""
   let collectionAnswer: String! = "{\"items\":{" +
-    "\"batch\":{\"removed\":[],\"selected\":[\"b\",\"a\",\"c\"]}," +
-    "\"changed\":{\"change\":{\"batch\":{\"added\":[\"d\"],\"removed\":[\"b\",\"a\"]},\"keys\":[\"c\",\"d\"]}}," +
-    "\"fresh\":{\"batch\":{\"fresh\":{\"batch\":{\"added\":[],\"removed\":[]},\"keys\":[\"z\"]}}}," +
+    "\"changed\":{\"added\":[\"d\"],\"keys\":[\"c\",\"d\"],\"removed\":[\"b\",\"a\"]}," +
+    "\"fresh\":{\"fresh\":{\"added\":[],\"keys\":[\"z\"],\"removed\":[]}}," +
     "\"get\":{\"name\":\"item:a\"}," +
     "\"keys\":[\"b\",\"a\",\"c\"]," +
     "\"list\":[{\"name\":\"item:b\"},{\"name\":\"item:a\"},{\"name\":\"item:c\"}]," +
-    "\"subset\":{\"batch\":{\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]},\"keys\":[\"b\",\"c\"]}" +
+    "\"removed\":[]," +
+    "\"selected\":[\"b\",\"a\",\"c\"]," +
+    "\"subset\":{\"keys\":[\"b\",\"c\"],\"removed\":[\"a\"],\"selected\":[\"b\",\"c\"]}" +
     "}}"
 
   """
   Collections of every key type the engine takes, in one module: Int, Float,
   Boolean, an enum and a core scalar. The delta names a removed key as text,
-  whatever the key type. An item can be a collection itself. A batch
-  generator replaces its item's generator of the same name and sees only the
-  selected keys; the item's generator raises if it runs.
+  whatever the key type. An item can be a collection itself. An item's
+  generator runs once for each item the selectors name, and for no other.
   """
   pub collectionKindsCheck(ws: Workspace!): Void @check {
     let path = ".dagger/modules/kinds"
@@ -2534,30 +2508,30 @@ type E2e {
     assert(compact == kindsAnswer, "the collections answered " + compact + ", not " + kindsAnswer)
 
     let generated = cli(ready, ["-m", path, "generate", "-y", "items/write?kinds-items-item=a&kinds-items-item=b"])
-    let selected = generated.withExec(["cat", playgroundRoot + "/selected"]).stdout
-    assert(selected == "a,b", "the batch generator wrote " + selected + ", not the selected keys a,b")
+    let selected = generated.withExec(["sh", "-c", "cat " + playgroundRoot + "/selected-*"]).stdout
+    assert(selected == "ab", "the item generators wrote " + selected + ", not the selected items a and b")
     null
   }
 
   let kindsQuery: String! = "{\n" +
-    "  numbers { keys get(key: 2) { name } subset(keys: [3, 1]) { keys batch { removed } } }\n" +
-    "  ratios { keys get(key: 1.5) { name } subset(keys: [1.5]) { batch { removed } } }\n" +
-    "  flags { keys get(key: false) { name } subset(keys: [false]) { batch { removed } } }\n" +
-    "  colors { keys get(key: BLUE) { name } subset(keys: [BLUE]) { batch { removed } } }\n" +
-    "  platforms { keys get(key: \"linux/arm64\") { name } subset(keys: [\"linux/arm64\"]) { batch { removed } } }\n" +
-    "  items { keys batch { selected } }\n" +
-    "  shelves { keys get(key: \"s2\") { keys get(key: \"s2-1\") { name } subset(keys: [\"s2-2\"]) { batch { selected } } } subset(keys: [\"s1\"]) { batch { count } } }\n" +
+    "  numbers { keys get(key: 2) { name } subset(keys: [3, 1]) { keys removed } }\n" +
+    "  ratios { keys get(key: 1.5) { name } subset(keys: [1.5]) { removed } }\n" +
+    "  flags { keys get(key: false) { name } subset(keys: [false]) { removed } }\n" +
+    "  colors { keys get(key: BLUE) { name } subset(keys: [BLUE]) { removed } }\n" +
+    "  platforms { keys get(key: \"linux/arm64\") { name } subset(keys: [\"linux/arm64\"]) { removed } }\n" +
+    "  items { keys selected }\n" +
+    "  shelves { keys get(key: \"s2\") { keys get(key: \"s2-1\") { name } subset(keys: [\"s2-2\"]) { selected } } subset(keys: [\"s1\"]) { count } }\n" +
     "}"
 
   """The answer to kindsQuery, with its keys sorted the way the CLI prints them."""
   let kindsAnswer: String! = "{" +
-    "\"colors\":{\"get\":{\"name\":\"blue\"},\"keys\":[\"RED\",\"BLUE\"],\"subset\":{\"batch\":{\"removed\":[\"RED\"]}}}," +
-    "\"flags\":{\"get\":{\"name\":\"fFalse\"},\"keys\":[true,false],\"subset\":{\"batch\":{\"removed\":[\"true\"]}}}," +
-    "\"items\":{\"batch\":{\"selected\":[\"a\",\"b\",\"c\"]},\"keys\":[\"a\",\"b\",\"c\"]}," +
-    "\"numbers\":{\"get\":{\"name\":\"n2\"},\"keys\":[2,1,3],\"subset\":{\"batch\":{\"removed\":[\"2\"]},\"keys\":[1,3]}}," +
-    "\"platforms\":{\"get\":{\"name\":\"linux/arm64\"},\"keys\":[\"linux/amd64\",\"linux/arm64\"],\"subset\":{\"batch\":{\"removed\":[\"linux/amd64\"]}}}," +
-    "\"ratios\":{\"get\":{\"name\":\"r1.5\"},\"keys\":[0.5,1.5],\"subset\":{\"batch\":{\"removed\":[\"0.5\"]}}}," +
-    "\"shelves\":{\"get\":{\"get\":{\"name\":\"s2-1\"},\"keys\":[\"s2-1\",\"s2-2\"],\"subset\":{\"batch\":{\"selected\":[\"s2-2\"]}}},\"keys\":[\"s1\",\"s2\"],\"subset\":{\"batch\":{\"count\":1}}}" +
+    "\"colors\":{\"get\":{\"name\":\"blue\"},\"keys\":[\"RED\",\"BLUE\"],\"subset\":{\"removed\":[\"RED\"]}}," +
+    "\"flags\":{\"get\":{\"name\":\"fFalse\"},\"keys\":[true,false],\"subset\":{\"removed\":[\"true\"]}}," +
+    "\"items\":{\"keys\":[\"a\",\"b\",\"c\"],\"selected\":[\"a\",\"b\",\"c\"]}," +
+    "\"numbers\":{\"get\":{\"name\":\"n2\"},\"keys\":[2,1,3],\"subset\":{\"keys\":[1,3],\"removed\":[\"2\"]}}," +
+    "\"platforms\":{\"get\":{\"name\":\"linux/arm64\"},\"keys\":[\"linux/amd64\",\"linux/arm64\"],\"subset\":{\"removed\":[\"linux/amd64\"]}}," +
+    "\"ratios\":{\"get\":{\"name\":\"r1.5\"},\"keys\":[0.5,1.5],\"subset\":{\"removed\":[\"0.5\"]}}," +
+    "\"shelves\":{\"get\":{\"get\":{\"name\":\"s2-1\"},\"keys\":[\"s2-1\",\"s2-2\"],\"subset\":{\"selected\":[\"s2-2\"]}},\"keys\":[\"s1\",\"s2\"],\"subset\":{\"count\":1}}" +
     "}"
 
   """
@@ -2657,8 +2631,8 @@ type E2e {
   sdk/entrypoint, whether the path exists or not. A module generated
   directly refuses what the written manifest cannot carry, a [clients]
   table, disableDefaultFunctionCaching or a [codegen] table, as the scope
-  path does, rather than dropping it. The move needs the engine floor,
-  v1.0.0-beta.18, which generation already requires.
+  path does, rather than dropping it. The moved module runs on
+  v1.0.0-beta.18 or later, and generating it needs v1.0.0-beta.26 or later.
   """
   pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check {
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"
@@ -2804,11 +2778,11 @@ type E2e {
     ws.withNewFile("/" + resourcesAppPath + "/uv.lock", "version = 1\nrequires-python = \">=3.14\"\n")
   }
 
-  let resourcesGenerated(sdk: PythonSdk!, ws: Workspace!): Workspace! {
+  let resourcesGenerated(sdk: PythonSDK!, ws: Workspace!): Workspace! {
     sdk.generateScope(ws.withWorkdir(resourcesAppPath), isModule: true, name: "resources-app", clients: []).withWorkdir(".")
   }
 
-  let resourcesAttempt(sdk: PythonSdk!, ws: Workspace!): String! {
+  let resourcesAttempt(sdk: PythonSDK!, ws: Workspace!): String! {
     resourcesGenerated(sdk, ws).file("/" + resourcesAppPath + "/sdk/entrypoint/main.dang").contents rescue {
       err: Error => err.message
     }

@@ -1,8 +1,8 @@
 """Collections of every key type, copied into a module a check generates.
 
 The keys are Int, Float, Boolean, an enum and a core scalar. Shelves returns
-an item that is a collection itself. Items has a batch generator that
-replaces its item's generator of the same name.
+an item that is a collection itself. Item has a generator that writes a file
+named after its item.
 """
 
 import enum
@@ -119,8 +119,8 @@ class Item:
     @function
     @generate
     def write(self) -> Changeset:
-        msg = "replaced item generator ran: " + self.name
-        raise ValueError(msg)
+        empty = core().directory()
+        return empty.with_new_file("selected-" + self.name, self.name).changes(empty)
 
 
 @object_type
@@ -132,12 +132,6 @@ class Items:
     @get
     def item(self, name: str) -> Item:
         return Item(name=name)
-
-    @function
-    @generate
-    def write(self) -> Changeset:
-        empty = core().directory()
-        return empty.with_new_file("selected", ",".join(self.names)).changes(empty)
 
     @function
     def selected(self) -> list[str]:
