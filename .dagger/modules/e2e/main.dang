@@ -2627,8 +2627,8 @@ type E2e {
   sdk/entrypoint, whether the path exists or not. A module generated
   directly refuses what the written manifest cannot carry, a [clients]
   table, disableDefaultFunctionCaching or a [codegen] table, as the scope
-  path does, rather than dropping it. The move needs the engine floor,
-  v1.0.0-beta.18, which generation already requires.
+  path does, rather than dropping it. The moved module runs on
+  v1.0.0-beta.18 or later, and generating it needs v1.0.0-beta.26 or later.
   """
   pub remoteEntrypointReplacedCheck(ws: Workspace!): Void @check {
     let manifestPath = "/" + tomlGenerateModulePath + "/dagger-module.toml"

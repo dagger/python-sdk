@@ -21,5 +21,5 @@ dagger check -m .dagger/modules/e2e 'e2e:*'
 Without a pattern, `dagger check` runs the same e2e checks, which is what CI
 runs.
 
-Judge a check by `dagger check`, never by `dagger call <check>`: on
-v1.0.0-beta.18, `dagger call` exits 0 when the check fails.
+Judge a check by `dagger check`, never by `dagger call <check>`: `dagger call`
+can exit 0 when the check fails.
