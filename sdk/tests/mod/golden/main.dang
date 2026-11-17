@@ -2,7 +2,7 @@
 
 type Entrypoint implements ModuleEntrypoint {
   let moduleName: String! = "main"
-  let clientVersion: String! = "v1.0.0-beta.24"
+  let clientVersion: String! = "v1.0.0-beta.27"
 
   pub sources(workspace: Workspace!): Directory! {
     directory

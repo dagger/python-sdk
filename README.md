@@ -3,7 +3,7 @@
 > [!NOTE]
 >
 > By default, this version of `dagger.io/sdk/python` targets Dagger engine
-> `v1.0.0-beta.24`. See
+> `v1.0.0-beta.27`. See
 > [The engine release a module targets](#the-engine-release-a-module-targets).
 
 A Dagger module for managing Dagger modules that use the Python SDK.
@@ -107,7 +107,7 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 
 ## The engine release a module targets
 
-Each release of this SDK targets one engine release, `v1.0.0-beta.24` today.
+Each release of this SDK targets one engine release, `v1.0.0-beta.27` today.
 That release, or the one the setting below pins, is what the SDK generates
 for and announces:
 
@@ -236,7 +236,7 @@ dang = "2.1"
 
 [imports]
   [imports.Dagger]
-    dagger = "v1.0.0-beta.24"
+    dagger = "v1.0.0-beta.27"
 ```
 
 Generation loads an existing `sdk/entrypoint/dang.toml` through sdk-helpers,
@@ -252,12 +252,12 @@ settings are read again if the module moves back.
 
 The two declarations reach an engine in different ways:
 
-- `dang.toml`: no release so far, v1.0.0-beta.25 included, takes the module's
-  Dagger version from the file.
-  [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902), not
-  merged, would. It also refuses an entrypoint whose imports declare different
-  Dagger versions, and proposes a fixed default release for an entrypoint whose
-  `dang.toml` declares no Dagger version.
+- `dang.toml`: [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902),
+  first released in v1.0.0-beta.26, makes an engine take the module's Dagger
+  version from the file. Engines up to v1.0.0-beta.25 do not read it. It also
+  refuses an entrypoint whose imports declare different Dagger versions, and
+  serves v1.0.0-beta.25 to an entrypoint whose `dang.toml` declares no Dagger
+  version.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.
@@ -398,7 +398,7 @@ are persisted on the scope:
 ```sh
 dagger module init python --name my-module --template empty
 dagger module init python --name my-module --legacy-runtime
-dagger module init python --name my-module --target-version v1.0.0-beta.24
+dagger module init python --name my-module --target-version v1.0.0-beta.27
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \

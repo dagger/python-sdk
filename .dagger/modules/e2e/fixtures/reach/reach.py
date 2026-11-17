@@ -164,7 +164,7 @@ def _source_dirs(source: Context, secret: str) -> dict[str, Context]:
     # Mutations that clone and may reload the context.
     for label, field, arg in (
         ("withName", "withName", Arg("name", "reach")),
-        ("withSDK", "withSDK", Arg("source", "")),
+        ("withSDK", "withSdk", Arg("source", "")),
         ("withEngineVersion", "withEngineVersion", Arg("version", "v1.0.0-0")),
     ):
         add(
