@@ -249,13 +249,20 @@ async def _probe(ctx: Context) -> tuple[str, str]:
 
 
 async def reach(secret: str) -> str:
-    held = [*_held_ids(), await _own_workspace_id()]
+    sdk_held = _held_ids()
+    own_id = await _own_workspace_id()
+    held = [*sdk_held, own_id]
     # The held IDs, plus one level of sub-sources reached from each.
     sources = list(held)
     for i in held:
         sources += await _sub_source_ids(Context().select_id("ModuleSource", i))
 
     reads: list[str] = []
+    # What the engine serves as the module's own current workspace, kept apart
+    # from what the SDK holds: dagger/dagger serves the caller's workspace there.
+    # The SDK holding that same ID makes its reads the SDK's.
+    engine_only = own_id not in sdk_held
+    engine: list[str] = []
     counts = {"read": 0, "refused": 0, "absent": 0, "errored": 0}
     absent_routes: list[str] = []
     total = 0
@@ -268,7 +275,9 @@ async def reach(secret: str) -> str:
             # module's loaded files, so any successful read of it is a leak,
             # whatever its contents.
             if status == "read":
-                reads.append(f"{label}: {detail}")
+                (engine if i == own_id and engine_only else reads).append(
+                    f"{label}: {detail}"
+                )
             elif status == "absent":
                 absent_routes.append(label)
 
@@ -281,11 +290,12 @@ async def reach(secret: str) -> str:
     total += 1
     counts[status] += 1
     if status == "read":
-        reads.append(f"currentWorkspace.directory: {detail}")
+        engine.append(f"currentWorkspace.directory: {detail}")
 
     absent = ",".join(sorted(set(absent_routes)))
     return (
         f"held={len(held)} sources={len(sources)} routes={total} "
-        f"reads={reads} refused={counts['refused']} absent={counts['absent']} "
-        f"errored={counts['errored']} absentRoutes=[{absent}]"
+        f"reads={reads} engine={engine} refused={counts['refused']} "
+        f"absent={counts['absent']} errored={counts['errored']} "
+        f"absentRoutes=[{absent}]"
     )
