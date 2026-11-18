@@ -123,6 +123,34 @@ class LiveSpanProcessor(sdktrace.SynchronousMultiSpanProcessor):
         return self.on_end(span)
 
 
+class _LazyExporter(SpanExporter):
+    """Imports the configured exporter on its first export.
+
+    A module call usually ends without a span, and the OTLP exporter
+    imports requests and protobuf, about 40 ms per call.
+    """
+
+    def __init__(self, name: str):
+        self._name = name
+        self._exporter: SpanExporter | None = None
+
+    def _get(self) -> SpanExporter:
+        if self._exporter is None:
+            classes, _, _ = _import_exporters([self._name], [], [])
+            self._exporter = classes[self._name]()
+        return self._exporter
+
+    def export(self, spans):
+        return self._get().export(spans)
+
+    def shutdown(self):
+        if self._exporter is not None:
+            self._exporter.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self._exporter is None or self._exporter.force_flush(timeout_millis)
+
+
 def _init_tracing(exporters: dict[str, type[SpanExporter]]):
     # By default this is a NoOpTracerProvider, unless OTEL_PYTHON_TRACER_PROVIDER
     # is set, which is done in _prepare_env.
@@ -196,11 +224,10 @@ class _DaggerOtelConfigurator(_BaseConfigurator):
         # Also skip OTel log exporting. Dagger already captures module
         # stdout/stderr and forwards it as logs; installing OTel's logging
         # handler would duplicate Python logging records in the TUI.
-        trace_exporters, _, _ = _import_exporters(
-            _get_exporter_names("traces"),
-            [],
-            [],
-        )
+        trace_exporters = {
+            name: (lambda name=name: _LazyExporter(name))
+            for name in _get_exporter_names("traces")
+        }
         logger.debug(
             "Initializing traces telemetry with exporters: %s",
             ", ".join(trace_exporters) if trace_exporters else "none",
