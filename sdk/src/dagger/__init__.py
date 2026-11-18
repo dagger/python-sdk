@@ -22,7 +22,6 @@ from dagger._exceptions import *
 from dagger.client import Session as Session
 from dagger.client import _session as _sessions
 from dagger.client._config import Retry as Retry
-from dagger.client._config import Timeout as Timeout
 from dagger.client._connection import connect as connect
 from dagger.client._connection import close as close
 
@@ -104,7 +103,12 @@ def _lazy_names() -> list[str]:
     provisioning = (
         _PROVISIONING if _importlib_util.find_spec("dagger.provisioning") else ()
     )
-    return ["dag", *provisioning, *(() if global_ is None else global_.__all__)]
+    return [
+        "dag",
+        "Timeout",
+        *provisioning,
+        *(() if global_ is None else global_.__all__),
+    ]
 
 
 def __dir__() -> list[str]:
@@ -116,6 +120,12 @@ def __getattr__(name: str) -> _typing.Any:
     if name == "dag":
         return _sessions.default_session()
     if name in _PROVISIONING and (value := _provisioning(name)) is not None:
+        return value
+    if name == "Timeout":
+        # Through the client config, which defines it on first use.
+        from dagger.client import _config
+
+        globals()[name] = value = _config.Timeout
         return value
     if name == "__all__":
         # What a star import took when these names were globals.
