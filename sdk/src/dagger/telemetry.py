@@ -3,13 +3,11 @@ import os
 from typing import Final
 
 from opentelemetry import context, propagate, trace
-from opentelemetry.environment_variables import OTEL_PYTHON_TRACER_PROVIDER
-from opentelemetry.sdk import trace as sdktrace
-from opentelemetry.sdk._configuration import _BaseConfigurator as _BaseSDKConfigurator
-from opentelemetry.sdk._configuration import (
-    _get_exporter_names,
-    _import_exporters,
+from opentelemetry.environment_variables import (
+    OTEL_PYTHON_TRACER_PROVIDER,
+    OTEL_TRACES_EXPORTER,
 )
+from opentelemetry.sdk import trace as sdktrace
 from opentelemetry.sdk.environment_variables import (
     OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_INSECURE,
@@ -82,16 +80,29 @@ def live_traces_enabled() -> bool:
     return os.getenv("OTEL_EXPORTER_OTLP_TRACES_LIVE") is not None
 
 
-class _BaseConfigurator(_BaseSDKConfigurator):
-    """Base configurator singleton, that ensures configuration only happens once."""
+class _BaseConfigurator:
+    """Base configurator singleton, that ensures configuration only happens once.
 
+    Not opentelemetry.sdk._configuration's own base: importing that module
+    loads the logs and metrics SDKs, about 20 ms per module call.
+    """
+
+    _instance = None
     _is_configured: bool = False
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def _configure(self, **kwargs):
+        raise NotImplementedError
 
     def configure(self, **kwargs):
         if self._is_configured:
             return
 
-        super().configure(**kwargs)
+        self._configure(**kwargs)
         self._is_configured = True
 
 
@@ -136,8 +147,14 @@ class _LazyExporter(SpanExporter):
 
     def _get(self) -> SpanExporter:
         if self._exporter is None:
-            classes, _, _ = _import_exporters([self._name], [], [])
-            self._exporter = classes[self._name]()
+            from opentelemetry.sdk._configuration import (
+                _get_exporter_entry_point,
+                _import_exporters,
+            )
+
+            name = _get_exporter_entry_point(self._name, "traces")
+            classes, _, _ = _import_exporters([name], [], [])
+            self._exporter = classes[name]()
         return self._exporter
 
     def export(self, spans):
@@ -245,9 +262,12 @@ class _DaggerOtelConfigurator(_BaseConfigurator):
         # Also skip OTel log exporting. Dagger already captures module
         # stdout/stderr and forwards it as logs; installing OTel's logging
         # handler would duplicate Python logging records in the TUI.
+        names = os.environ.get(OTEL_TRACES_EXPORTER, "")
+        if names.strip().lower() == "none":
+            names = ""
         trace_exporters = {
             name: (lambda name=name: _LazyExporter(name))
-            for name in _get_exporter_names("traces")
+            for name in (n.strip() for n in names.split(",") if n.strip())
         }
         logger.debug(
             "Initializing traces telemetry with exporters: %s",
