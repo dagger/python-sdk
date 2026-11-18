@@ -48,29 +48,30 @@ There are three answers, and a new module gets the first:
 | `[entrypoint] source = <a path in the module>` | a Dang entrypoint of the user's own, kept as written |
 | `[runtime] source = <a ref or path>` | a module runtime, which builds and runs the module itself |
 
-This SDK needs an engine `v1.0.0-beta.26` or later: it reads a scope's
+This SDK needs an engine `v1.0.0-beta.26` or later. It reads a scope's
 settings through `WorkspaceSDK.scopeSetting`, which
 [dagger/dagger#15084](https://github.com/dagger/dagger/pull/15084) adds in that
-release. The entrypoint it generates into a module needs an engine
-`v1.0.0-beta.18` or later, the first release that loads a module's files
-through its entrypoint's `sources` member. An entrypoint runs a module on the
-engine's own version, so an entrypoint manifest keeps no `engineVersion`.
+release. It also needs the first release that names identifiers by its naming
+rules and answers for them: generation asks it how to spell the Python names of
+the schema's identifiers, and a module asks it what it named the module's own
+declarations. An entrypoint manifest keeps no `engineVersion` (see "The Dagger
+version of a generated entrypoint"). The final config and manifest are staged
+before naming or main-object selection, so those answers describe the module
+generation actually writes.
 
-On an engine without that field, `dagger module init` and `dagger generate`
-fail while they load the SDK, before they write anything. A
-generated entrypoint fails to load on an older engine with `field "types":
-missing argument "workspace" required by interface`. To stay on an engine from
-v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release that runs
-there: `dagger module install github.com/dagger/python-sdk@v1.1.1`, and
-`dagger.io/sdk/python/entrypoint@v1.1.1` for the shared entrypoint of that
-release. An engine older than v1.0.0-beta.14 runs neither release, and needs
-an upgrade.
+The SDK's modules declare `engineVersion` v1.0.0-beta.26. Engines compare
+only the base version, so an engine from v1.0.0-beta.18 to v1.0.0-beta.25 does
+not refuse them for it: `dagger module init` and `dagger generate` fail while
+they load the SDK, before they write anything. To stay on such an engine, pin a
+release from before this floor, such as `v1.8.0`:
+`dagger module install github.com/dagger/python-sdk@v1.8.0`. To stay on an
+engine from v1.0.0-beta.14 to v1.0.0-beta.17, pin `v1.1.1`, the last release
+that runs there.
 
 An entrypoint served from elsewhere, such as the shared one this repository
 used to serve as `dagger.io/sdk/python/entrypoint@v1`, a pin of it or a fork,
 is replaced by the generated entrypoint at the module's next
-`dagger generate`. A module moved this way needs an engine `v1.0.0-beta.18` or
-later to run, and generating it needs `v1.0.0-beta.26` or later.
+`dagger generate`.
 
 Generating a module that has a manifest already keeps the kind it names:
 
@@ -131,7 +132,7 @@ for and announces:
 
 The scope setting `targetVersion`, under
 `[sdks.python.scopes."<module path>".settings]` in `dagger.toml`, pins the
-release, from `v1.0.0-beta.18` to the targeted release;
+release, from `v1.0.0-beta.26` to the targeted release;
 `dagger module init python --target-version <release>` writes it. Any other
 value stops generation before it writes anything, with a message that names
 the module and says why.
@@ -255,9 +256,10 @@ The two declarations reach an engine in different ways:
 - `dang.toml`: [dagger/dagger#14902](https://github.com/dagger/dagger/pull/14902),
   first released in v1.0.0-beta.26, makes an engine take the module's Dagger
   version from the file. Engines up to v1.0.0-beta.25 do not read it. It also
-  refuses an entrypoint whose imports declare different Dagger versions, and
-  serves v1.0.0-beta.25 to an entrypoint whose `dang.toml` declares no Dagger
-  version.
+  refuses an entrypoint whose imports declare different Dagger versions, so
+  generation stops with that error, and serves v1.0.0-beta.25, the last release
+  before the identifier casing cut, to an entrypoint whose `dang.toml` declares
+  no Dagger version.
 - `DAGGER_CLIENT_VERSION`: [dagger/dagger#14881](https://github.com/dagger/dagger/pull/14881),
   first released in v1.0.0-beta.22, makes an engine serve that version's view to
   the process. Engines up to v1.0.0-beta.21 do not read it.

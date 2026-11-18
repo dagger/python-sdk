@@ -22,7 +22,7 @@ func TestRenderedPackageMatchesTheRuntime(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out := t.TempDir()
-			if err := run([]string{tc.name, filepath.Join("..", "..", "templates", "default"), out}); err != nil {
+			if err := run([]string{tc.name, "Main", filepath.Join("..", "..", "templates", "default"), out}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := os.Stat(filepath.Join(out, "src", tc.pkg, "__init__.py")); err != nil {
