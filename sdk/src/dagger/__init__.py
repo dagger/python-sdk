@@ -9,10 +9,6 @@ import warnings as _warnings
 # Make sure to place exceptions first as they're dependencies of other imports.
 from dagger._exceptions import *
 
-# Engine provisioning (doesn't make sense in modules)
-with contextlib.suppress(ModuleNotFoundError):
-    from dagger.provisioning import *
-
 # Client connection
 from dagger.client import Session as Session
 from dagger.client import _session as _sessions
@@ -68,9 +64,38 @@ with contextlib.suppress(ModuleNotFoundError):
     from dagger.mod import *
 
 
+# Engine provisioning, loaded on first use: a module runtime never provisions,
+# and importing it there costs rich and platformdirs on every call.
+_PROVISIONING = (
+    "Config",
+    "Connection",
+    "DownloadError",
+    "ProvisionError",
+    "SessionError",
+    "connection",
+)
+
+
+def _provisioning(name: str) -> _typing.Any:
+    try:
+        provisioning = _importlib.import_module("dagger.provisioning")
+    except ModuleNotFoundError as e:
+        if not (e.name or "").startswith("dagger.provisioning"):
+            raise
+        return None
+    value = getattr(provisioning, name)
+    with contextlib.suppress(AttributeError):
+        value.__module__ = __name__
+    globals()[name] = value
+    return value
+
+
 def _lazy_names() -> list[str]:
     global_ = _global_client()
-    return ["dag", *(() if global_ is None else global_.__all__)]
+    provisioning = (
+        _PROVISIONING if _importlib_util.find_spec("dagger.provisioning") else ()
+    )
+    return ["dag", *provisioning, *(() if global_ is None else global_.__all__)]
 
 
 def __dir__() -> list[str]:
@@ -81,6 +106,8 @@ def __getattr__(name: str) -> _typing.Any:
     """Names of the global client, or where a name of the legacy bindings went."""
     if name == "dag":
         return _sessions.default_session()
+    if name in _PROVISIONING and (value := _provisioning(name)) is not None:
+        return value
     if name == "__all__":
         # What a star import took when these names were globals.
         public = (n for n in globals() if not n.startswith("_"))
