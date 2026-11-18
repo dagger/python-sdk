@@ -1,3 +1,12 @@
+import gc as _gc
+import os as _os
+
+# A module's runtime container runs only the SDK's own short commands, which
+# import about 700 modules: collecting while they import costs about 15 ms per
+# call. dagger.mod.cli.load_module turns collection back on for user code.
+if _os.environ.get("DAGGER_MODULE"):
+    _gc.disable()
+
 import contextlib
 import functools as _functools
 import importlib as _importlib
