@@ -89,7 +89,9 @@ type PythonModuleBuild {
         .withEnvVariable("UV_COMPILE_BYTECODE", "1")
         # Bytecode keyed on its source's hash rather than the time uv copied
         # the source, so the same inputs build the same layer, byte for byte.
-        .withEnvVariable("PYC_INVALIDATION_MODE", "CHECKED_HASH")
+        # Unchecked: the bytecode and its source only change together, in a
+        # new layer, and checking reads and hashes every source on each call.
+        .withEnvVariable("PYC_INVALIDATION_MODE", "UNCHECKED_HASH")
       let built = dependencies(compiled, source, cfg)
         .withWorkdir(join(contextDirPath, subPath))
         .withMountedDirectory(contextDirPath, withoutVenv)
@@ -178,7 +180,7 @@ type PythonModuleBuild {
       .withExec(["python", "-c",
         "import compileall, py_compile, re, sysconfig\n" +
         "compileall.compile_dir(sysconfig.get_path('stdlib'), quiet=2, force=True, rx=re.compile('/site-packages/'),\n" +
-        "    invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)\n",
+        "    invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)\n",
       ], expect: ReturnType.ANY)
       # Informational only, in case a module finds them useful.
       .withEnvVariable("DAGGER_BASE_IMAGE", baseImage)
