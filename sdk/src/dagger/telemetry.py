@@ -4,12 +4,6 @@ from typing import Final
 
 from opentelemetry import context, propagate, trace
 from opentelemetry.environment_variables import OTEL_PYTHON_TRACER_PROVIDER
-from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from opentelemetry.instrumentation.logging.environment_variables import (
-    OTEL_PYTHON_LOG_CORRELATION,
-    OTEL_PYTHON_LOG_FORMAT,
-    OTEL_PYTHON_LOG_LEVEL,
-)
 from opentelemetry.sdk import trace as sdktrace
 from opentelemetry.sdk._configuration import _BaseConfigurator as _BaseSDKConfigurator
 from opentelemetry.sdk._configuration import (
@@ -36,6 +30,12 @@ __all__ = [
 ]
 
 SERVICE_NAME: Final = "dagger-python-sdk"
+
+# The variables of opentelemetry-instrumentation-logging, named here because
+# importing that package costs wrapt and packaging on every module call.
+OTEL_PYTHON_LOG_CORRELATION: Final = "OTEL_PYTHON_LOG_CORRELATION"
+OTEL_PYTHON_LOG_FORMAT: Final = "OTEL_PYTHON_LOG_FORMAT"
+OTEL_PYTHON_LOG_LEVEL: Final = "OTEL_PYTHON_LOG_LEVEL"
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,27 @@ def _init_tracing(exporters: dict[str, type[SpanExporter]]):
             provider.add_span_processor(proc_cls(exporter_class()))
 
 
+def _correlate_logs():
+    logging.basicConfig(
+        format=os.environ[OTEL_PYTHON_LOG_FORMAT],
+        level=logging.getLevelNamesMapping().get(
+            os.environ[OTEL_PYTHON_LOG_LEVEL].upper(), logging.INFO
+        ),
+    )
+    old_factory = logging.getLogRecordFactory()
+
+    def factory(*args, **kwargs):
+        record = old_factory(*args, **kwargs)
+        ctx = trace.get_current_span().get_span_context()
+        record.otelSpanID = format(ctx.span_id, "016x") if ctx.is_valid else "0"
+        record.otelTraceID = format(ctx.trace_id, "032x") if ctx.is_valid else "0"
+        record.otelTraceSampled = ctx.trace_flags.sampled if ctx.is_valid else False
+        record.otelServiceName = SERVICE_NAME
+        return record
+
+    logging.setLogRecordFactory(factory)
+
+
 class _DaggerOtelConfigurator(_BaseConfigurator):
     exporters = ("otlp",)
 
@@ -234,6 +255,6 @@ class _DaggerOtelConfigurator(_BaseConfigurator):
         )
         _init_tracing(trace_exporters)
 
-        # The logging instrumentor injects the trace context into logs without
-        # exporting them separately.
-        LoggingInstrumentor().instrument()
+        # The trace context goes into log records, as the logging instrumentor
+        # puts it, without exporting them separately.
+        _correlate_logs()
