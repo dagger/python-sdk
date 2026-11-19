@@ -2328,7 +2328,7 @@ type E2e {
     assert(generated.cwd == scoped.cwd, "generateScope must not change the workspace cwd")
     let manifest = changes.layer.file(scope + "/dagger-module.toml").contents
     assert(
-      manifest == "name = \"static-init\"\n\n[entrypoint]\n  kind = \"dang\"\n  source = \"./sdk/entrypoint\"\n",
+      manifest == "name = \"static-init\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./sdk/entrypoint\"\n",
       "unexpected static manifest: " + manifest,
     )
     assertAdded(changes, scope + "/src/static_init/__init__.py")
@@ -2811,7 +2811,7 @@ type E2e {
     let generated = resourcesGenerated(pythonSdk, seeded)
     let manifest = generated.file("/" + resourcesAppPath + "/dagger-module.toml").contents
     assert(
-      manifest == "name = \"resources-app\"\n\n[entrypoint]\n  kind = \"dang\"\n  source = \"./sdk/entrypoint\"\n",
+      manifest == "name = \"resources-app\"\n\n[entrypoint]\nkind = \"dang\"\nsource = \"./sdk/entrypoint\"\n",
       "unexpected manifest: " + manifest,
     )
     let changes = generated.changes(seeded)
