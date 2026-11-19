@@ -1124,13 +1124,13 @@ type E2e {
   }
 
   """
-  When the runtime's build compiled the standard library, with checked-hash
+  When the runtime's build compiled the standard library, with unchecked-hash
   bytecode. The generated entrypoint compiles it once per source state instead.
   """
   let stdlibCompiledAt(ws: Workspace!): String! {
     pythonSdkRuntime
       .moduleRuntime(modSource: ws.moduleSource("/" + runtimeModulePath), introspectionJson: null)
-      .withExec(["python", "-c", "import json, os; b = open(json.__cached__, 'rb').read(8); assert int.from_bytes(b[4:8], 'little') == 3, b; print(os.stat(json.__cached__).st_mtime_ns)"])
+      .withExec(["python", "-c", "import json, os; b = open(json.__cached__, 'rb').read(8); assert int.from_bytes(b[4:8], 'little') == 1, b; print(os.stat(json.__cached__).st_mtime_ns)"])
       .stdout
       .trimSpace
   }
