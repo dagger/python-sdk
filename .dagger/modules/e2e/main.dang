@@ -2717,7 +2717,7 @@ type E2e {
     let neverCached = "from dagger import function, object_type\n\n\n@object_type\nclass TomlGenerateApp:\n    @function(cache=\"never\")\n    def hello(self) -> str:\n        return \"hello\"\n"
     let fresh = static.generateScope(ws.withNewFile(sourcePath, neverCached).withWorkdir(tomlGenerateModulePath), isModule: true, name: name, clients: [])
       .file("/" + tomlGenerateModulePath + "/sdk/entrypoint/types.dang").contents
-    assertContains(fresh, "withCachePolicy(FunctionCachePolicy.Never)", "a generated entrypoint dropped the cache policy: " + fresh)
+    assertContains(fresh, "withCachePolicy(FunctionCachePolicy.NEVER)", "a generated entrypoint dropped the cache policy: " + fresh)
 
     null
   }
@@ -2734,6 +2734,26 @@ type E2e {
     let tree = playgroundTree(ws).withFile(staticTypesModulePath + "/types.dang", types)
     let counted = cli(playgroundOf(tree), ["-m", staticTypesModulePath, "call", "count"]).stdout
     assert(counted.trimSpace == "1", "types.dang did not evaluate to the fixture's one type: " + counted)
+
+    null
+  }
+
+  """
+  A module whose functions set each cache policy loads on this engine.
+  """
+  pub cachePoliciesLoadCheck(ws: Workspace!): Void @check {
+    let sourcePath = "/" + tomlGenerateModulePath + "/src/toml_generate_app/__init__.py"
+    let cached = "from dagger import function, object_type\n\n\n@object_type\nclass TomlGenerateApp:\n" +
+      "    @function(cache=\"never\")\n    def never(self) -> str:\n        return \"never\"\n\n" +
+      "    @function(cache=\"session\")\n    def session(self) -> str:\n        return \"session\"\n\n" +
+      "    @function(cache=\"30m\")\n    def ttl(self) -> str:\n        return \"ttl\"\n"
+    let generated = pythonSdk
+      .generateScope(ws.withNewFile(sourcePath, cached).withWorkdir(tomlGenerateModulePath), isModule: true, name: "toml-generate-app", clients: [])
+      .withWorkdir(".")
+    let imported = generated.file("/" + tomlGenerateModulePath + "/sdk/entrypoint/dang.toml").contents
+    assertContains(imported, "dagger = \"" + pythonSdk.targetVersionOf("") + "\"", "the entrypoint does not import the engine target: " + imported)
+    let listed = cli(playground(generated), ["-m", tomlGenerateModulePath, "functions"]).stdout
+    assertContainsAll(listed, ["never", "session", "ttl"])
 
     null
   }

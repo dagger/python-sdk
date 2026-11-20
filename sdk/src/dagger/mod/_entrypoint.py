@@ -117,13 +117,15 @@ def _function(func: FunctionDescription) -> list[str]:
 
 
 def _cache_policy(cache: str) -> str:
+    # The entrypoint imports beta.26 or later, which spells core enum values
+    # in upper case.
     match cache:
         case "never":
-            return "FunctionCachePolicy.Never"
+            return "FunctionCachePolicy.NEVER"
         case "session":
-            return "FunctionCachePolicy.PerSession"
+            return "FunctionCachePolicy.PER_SESSION"
         case _:
-            return f"FunctionCachePolicy.Default, timeToLive: {_quote(cache)}"
+            return f"FunctionCachePolicy.DEFAULT, timeToLive: {_quote(cache)}"
 
 
 def _argument(arg: ArgumentDescription) -> str:
