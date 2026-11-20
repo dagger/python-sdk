@@ -135,9 +135,9 @@ def test_one_constructor_no_cache_policy(mod: Module):
 @pytest.mark.parametrize(
     ("cache", "policy"),
     [
-        ("never", "FunctionCachePolicy.Never"),
-        ("session", "FunctionCachePolicy.PerSession"),
-        ("30m", 'FunctionCachePolicy.Default, timeToLive: "30m"'),
+        ("never", "FunctionCachePolicy.NEVER"),
+        ("session", "FunctionCachePolicy.PER_SESSION"),
+        ("30m", 'FunctionCachePolicy.DEFAULT, timeToLive: "30m"'),
     ],
 )
 def test_renders_cache_policy(cache: str, policy: str):
