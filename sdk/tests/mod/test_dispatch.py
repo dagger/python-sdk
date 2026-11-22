@@ -103,6 +103,14 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "    @function\n"
         "    def boom(self) -> str:\n"
         "        raise RuntimeError('boom')\n"
+        "    @function\n"
+        "    def api_boom(self) -> str:\n"
+        "        from dagger import QueryError\n"
+        "        from dagger._exceptions import QueryErrorValue\n"
+        "        ext = {'_type': 'EXEC_ERROR', 'cmd': ['false'], 'exitCode': 1,\n"
+        "               'stdout': 'out', 'stderr': 'err'}\n"
+        "        raise QueryError([QueryErrorValue('exit code: 1', extensions=ext)],\n"
+        "                         'query')\n"
     )
     return tmp_path
 
@@ -192,6 +200,41 @@ def test_command_failure_writes_error_file(module_dir: pathlib.Path):
         if line.strip() == "boom" or line.endswith("]: boom")
     ]
     assert not echoes, proc.stderr
+
+
+API_BOOM = {
+    "receiverType": "Hello",
+    "receiverValue": "{}",
+    "fnName": "api_boom",
+    "fnArgs": "{}",
+}
+
+
+def test_command_api_error_logs_nothing_with_error_file(module_dir: pathlib.Path):
+    error_file = module_dir / "function-error"
+    proc = _call(module_dir, API_BOOM, {FUNCTION_ERROR_PATH_ENV: str(error_file)})
+    assert proc.returncode == 2
+    # The engine shows the call that failed, with its logs.
+    assert proc.stderr == "", proc.stderr
+    report = json.loads(error_file.read_text())
+    assert report["message"] == "exit code: 1"
+    values = report["values"]
+    assert values["_type"] == "EXEC_ERROR"
+    assert values["exitCode"] == 1
+    assert values["exception.type"] == "dagger.ExecError"
+    assert "raise QueryError" in values["exception.stacktrace"]
+
+
+def test_command_api_error_logs_traceback_without_error_file(
+    module_dir: pathlib.Path,
+):
+    proc = _call(module_dir, API_BOOM)
+    assert proc.returncode == 2
+    assert "API error while executing function" in proc.stderr
+    assert "Traceback" in proc.stderr
+    assert "dagger.ExecError: exit code: 1" in proc.stderr
+    last = proc.stderr.rstrip("\n").split("\n")[-1]
+    assert json.loads(last.removeprefix(FUNCTION_ERROR_MARKER)) == "exit code: 1"
 
 
 def test_command_success_writes_no_error_file(module_dir: pathlib.Path):
