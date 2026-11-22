@@ -15,12 +15,16 @@ from dagger.mod._exceptions import (
     ErrorOriginFilter,
     FunctionError,
     InvalidInputError,
+    format_user_traceback,
     function_error_message,
+    has_error_origin,
     report_function_error,
     write_function_error,
 )
 
 pytestmark = pytest.mark.anyio
+
+ORIGIN = " [traceparent:" + "a" * 32 + "-" + "b" * 16 + "]"
 
 
 @pytest.fixture
@@ -104,15 +108,37 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "    def boom(self) -> str:\n"
         "        raise RuntimeError('boom')\n"
         "    @function\n"
-        "    def api_boom(self) -> str:\n"
+        "    def api_boom(self, origin: str = '') -> str:\n"
         "        from dagger import QueryError\n"
         "        from dagger._exceptions import QueryErrorValue\n"
         "        ext = {'_type': 'EXEC_ERROR', 'cmd': ['false'], 'exitCode': 1,\n"
         "               'stdout': 'out', 'stderr': 'err'}\n"
-        "        raise QueryError([QueryErrorValue('exit code: 1', extensions=ext)],\n"
-        "                         'query')\n"
+        "        err = QueryErrorValue('exit code: 1' + origin, extensions=ext)\n"
+        "        raise QueryError([err], 'query')\n"
+        "    @function\n"
+        "    def sdk_boom(self) -> str:\n"
+        "        return _sdk_boom()\n"
+        "    @function\n"
+        "    def wrapped_boom(self) -> str:\n"
+        "        try:\n"
+        "            _sdk_boom()\n"
+        "        except ValueError as e:\n"
+        "            raise RuntimeError(f'wrapped: {e}') from e\n"
+        "\n"
+        "def _sdk_boom():\n"
+        "    from dagger import QueryError\n"
+        "    # The SDK raises: an API error needs an error.\n"
+        "    return QueryError([], 'query')\n"
     )
     return tmp_path
+
+
+@pytest.fixture
+def broken_module_dir(module_dir: pathlib.Path) -> pathlib.Path:
+    (module_dir / "src" / "hello" / "__init__.py").write_text(
+        "import json\n\nthis is not python\n"
+    )
+    return module_dir
 
 
 def _call(
@@ -202,22 +228,111 @@ def test_command_failure_writes_error_file(module_dir: pathlib.Path):
     assert not echoes, proc.stderr
 
 
-API_BOOM = {
-    "receiverType": "Hello",
-    "receiverValue": "{}",
-    "fnName": "api_boom",
-    "fnArgs": "{}",
-}
+def _request(fn: str, args: dict | None = None) -> dict:
+    return {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": fn,
+        "fnArgs": json.dumps(args or {}),
+    }
+
+
+def _call_with_error_file(
+    module_dir: pathlib.Path, request: dict
+) -> tuple[subprocess.CompletedProcess, dict]:
+    error_file = module_dir / "function-error"
+    proc = _call(module_dir, request, {FUNCTION_ERROR_PATH_ENV: str(error_file)})
+    return proc, json.loads(error_file.read_text())
+
+
+def _sdk_frames(stderr: str) -> list[str]:
+    return [
+        line
+        for line in stderr.splitlines()
+        if line.lstrip().startswith("File ")
+        and ("/dagger/" in line or "importlib" in line or "<frozen" in line)
+    ]
+
+
+def test_command_failure_shows_short_traceback_with_error_file(
+    module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(module_dir, _request("boom"))
+    assert proc.returncode == 2
+    assert proc.stderr.startswith("Traceback (most recent call last):\n"), proc.stderr
+    assert "in boom\n    raise RuntimeError('boom')\n" in proc.stderr
+    assert proc.stderr.endswith("\nRuntimeError: boom\n"), proc.stderr
+    assert not _sdk_frames(proc.stderr), proc.stderr
+    assert "Unhandled exception" not in proc.stderr
+    # The report keeps the whole traceback.
+    assert "_module.py" in report["values"]["exception.stacktrace"]
+
+
+def test_command_failure_shows_full_traceback_without_error_file(
+    module_dir: pathlib.Path,
+):
+    proc = _call(module_dir, _request("boom"))
+    assert proc.returncode == 2
+    assert "Unhandled exception while executing function" in proc.stderr
+    assert "_module.py" in proc.stderr
+
+
+def test_command_failure_in_the_sdk_shows_the_users_frames(
+    module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(module_dir, _request("sdk_boom"))
+    assert proc.returncode == 2
+    assert "in sdk_boom\n" in proc.stderr
+    assert "in _sdk_boom\n" in proc.stderr
+    assert proc.stderr.endswith("\nValueError: Errors list is empty\n"), proc.stderr
+    assert not _sdk_frames(proc.stderr), proc.stderr
+    assert "dagger/_exceptions.py" in report["values"]["exception.stacktrace"]
+
+
+def test_command_chained_failure_shows_short_tracebacks(module_dir: pathlib.Path):
+    proc, _ = _call_with_error_file(module_dir, _request("wrapped_boom"))
+    assert proc.returncode == 2
+    assert proc.stderr.count("Traceback (most recent call last):") == 2
+    cause, _, effect = proc.stderr.partition(
+        "\nThe above exception was the direct cause of the following exception:\n"
+    )
+    assert "in _sdk_boom\n" in cause
+    assert cause.rstrip().endswith("ValueError: Errors list is empty"), cause
+    assert "in wrapped_boom\n    raise RuntimeError" in effect
+    assert effect.endswith("\nRuntimeError: wrapped: Errors list is empty\n"), effect
+    assert not _sdk_frames(proc.stderr), proc.stderr
+
+
+def test_command_import_error_shows_short_traceback_with_error_file(
+    broken_module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(broken_module_dir, _request("hi"))
+    assert proc.returncode == 2
+    assert proc.stderr.startswith("Traceback (most recent call last):\n"), proc.stderr
+    assert "in <module>\n    this is not python\n" in proc.stderr
+    assert "NameError: name 'this' is not defined" in proc.stderr
+    assert not _sdk_frames(proc.stderr), proc.stderr
+    assert "Error while importing" not in proc.stderr
+    assert report["message"] == "name 'this' is not defined"
+
+
+def test_command_import_error_logs_traceback_without_error_file(
+    broken_module_dir: pathlib.Path,
+):
+    proc = _call(broken_module_dir, _request("hi"))
+    assert proc.returncode == 2
+    assert "Error while importing Python module 'hello'" in proc.stderr
+    assert "cli.py" in proc.stderr
 
 
 def test_command_api_error_logs_nothing_with_error_file(module_dir: pathlib.Path):
-    error_file = module_dir / "function-error"
-    proc = _call(module_dir, API_BOOM, {FUNCTION_ERROR_PATH_ENV: str(error_file)})
+    proc, report = _call_with_error_file(
+        module_dir, _request("api_boom", {"origin": ORIGIN})
+    )
     assert proc.returncode == 2
     # The engine shows the call that failed, with its logs.
     assert proc.stderr == "", proc.stderr
-    report = json.loads(error_file.read_text())
-    assert report["message"] == "exit code: 1"
+    assert report["message"] == "exit code: 1" + ORIGIN
     values = report["values"]
     assert values["_type"] == "EXEC_ERROR"
     assert values["exitCode"] == 1
@@ -225,16 +340,31 @@ def test_command_api_error_logs_nothing_with_error_file(module_dir: pathlib.Path
     assert "raise QueryError" in values["exception.stacktrace"]
 
 
+def test_command_api_error_without_origin_shows_short_traceback(
+    module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(module_dir, _request("api_boom"))
+    assert proc.returncode == 2
+    # No call the engine shows it at: the function shows where it got it.
+    assert proc.stderr.startswith("Traceback (most recent call last):\n"), proc.stderr
+    assert "in api_boom\n    raise QueryError([err], 'query')\n" in proc.stderr
+    assert proc.stderr.endswith("\ndagger.ExecError: exit code: 1\n"), proc.stderr
+    assert not _sdk_frames(proc.stderr), proc.stderr
+    assert "API error while executing function" not in proc.stderr
+    assert report["message"] == "exit code: 1"
+
+
 def test_command_api_error_logs_traceback_without_error_file(
     module_dir: pathlib.Path,
 ):
-    proc = _call(module_dir, API_BOOM)
+    proc = _call(module_dir, _request("api_boom", {"origin": ORIGIN}))
     assert proc.returncode == 2
     assert "API error while executing function" in proc.stderr
     assert "Traceback" in proc.stderr
     assert "dagger.ExecError: exit code: 1" in proc.stderr
     last = proc.stderr.rstrip("\n").split("\n")[-1]
-    assert json.loads(last.removeprefix(FUNCTION_ERROR_MARKER)) == "exit code: 1"
+    reported = json.loads(last.removeprefix(FUNCTION_ERROR_MARKER))
+    assert reported == "exit code: 1" + ORIGIN
 
 
 def test_command_success_writes_no_error_file(module_dir: pathlib.Path):
@@ -262,6 +392,70 @@ def test_error_origin_filter_strips_origins_from_logs():
     assert "traceparent" not in formatted, formatted
     assert "failed: exit code: 1" in formatted
     assert formatted.rstrip().endswith("exit code: 1")
+
+
+def test_user_traceback_leaves_out_library_frames():
+    try:
+        json.loads("{")
+    except ValueError as e:
+        formatted = format_user_traceback(e)
+    assert 'json.loads("{")' in formatted, formatted
+    assert "decoder.py" not in formatted, formatted
+    assert formatted.rstrip().endswith("line 1 column 2 (char 1)"), formatted
+
+
+def test_user_traceback_leaves_out_error_origins():
+    try:
+        raise _query_error("exit code: 1" + ORIGIN)
+    except QueryError as e:
+        formatted = format_user_traceback(e)
+    assert "traceparent" not in formatted, formatted
+    assert formatted.endswith("QueryError: exit code: 1\n"), formatted
+
+
+def test_user_traceback_leaves_out_generated_code(tmp_path: pathlib.Path):
+    generated = tmp_path / "client.py"
+    generated.write_text(
+        "# Code generated by dagger. DO NOT EDIT.\n\n"
+        "def call():\n"
+        "    raise ValueError('from a client')\n"
+    )
+    namespace: dict = {}
+    exec(compile(generated.read_text(), str(generated), "exec"), namespace)
+    try:
+        namespace["call"]()
+    except ValueError as e:
+        formatted = format_user_traceback(e)
+    assert 'namespace["call"]()' in formatted, formatted
+    assert "client.py" not in formatted, formatted
+
+
+def test_user_traceback_without_user_frames():
+    exc = ValueError("boom")
+    assert format_user_traceback(exc) == "ValueError: boom\n"
+
+
+def test_user_traceback_of_a_group():
+    def sdk_error() -> BaseException:
+        try:
+            QueryError([], "query")
+        except ValueError as e:
+            return e
+        raise AssertionError
+
+    group = ExceptionGroup("unhandled errors in a TaskGroup", [sdk_error()])
+    formatted = format_user_traceback(group)
+    assert "in sdk_error" in formatted, formatted
+    assert "dagger/_exceptions.py" not in formatted, formatted
+    assert "ValueError: Errors list is empty" in formatted, formatted
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [("exit code: 1" + ORIGIN, True), ("no such ID", False)],
+)
+def test_has_error_origin(message: str, expected: bool):
+    assert has_error_origin(_query_error(message)) is expected
 
 
 def _exec_error(message: str) -> QueryError:
@@ -363,9 +557,6 @@ def test_write_function_error_of_a_module_error(tmp_path: pathlib.Path):
     assert report["values"]["extra.field"] == "who"
     assert report["values"]["extra.bad"].startswith("<object object")
     assert report["values"]["exception.type"] == "InvalidInputError"
-
-
-ORIGIN = " [traceparent:" + "a" * 32 + "-" + "b" * 16 + "]"
 
 
 def _query_error(message: str) -> QueryError:
