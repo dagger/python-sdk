@@ -246,7 +246,7 @@ def _report(tmp_path: pathlib.Path, exc: BaseException) -> dict:
 
 
 def test_write_function_error_keeps_an_api_error_whole(tmp_path: pathlib.Path):
-    message = "\x01" * 100_000 + "exit code: 7" + ORIGIN
+    message = "x" * 100_000 + "exit code: 7" + ORIGIN
     report = _report(tmp_path, _exec_error(message))
     assert report["message"] == message, "nothing is trimmed, the origin kept"
     values = report["values"]
@@ -269,6 +269,48 @@ def test_write_function_error_of_a_wrapped_api_error(tmp_path: pathlib.Path):
     assert report["message"] == "it ran a failing command: exit code: 7" + ORIGIN
     assert report["values"]["exitCode"] == 7
     assert report["values"]["exception.type"] == "RuntimeError"
+
+
+def test_write_function_error_of_an_error_raised_handling_an_api_error(
+    tmp_path: pathlib.Path,
+):
+    try:
+        try:
+            raise _exec_error("exit code: 7" + ORIGIN)
+        except QueryError:
+            msg = "lint failed"
+            raise RuntimeError(msg)  # noqa: B904
+    except RuntimeError as e:
+        report = _report(tmp_path, _wrapped(e))
+    assert report["message"] == "lint failed"
+    assert "_type" not in report["values"], "not the handled exec's error"
+    assert report["values"]["exception.type"] == "RuntimeError"
+
+
+def test_write_function_error_of_a_function_error_with_extra(
+    tmp_path: pathlib.Path,
+):
+    try:
+        try:
+            raise _exec_error("exit code: 7" + ORIGIN)
+        except QueryError as e:
+            msg = "deploy failed"
+            raise FunctionError(msg, extra={"env": "prod"}) from e
+    except FunctionError as e:
+        report = _report(tmp_path, e)
+    assert report["values"]["extra.env"] == "prod"
+    assert report["values"]["exitCode"] == 7
+
+
+def test_write_function_error_over_the_limit(tmp_path: pathlib.Path):
+    message = "x" * (1 << 19) + ORIGIN
+    error_file = tmp_path / "function-error"
+    write_function_error(str(error_file), _exec_error(message))
+    assert len(error_file.read_bytes()) <= 1 << 20, "the engine reads it"
+    report = json.loads(error_file.read_text())
+    assert report["message"].endswith("..." + ORIGIN), "the origin kept"
+    assert report["values"]["exitCode"] == 7
+    assert "exception.stacktrace" not in report["values"]
 
 
 def test_write_function_error_of_a_module_error(tmp_path: pathlib.Path):
