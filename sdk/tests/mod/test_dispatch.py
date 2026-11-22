@@ -1,5 +1,7 @@
+import importlib
 import json
 import logging
+import os
 import pathlib
 import subprocess
 import sys
@@ -8,13 +10,14 @@ import pytest
 
 from dagger import QueryError
 from dagger._exceptions import QueryErrorValue
-from dagger.mod import Module
+from dagger.mod import Module, _exceptions
 from dagger.mod._exceptions import (
     FUNCTION_ERROR_MARKER,
     FUNCTION_ERROR_PATH_ENV,
     ErrorOriginFilter,
     FunctionError,
     InvalidInputError,
+    errors_to_show,
     format_user_traceback,
     function_error_message,
     has_error_origin,
@@ -115,6 +118,12 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "               'stdout': 'out', 'stderr': 'err'}\n"
         "        err = QueryErrorValue('exit code: 1' + origin, extensions=ext)\n"
         "        raise QueryError([err], 'query')\n"
+        "    @function\n"
+        "    def group_boom(self, origin: str = '') -> str:\n"
+        "        from dagger import QueryError\n"
+        "        from dagger._exceptions import QueryErrorValue\n"
+        "        err = QueryError([QueryErrorValue('exit code: 1' + origin)], 'q')\n"
+        "        raise ExceptionGroup('unhandled errors in a TaskGroup', [err])\n"
         "    @function\n"
         "    def sdk_boom(self) -> str:\n"
         "        return _sdk_boom()\n"
@@ -354,6 +363,28 @@ def test_command_api_error_without_origin_shows_short_traceback(
     assert report["message"] == "exit code: 1"
 
 
+def test_command_group_of_api_errors_logs_nothing_with_error_file(
+    module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(
+        module_dir, _request("group_boom", {"origin": ORIGIN})
+    )
+    assert proc.returncode == 2
+    # As a task group raises them: the engine shows where each comes from.
+    assert proc.stderr == "", proc.stderr
+    assert report["message"] == "exit code: 1" + ORIGIN
+
+
+def test_command_group_of_api_errors_without_origin_shows_them(
+    module_dir: pathlib.Path,
+):
+    proc, _ = _call_with_error_file(module_dir, _request("group_boom"))
+    assert proc.returncode == 2
+    assert "in group_boom\n" in proc.stderr, proc.stderr
+    assert "QueryError: exit code: 1" in proc.stderr, proc.stderr
+    assert not _sdk_frames(proc.stderr), proc.stderr
+
+
 def test_command_api_error_logs_traceback_without_error_file(
     module_dir: pathlib.Path,
 ):
@@ -428,6 +459,77 @@ def test_user_traceback_leaves_out_generated_code(tmp_path: pathlib.Path):
         formatted = format_user_traceback(e)
     assert 'namespace["call"]()' in formatted, formatted
     assert "client.py" not in formatted, formatted
+
+
+def _installed_package(
+    site_dir: pathlib.Path, name: str, source: str, *, local: bool
+) -> None:
+    (site_dir / name).mkdir(parents=True)
+    (site_dir / name / "__init__.py").write_text(source)
+    info = site_dir / f"{name}-0.1.dist-info"
+    info.mkdir()
+    metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: 0.1\n"
+    (info / "METADATA").write_text(metadata)
+    (info / "top_level.txt").write_text(f"{name}\n")
+    if local:
+        url = (site_dir.parent / name).as_uri()
+        (info / "direct_url.json").write_text(json.dumps({"url": url, "dir_info": {}}))
+
+
+@pytest.fixture
+def site_dir(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch):
+    site_dir = tmp_path / "site-packages"
+    site_dir.mkdir()
+    monkeypatch.syspath_prepend(str(site_dir))
+    installed = (os.path.realpath(site_dir) + os.sep,)
+    monkeypatch.setattr(_exceptions, "_site_dirs", lambda: installed)
+    _exceptions._local_packages.cache_clear()
+    yield site_dir
+    _exceptions._local_packages.cache_clear()
+    for name in list(sys.modules):
+        if name.startswith("tb_fixture_"):
+            del sys.modules[name]
+
+
+def test_user_traceback_keeps_the_users_installed_libraries(site_dir: pathlib.Path):
+    # The runtime installs the module's own libraries from their directories,
+    # not editable, beside the packages from an index.
+    _installed_package(
+        site_dir,
+        "tb_fixture_mine",
+        "def parse(s):\n    raise ValueError('empty: ' + s)\n",
+        local=True,
+    )
+    _installed_package(
+        site_dir, "tb_fixture_theirs", "def run(fn, s):\n    fn(s)\n", local=False
+    )
+    importlib.invalidate_caches()
+    mine = importlib.import_module("tb_fixture_mine")
+    theirs = importlib.import_module("tb_fixture_theirs")
+    try:
+        theirs.run(mine.parse, "x")
+    except ValueError as e:
+        formatted = format_user_traceback(e)
+    assert "theirs.run(mine.parse" in formatted, formatted
+    assert "tb_fixture_mine" in formatted, formatted
+    assert "raise ValueError('empty: ' + s)" in formatted, formatted
+    assert "tb_fixture_theirs" not in formatted, formatted
+
+
+def test_errors_to_show():
+    shown = _query_error("no such ID")
+    assert errors_to_show(_query_error("exit code: 1" + ORIGIN)) is None
+    assert errors_to_show(shown) is shown
+    assert errors_to_show(KeyError("k")) is not None
+    group = ExceptionGroup(
+        "unhandled errors in a TaskGroup",
+        [_query_error("exit code: 1" + ORIGIN), KeyError("k"), shown],
+    )
+    rest = errors_to_show(group)
+    assert isinstance(rest, ExceptionGroup)
+    assert [type(e) for e in rest.exceptions] == [KeyError, QueryError]
+    only_origins = ExceptionGroup("g", [_query_error("exit code: 1" + ORIGIN)])
+    assert errors_to_show(only_origins) is None
 
 
 def test_user_traceback_without_user_frames():
