@@ -85,6 +85,31 @@ async def test_null_argument(mod: Module):
     assert await mod.dispatch(request) == "foo"
 
 
+@pytest.mark.parametrize(("origin", "shown"), [("", True), (ORIGIN, False)])
+async def test_dispatch_shows_an_api_error_before_the_call(
+    mod: Module,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    origin: str,
+    shown: bool,
+):
+    async def load_names():
+        raise _query_error("no such module" + origin)
+
+    monkeypatch.setattr(mod, "load_names", load_names)
+    mod.short_tracebacks = True
+    request = {
+        "receiverType": "Foo",
+        "receiverValue": "{}",
+        "fnName": "hello",
+        "fnArgs": "{}",
+    }
+    with pytest.raises(QueryError):
+        await mod.dispatch(request)
+    err = capsys.readouterr().err
+    assert ("QueryError: no such module\n" in err) is shown, err
+
+
 async def test_malformed_request(mod: Module):
     request = {
         "receiverType": "Foo",
@@ -102,7 +127,9 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
     pkg = tmp_path / "src" / "hello"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(
-        "from dagger import function, object_type\n\n"
+        "from dagger import function, object_type\n"
+        "from dagger.client import gen\n"
+        "from dagger.client._core import Context\n\n"
         "@object_type\nclass Hello:\n"
         "    @function\n"
         "    def hi(self, who: str) -> str:\n"
@@ -125,6 +152,9 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "        err = QueryError([QueryErrorValue('exit code: 1' + origin)], 'q')\n"
         "        raise ExceptionGroup('unhandled errors in a TaskGroup', [err])\n"
         "    @function\n"
+        "    def unloadable(self, origin: str = '') -> gen.Container:\n"
+        "        return _Unloadable(Context(), origin)\n"
+        "    @function\n"
         "    def sdk_boom(self) -> str:\n"
         "        return _sdk_boom()\n"
         "    @function\n"
@@ -133,6 +163,17 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
         "            _sdk_boom()\n"
         "        except ValueError as e:\n"
         "            raise RuntimeError(f'wrapped: {e}') from e\n"
+        "\n"
+        "class _Unloadable(gen.Container):\n"
+        "    # A result whose ID fails to load, after the function returned it.\n"
+        "    def __init__(self, ctx, origin):\n"
+        "        super().__init__(ctx)\n"
+        "        self.origin = origin\n"
+        "    async def id(self):\n"
+        "        from dagger import QueryError\n"
+        "        from dagger._exceptions import QueryErrorValue\n"
+        "        err = QueryErrorValue('no such container' + self.origin)\n"
+        "        raise QueryError([err], 'query')\n"
         "\n"
         "def _sdk_boom():\n"
         "    from dagger import QueryError\n"
@@ -361,6 +402,38 @@ def test_command_api_error_without_origin_shows_short_traceback(
     assert not _sdk_frames(proc.stderr), proc.stderr
     assert "API error while executing function" not in proc.stderr
     assert report["message"] == "exit code: 1"
+
+
+def test_command_result_api_error_without_origin_shows_short_traceback(
+    module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(module_dir, _request("unloadable"))
+    assert proc.returncode == 2
+    # Raised loading the result, outside the function, as the API error.
+    assert proc.stderr.startswith("Traceback (most recent call last):\n"), proc.stderr
+    assert "in id\n" in proc.stderr, proc.stderr
+    assert proc.stderr.endswith("QueryError: no such container\n"), proc.stderr
+    assert not _sdk_frames(proc.stderr), proc.stderr
+    assert "Invalid result" not in proc.stderr
+    assert report["message"] == "no such container"
+
+
+def test_command_result_api_error_logs_nothing_with_error_file(
+    module_dir: pathlib.Path,
+):
+    proc, report = _call_with_error_file(
+        module_dir, _request("unloadable", {"origin": ORIGIN})
+    )
+    assert proc.returncode == 2
+    assert proc.stderr == "", proc.stderr
+    assert report["message"] == "no such container" + ORIGIN
+
+
+def test_command_result_api_error_without_error_file(module_dir: pathlib.Path):
+    proc = _call(module_dir, _request("unloadable"))
+    assert proc.returncode == 2
+    # Old engines: as before, an invalid result.
+    assert "Invalid result from function" in proc.stderr, proc.stderr
 
 
 def test_command_group_of_api_errors_logs_nothing_with_error_file(
