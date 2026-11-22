@@ -462,15 +462,17 @@ def test_user_traceback_leaves_out_generated_code(tmp_path: pathlib.Path):
 
 
 def _installed_package(
-    site_dir: pathlib.Path, name: str, source: str, *, local: bool
+    site_dir: pathlib.Path, name: str, module: str, source: str, *, local: bool
 ) -> None:
-    (site_dir / name).mkdir(parents=True)
-    (site_dir / name / "__init__.py").write_text(source)
+    """Install a distribution of one module of the tb_fixture_ns namespace."""
+    file = f"tb_fixture_ns/{module}.py"
+    (site_dir / file).parent.mkdir(parents=True, exist_ok=True)
+    (site_dir / file).write_text(source)
     info = site_dir / f"{name}-0.1.dist-info"
     info.mkdir()
     metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: 0.1\n"
     (info / "METADATA").write_text(metadata)
-    (info / "top_level.txt").write_text(f"{name}\n")
+    (info / "RECORD").write_text(f"{file},,\n")
     if local:
         url = (site_dir.parent / name).as_uri()
         (info / "direct_url.json").write_text(json.dumps({"url": url, "dir_info": {}}))
@@ -483,9 +485,9 @@ def site_dir(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.syspath_prepend(str(site_dir))
     installed = (os.path.realpath(site_dir) + os.sep,)
     monkeypatch.setattr(_exceptions, "_site_dirs", lambda: installed)
-    _exceptions._local_packages.cache_clear()
+    _exceptions._local_files.cache_clear()
     yield site_dir
-    _exceptions._local_packages.cache_clear()
+    _exceptions._local_files.cache_clear()
     for name in list(sys.modules):
         if name.startswith("tb_fixture_"):
             del sys.modules[name]
@@ -493,27 +495,32 @@ def site_dir(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch):
 
 def test_user_traceback_keeps_the_users_installed_libraries(site_dir: pathlib.Path):
     # The runtime installs the module's own libraries from their directories,
-    # not editable, beside the packages from an index.
+    # not editable, beside the packages from an index, even in one namespace.
     _installed_package(
         site_dir,
         "tb_fixture_mine",
+        "mine",
         "def parse(s):\n    raise ValueError('empty: ' + s)\n",
         local=True,
     )
     _installed_package(
-        site_dir, "tb_fixture_theirs", "def run(fn, s):\n    fn(s)\n", local=False
+        site_dir,
+        "tb_fixture_theirs",
+        "theirs",
+        "def run(fn, s):\n    fn(s)\n",
+        local=False,
     )
     importlib.invalidate_caches()
-    mine = importlib.import_module("tb_fixture_mine")
-    theirs = importlib.import_module("tb_fixture_theirs")
+    mine = importlib.import_module("tb_fixture_ns.mine")
+    theirs = importlib.import_module("tb_fixture_ns.theirs")
     try:
         theirs.run(mine.parse, "x")
     except ValueError as e:
         formatted = format_user_traceback(e)
     assert "theirs.run(mine.parse" in formatted, formatted
-    assert "tb_fixture_mine" in formatted, formatted
+    assert "tb_fixture_ns/mine.py" in formatted, formatted
     assert "raise ValueError('empty: ' + s)" in formatted, formatted
-    assert "tb_fixture_theirs" not in formatted, formatted
+    assert "theirs.py" not in formatted, formatted
 
 
 def test_errors_to_show():
@@ -530,6 +537,14 @@ def test_errors_to_show():
     assert [type(e) for e in rest.exceptions] == [KeyError, QueryError]
     only_origins = ExceptionGroup("g", [_query_error("exit code: 1" + ORIGIN)])
     assert errors_to_show(only_origins) is None
+
+
+def test_errors_to_show_keeps_a_group_that_loses_nothing():
+    class ValidationErrors(ExceptionGroup):
+        pass
+
+    group = ValidationErrors("bad input", [KeyError("k"), _query_error("no such ID")])
+    assert errors_to_show(group) is group, "the user's own group type"
 
 
 def test_user_traceback_without_user_frames():
