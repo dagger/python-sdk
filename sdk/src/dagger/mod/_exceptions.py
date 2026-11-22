@@ -1,5 +1,6 @@
 import json
 import logging
+import pathlib
 import re
 import sys
 import traceback
@@ -141,19 +142,122 @@ _REPORTED_ERROR_LIMIT: Final = 16 << 10
 _ERROR_ORIGIN: Final = re.compile(r"\s*\[traceparent:[0-9a-f]{32}-[0-9a-f]{16}\]")
 
 
-def function_error_message(exc: BaseException) -> str:
+def function_error_message(exc: BaseException, *, logged: bool = False) -> str:
     """The error a failed call reports: the function's own, not its wrapper.
 
     An API error's message is kept whole, with the origin it names. Each
-    error of a group is reported, as a task group raises them.
+    error of a group is reported, as a task group raises them. An exception
+    the function raised is named with its type, unless `logged` says its
+    traceback, which names it, is already in the function's logs.
     """
     if isinstance(exc, FunctionError) and exc.__cause__ is not None:
+        if logged and not isinstance(exc.__cause__, BaseExceptionGroup):
+            return str(exc) or type(exc.__cause__).__name__
         exc = exc.__cause__
     if isinstance(exc, BaseExceptionGroup):
         return "; ".join(function_error_message(e) for e in exc.exceptions)
     if isinstance(exc, ModuleError | QueryError):
         return str(exc) or type(exc).__name__
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
+FUNCTION_ERROR_PATH_ENV: Final = "DAGGER_FUNCTION_ERROR_PATH"
+"""The file the engine gives a call's process to write the function's error to.
+
+An engine that sets it fails the call with the error written there; one that
+doesn't reads the FUNCTION_ERROR_MARKER line instead.
+"""
+
+
+class ErrorOriginFilter(logging.Filter):
+    """Leave the error origins out of what a call's process logs.
+
+    An API error's message ends with the origin the engine finds it by, such
+    as `[traceparent:...]`: plumbing for the engine, which reads it from the
+    error the process reports, and noise in the function's logs, a traceback
+    included.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = _ERROR_ORIGIN.sub("", record.exc_text)
+        message = record.getMessage()
+        if _ERROR_ORIGIN.search(message):
+            record.msg, record.args = _ERROR_ORIGIN.sub("", message), None
+        return True
+
+
+def _limit(message: str) -> str:
+    if len(message) > _REPORTED_ERROR_LIMIT:
+        origins = "".join(_ERROR_ORIGIN.findall(message[_REPORTED_ERROR_LIMIT:]))
+        message = message[:_REPORTED_ERROR_LIMIT] + "..." + origins
+    return message
+
+
+def write_function_error(path: str, exc: BaseException) -> None:
+    """Give the engine a failed call's error in the file it names.
+
+    The engine fails the call with this error as the function's own, as with
+    `record_exception`: `{"message": ..., "values": {...}}`, the message in
+    full and the values `function_error_values` gives. An API error's
+    message names the call that failed, so that call stays the error's
+    origin; any other error comes from the function call.
+    """
+    reported = exc
+    if isinstance(exc, FunctionError) and exc.__cause__ is not None:
+        reported = exc.__cause__
+    report = {
+        # The traceback, which names the exception's type, is already in
+        # the function's logs.
+        "message": function_error_message(exc, logged=True),
+        "values": {
+            key: _json_value(value)
+            for key, value in function_error_values(reported).items()
+        },
+    }
+    encoded = json.dumps(report, ensure_ascii=False)
+    pathlib.Path(path).write_text(encoded, encoding="utf-8")
+
+
+def function_error_values(exc: BaseException) -> dict[str, Any]:
+    """The values of the error a failed call reports for `exc`.
+
+    The same as `record_exception` gives its `dagger.Error`: the exception's
+    type, message and stack trace, a ModuleError's `extra` values, and an API
+    error's extensions, such as an ExecError's exit code and output, whole.
+    The API error may be one the exception wraps, as one that adds to its
+    message does.
+    """
+    attrs: dict[str, Any] = _exception_attributes(exc)
+    if isinstance(exc, ModuleError) and exc.extra:
+        extra = {f"extra.{key}": val for key, val in exc.extra.items()}
+        attrs = {**extra, **attrs}
+    if (api_error := _wrapped_query_error(exc)) is not None:
+        attrs.update(api_error.error.extensions)
+    return attrs
+
+
+def _wrapped_query_error(exc: BaseException) -> QueryError | None:
+    """The API error exc is or wraps, if any."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        if isinstance(cur, QueryError):
+            return cur
+        seen.add(id(cur))
+        cur = cur.__cause__ or (None if cur.__suppress_context__ else cur.__context__)
+    return None
+
+
+def _json_value(value: Any) -> Any:
+    """The value if it is JSON, else its repr, as `_safe_json_dumps` does."""
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return repr(value)
+    return value
 
 
 def report_function_error(message: str) -> None:
@@ -163,12 +267,10 @@ def report_function_error(message: str) -> None:
     error to, so its exec fails, and the generated entrypoint raises the
     message from this line instead of the exec's exit code. An API error's
     message names the call that failed, so that call becomes the error's
-    origin, not the process.
+    origin, not the process. An engine that gives the process a file for the
+    error (FUNCTION_ERROR_PATH_ENV) gets it there instead.
     """
-    if len(message) > _REPORTED_ERROR_LIMIT:
-        origins = "".join(_ERROR_ORIGIN.findall(message[_REPORTED_ERROR_LIMIT:]))
-        message = message[:_REPORTED_ERROR_LIMIT] + "..." + origins
-    encoded = json.dumps(message, ensure_ascii=False)
+    encoded = json.dumps(_limit(message), ensure_ascii=False)
     sys.stderr.write(f"\n{FUNCTION_ERROR_MARKER}{encoded}\n")
     sys.stderr.flush()
 
@@ -210,7 +312,7 @@ async def record_exception(exc: Exception):
         span.record_exception(exc)
 
 
-def _exception_attributes(exc: Exception) -> dict[str, str]:
+def _exception_attributes(exc: BaseException) -> dict[str, str]:
     message = str(exc)
     stacktrace = "".join(traceback.format_exception(exc))
     module = type(exc).__module__

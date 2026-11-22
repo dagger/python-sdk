@@ -1,4 +1,5 @@
 import json
+import logging
 import pathlib
 import subprocess
 import sys
@@ -10,10 +11,13 @@ from dagger._exceptions import QueryErrorValue
 from dagger.mod import Module
 from dagger.mod._exceptions import (
     FUNCTION_ERROR_MARKER,
+    FUNCTION_ERROR_PATH_ENV,
+    ErrorOriginFilter,
     FunctionError,
     InvalidInputError,
     function_error_message,
     report_function_error,
+    write_function_error,
 )
 
 pytestmark = pytest.mark.anyio
@@ -103,7 +107,11 @@ def module_dir(tmp_path: pathlib.Path) -> pathlib.Path:
     return tmp_path
 
 
-def _call(module_dir: pathlib.Path, request: dict) -> subprocess.CompletedProcess:
+def _call(
+    module_dir: pathlib.Path,
+    request: dict,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "dagger.mod", "call", "--output", "out/result.json"],
         cwd=module_dir,
@@ -112,6 +120,7 @@ def _call(module_dir: pathlib.Path, request: dict) -> subprocess.CompletedProces
             "PYTHONPATH": str(module_dir / "src"),
             "DAGGER_DEFAULT_PYTHON_PACKAGE": "hello",
             "DAGGER_MAIN_OBJECT": "Hello",
+            **(env or {}),
         },
         input=json.dumps(request),
         capture_output=True,
@@ -158,6 +167,119 @@ def test_command_failure_reports_error_last(module_dir: pathlib.Path):
     assert json.loads(last.removeprefix(FUNCTION_ERROR_MARKER)) == "RuntimeError: boom"
 
 
+def test_command_failure_writes_error_file(module_dir: pathlib.Path):
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "boom",
+        "fnArgs": "{}",
+    }
+    error_file = module_dir / "function-error"
+    proc = _call(module_dir, request, {FUNCTION_ERROR_PATH_ENV: str(error_file)})
+    assert proc.returncode == 2
+    report = json.loads(error_file.read_text())
+    # The traceback names the type, so the error the engine shows needn't.
+    assert report["message"] == "boom"
+    assert report["values"]["exception.type"] == "RuntimeError"
+    assert report["values"]["exception.message"] == "boom"
+    assert "raise RuntimeError('boom')" in report["values"]["exception.stacktrace"]
+    assert "RuntimeError: boom" in proc.stderr
+    assert FUNCTION_ERROR_MARKER not in proc.stderr
+    # The engine shows the error; the process doesn't echo it.
+    echoes = [
+        line
+        for line in proc.stderr.splitlines()
+        if line.strip() == "boom" or line.endswith("]: boom")
+    ]
+    assert not echoes, proc.stderr
+
+
+def test_command_success_writes_no_error_file(module_dir: pathlib.Path):
+    request = {
+        "receiverType": "Hello",
+        "receiverValue": "{}",
+        "fnName": "hi",
+        "fnArgs": '{"who": "you"}',
+    }
+    error_file = module_dir / "function-error"
+    proc = _call(module_dir, request, {FUNCTION_ERROR_PATH_ENV: str(error_file)})
+    assert proc.returncode == 0, proc.stderr
+    assert not error_file.exists()
+
+
+def test_error_origin_filter_strips_origins_from_logs():
+    try:
+        raise _query_error("exit code: 1" + ORIGIN)
+    except QueryError as e:
+        record = logging.LogRecord(
+            "dagger.mod", logging.ERROR, __file__, 1, "failed: %s", (e,), sys.exc_info()
+        )
+    assert ErrorOriginFilter().filter(record)
+    formatted = logging.Formatter().format(record)
+    assert "traceparent" not in formatted, formatted
+    assert "failed: exit code: 1" in formatted
+    assert formatted.rstrip().endswith("exit code: 1")
+
+
+def _exec_error(message: str) -> QueryError:
+    return QueryError(
+        [
+            QueryErrorValue(
+                message,
+                extensions={
+                    "_type": "EXEC_ERROR",
+                    "cmd": ["sh", "-c", "exit 7"],
+                    "exitCode": 7,
+                    "stdout": "out",
+                    "stderr": "err",
+                },
+            )
+        ],
+        "query",
+    )
+
+
+def _report(tmp_path: pathlib.Path, exc: BaseException) -> dict:
+    error_file = tmp_path / "function-error"
+    write_function_error(str(error_file), exc)
+    return json.loads(error_file.read_text())
+
+
+def test_write_function_error_keeps_an_api_error_whole(tmp_path: pathlib.Path):
+    message = "\x01" * 100_000 + "exit code: 7" + ORIGIN
+    report = _report(tmp_path, _exec_error(message))
+    assert report["message"] == message, "nothing is trimmed, the origin kept"
+    values = report["values"]
+    assert values["_type"] == "EXEC_ERROR"
+    assert values["exitCode"] == 7
+    assert values["cmd"] == ["sh", "-c", "exit 7"]
+    assert (values["stdout"], values["stderr"]) == ("out", "err")
+    assert values["exception.type"] == "dagger.ExecError"
+
+
+def test_write_function_error_of_a_wrapped_api_error(tmp_path: pathlib.Path):
+    try:
+        try:
+            raise _exec_error("exit code: 7" + ORIGIN)
+        except QueryError as e:
+            msg = f"it ran a failing command: {e}"
+            raise RuntimeError(msg) from e
+    except RuntimeError as e:
+        report = _report(tmp_path, _wrapped(e))
+    assert report["message"] == "it ran a failing command: exit code: 7" + ORIGIN
+    assert report["values"]["exitCode"] == 7
+    assert report["values"]["exception.type"] == "RuntimeError"
+
+
+def test_write_function_error_of_a_module_error(tmp_path: pathlib.Path):
+    exc = InvalidInputError("bad input", extra={"field": "who", "bad": object()})
+    report = _report(tmp_path, exc)
+    assert report["message"] == "bad input"
+    assert report["values"]["extra.field"] == "who"
+    assert report["values"]["extra.bad"].startswith("<object object")
+    assert report["values"]["exception.type"] == "InvalidInputError"
+
+
 ORIGIN = " [traceparent:" + "a" * 32 + "-" + "b" * 16 + "]"
 
 
@@ -188,6 +310,11 @@ def _wrapped(cause: BaseException) -> FunctionError:
 
 def test_function_error_message_names_the_function_error():
     assert function_error_message(_wrapped(ValueError("boom"))) == "ValueError: boom"
+
+
+def test_function_error_message_of_a_logged_error():
+    assert function_error_message(_wrapped(ValueError("boom")), logged=True) == "boom"
+    assert function_error_message(_wrapped(ValueError()), logged=True) == "ValueError"
 
 
 def test_function_error_message_reports_a_group_error_by_error():
