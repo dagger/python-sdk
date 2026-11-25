@@ -3,7 +3,7 @@
 > [!NOTE]
 >
 > By default, this version of `dagger.io/sdk/python` targets Dagger engine
-> `v1.0.0-beta.27`. See
+> `v1.0.0-beta.30`. See
 > [The engine release a module targets](#the-engine-release-a-module-targets).
 
 A Dagger module for managing Dagger modules that use the Python SDK.
@@ -108,7 +108,7 @@ resolves to the runtime built into the engine (`dagger/dagger`'s
 
 ## The engine release a module targets
 
-Each release of this SDK targets one engine release, `v1.0.0-beta.27` today.
+Each release of this SDK targets one engine release, `v1.0.0-beta.30` today.
 That release, or the one the setting below pins, is what the SDK generates
 for and announces:
 
@@ -237,7 +237,7 @@ dang = "2.1"
 
 [imports]
   [imports.Dagger]
-    dagger = "v1.0.0-beta.27"
+    dagger = "v1.0.0-beta.30"
 ```
 
 Generation loads an existing `sdk/entrypoint/dang.toml` through sdk-helpers,
@@ -404,7 +404,7 @@ are persisted on the scope:
 ```sh
 dagger module init python --name my-module --template empty
 dagger module init python --name my-module --legacy-runtime
-dagger module init python --name my-module --target-version v1.0.0-beta.27
+dagger module init python --name my-module --target-version v1.0.0-beta.30
 dagger module init python --name my-module \
     --python-version 3.13 \
     --use-uv=false \
