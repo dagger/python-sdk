@@ -1406,7 +1406,7 @@ type E2e {
       "class RuntimeApp:\n" +
       "    @function\n" +
       "    async def greeting(self) -> str:\n" +
-      "        d = dag.directory().with_new_file(\"a\", \"served through the global client\")\n" +
+      "        d = dag.directory().with_new_file(\"a\", \"served through the global client \\U0001f517\")\n" +
       "        assert isinstance(d, dagger.Directory), type(d)\n" +
       "        return await d.file(\"a\").contents() + \" by \" + type(d).__module__\n")
     let upgraded = pythonSdk
@@ -1414,7 +1414,7 @@ type E2e {
       .withWorkdir(".")
       .withNewFile("/" + runtimeModulePath + "/dagger-module.toml", runtimeOnlyManifest("runtime-app"))
     let called = cli(playground(upgraded), ["-m", runtimeModulePath, "call", "greeting"]).stdout
-    assertContains(called, "served through the global client by dagger_clients.core", "the upgraded module did not run through the global client: " + called)
+    assertContains(called, "served through the global client 🔗 by dagger_clients.core", "the upgraded module did not run through the global client: " + called)
 
     null
   }
