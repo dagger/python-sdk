@@ -2481,7 +2481,7 @@ type E2e {
     let compact = queried.replace(" ", "").replace("\n", "")
     assert(compact == kindsAnswer, "the collections answered " + compact + ", not " + kindsAnswer)
 
-    let generated = cli(ready, ["-m", path, "generate", "-y", "items/write?kinds-items-item=a&kinds-items-item=b"])
+    let generated = cli(ready, ["-m", path, "generate", "-y", "items/write?kinds-item=a&kinds-item=b"])
     let selected = generated.withExec(["sh", "-c", "cat " + playgroundRoot + "/selected-*"]).stdout
     assert(selected == "ab", "the item generators wrote " + selected + ", not the selected items a and b")
     null
