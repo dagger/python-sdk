@@ -2190,11 +2190,8 @@ type E2e {
     dagger call -m .dagger/modules/e2e sdk-bindings export --path sdk/src/dagger/client/gen.py
   """
   pub sdkBindings(ws: Workspace!): File! {
-    let core = ws.directory("/helpers/core-schema").asModuleSource
     sdkContainer(ws)
-      .withFile("/core-only.py", ws.file("/helpers/core-schema/core_only.py"))
-      .withFile("/schema.json", core.withEngineVersion(core.engineVersion).clientSchemaIntrospectionJson)
-      .withExec(["python", "/core-only.py", "/schema.json", "/core.json"])
+      .withFile("/core.json", coreSchema(ws))
       .withExec(["uv", "run", "--frozen", "python", "-m", "codegen", "generate", "-i", "/core.json", "-o", sdkBindingsPath])
       .withExec(["uv", "run", "--frozen", "ruff", "check", "--fix-only", sdkBindingsPath])
       .withExec(["uv", "run", "--frozen", "ruff", "format", sdkBindingsPath])
@@ -2202,6 +2199,47 @@ type E2e {
   }
 
   let sdkBindingsPath: String! = "src/dagger/client/gen.py"
+
+  let coreSchema(ws: Workspace!): File! {
+    let core = ws.directory("/helpers/core-schema").asModuleSource
+    sdkContainer(ws)
+      .withFile("/core-only.py", ws.file("/helpers/core-schema/core_only.py"))
+      .withFile("/schema.json", core.withEngineVersion(core.engineVersion).clientSchemaIntrospectionJson)
+      .withExec(["python", "/core-only.py", "/schema.json", "/core.json"])
+      .file("/core.json")
+  }
+
+  """
+  The distributions a release publishes, built from the core of the engine
+  running this: dagger-io without generated code, and the core client pinned
+  to it. Both install and import.
+  """
+  pub librariesDistCheck(ws: Workspace!): Void @check {
+    let version = "1.0.0-beta.1"
+    let normalized = "1.0.0b1"
+    let io = "dagger_io-" + normalized + "-py3-none-any.whl"
+    let core = "dagger_clients_core-" + normalized + "-py3-none-any.whl"
+    let dist = pythonSdk.libraries.dist(version, coreSchema(ws))
+    let names = dist.entries.join(" ")
+    assert(names == core + " dagger_clients_core-" + normalized + ".tar.gz " + io + " dagger_io-" + normalized + ".tar.gz", "dist/ does not hold the two wheels and two sdists: " + names)
+    assertContains(wheelFile(dist, core, "dagger_clients_core-" + normalized + ".dist-info/METADATA"), "Requires-Dist: dagger-io==" + normalized + "\n", "the core client does not pin dagger-io")
+    let digest = wheelFile(dist, core, "dagger_clients/core/__init__.py").match("(?m)^CORE_DIGEST = \"([^\"]+)\"")
+    assert(digest != null, "the core client carries no CORE_DIGEST")
+    assertContains(wheelFile(dist, io, "dagger/_engine/_version.py"), "CLI_VERSION = \"" + version + "\"\n", "dagger-io does not announce its release")
+    let ioFiles = sdkBase("3.14")
+      .withMountedDirectory("/dist", dist)
+      .withExec(["python", "-c", "import sys, zipfile; print(*zipfile.ZipFile(sys.argv[1]).namelist(), sep='\\n')", "/dist/" + io])
+      .stdout
+    assertContainsNone(ioFiles, [globalPackage, legacyBindingsPath.trimPrefix("sdk/src/")])
+    pythonSdk.libraries.check(dist)
+  }
+
+  let wheelFile(dist: Directory!, wheel: String!, member: String!): String! {
+    sdkBase("3.14")
+      .withMountedDirectory("/dist", dist)
+      .withExec(["python", "-c", "import sys, zipfile; sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read(sys.argv[2]).decode())", "/dist/" + wheel, member])
+      .stdout
+  }
 
   """
   config.get should reflect pyproject.toml and report unset values as null
