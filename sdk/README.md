@@ -37,7 +37,7 @@ A compatible version of the  [Dagger CLI](https://docs.dagger.io/cli) is automat
 From [PyPI](https://pypi.org/project/dagger-io/), using `pip`:
 
 ```shell
-pip install dagger-io
+pip install dagger-clients-core
 ```
 
 You can also install via [Conda](https://anaconda.org/conda-forge/dagger-io), from the [conda-forge](https://conda-forge.org/docs/user/introduction.html#how-can-i-install-packages-from-conda-forge) channel:
