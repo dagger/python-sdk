@@ -38,6 +38,13 @@ type PythonSdk {
   pub targetVersion: String! = ""
 
   """
+  The distributions a Dagger release publishes.
+  """
+  pub libraries: Libraries! {
+    Libraries()
+  }
+
+  """
   Find the Python client root containing the workspace cwd: the directory of
   the nearest pyproject.toml, relative to the workspace root. A generated
   member, marked `[tool.dagger] generated` in its pyproject.toml, belongs to

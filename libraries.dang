@@ -1,0 +1,50 @@
+"""
+The two distributions a Dagger release publishes: dagger-io, the SDK library,
+and dagger-clients-core, the core client generated for that release.
+"""
+type Libraries {
+  """
+  dist/ with a wheel and an sdist of each distribution at version, a Dagger
+  release without its "v". The core client is generated from schema, the
+  release's core-only introspection JSON.
+  """
+  pub dist(version: String!, schema: File!): Directory! {
+    let core = directory
+      .withNewFile(scope.scopeFileName, scope.memberPyproject(scope.coreDistribution, scope.coreDirName, [scope.sdkDistribution + "==" + version], "core"))
+      .withDirectory("src", scope.coreFrom(schema))
+    let built = [scope.sdkLibrary("v" + version), core].reduce(scope.codegenBase) { ctr, project =>
+      ctr
+        .withDirectory("/project", project)
+        .withWorkdir("/project")
+        .withExec(["uv", "version", "--frozen", version])
+        .withExec(["uv", "build", "--out-dir", "/dist"])
+        .withoutDirectory("/project")
+    }
+    built.directory("/dist").filter(include: ["*.whl", "*.tar.gz"])
+  }
+
+  """
+  Install both wheels of dist into a clean Python venv and import their
+  packages.
+  """
+  pub check(dist: Directory!): Void {
+    let wheels = dist.glob("*.whl").map { wheel => "/dist/" + wheel }
+    container
+      .from("python:3.13")
+      .withMountedFile("/usr/local/bin/uv", container.from(scope.buildUvImage).rootfs.file("uv"))
+      .withMountedDirectory("/dist", dist)
+      .withExec(["uv", "venv", "--python", "/usr/local/bin/python3", "/venv"])
+      .withEnvVariable("VIRTUAL_ENV", "/venv")
+      .withExec(["uv", "pip", "install"] + wheels)
+      .withExec(["/venv/bin/python", "-c", "import dagger; from dagger_clients.core import core"])
+      .sync
+    null
+  }
+
+  """
+  A scope in an empty workspace, whose helpers read nothing from it.
+  """
+  let scope: Scope! {
+    Scope(path: ".", ws: directory.asWorkspace, clients: [], isModule: false, engineVersion: "", migrating: false, targetVersion: "")
+  }
+}
