@@ -44,6 +44,7 @@ Obj_T = TypeVar("Obj_T", bound=Type)
 INDENT = "  "
 
 _ENUM_NAME_RE = re.compile(r"[_A-Za-z][_0-9A-Za-z]*")
+_LONE_SURROGATE_RE = re.compile("[\ud800-\udfff]")
 
 
 class EnumName(str):
@@ -117,8 +118,11 @@ def _scalar_literal(value: Any) -> str:
     if isinstance(value, (enum.Enum, EnumName)):
         return _enum_literal(value)
     if isinstance(value, str):
-        # GraphQL string escapes are a subset of JSON's.
-        return json.dumps(value)
+        # Raw Unicode: escaped astral characters reach the engine as surrogate
+        # halves, which its parser decodes one by one into U+FFFD. Lone surrogates
+        # stay escaped: they have no UTF-8 encoding.
+        literal = json.dumps(value, ensure_ascii=False)
+        return _LONE_SURROGATE_RE.sub(lambda m: f"\\u{ord(m.group()):04x}", literal)
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float) and math.isfinite(value):
