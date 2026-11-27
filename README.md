@@ -480,6 +480,15 @@ when the workspace is opened from Git.
 Standalone clients, in a scope without a module, are not generated yet; adding
 one to a Python scope is refused and the workspace is left unchanged.
 
+## Released libraries
+
+dagger/dagger publishes two distributions at each of its releases, at the
+release's version, built by this module's `libraries.dist`: `dagger-io`, the
+SDK library without the generated API, and `dagger-clients-core`, the core
+client, which pins that `dagger-io`. A script outside a module installs the
+core client with `pip install dagger-clients-core`, imports it with
+`from dagger_clients.core import core`, and calls `core().container()`.
+
 ## Test
 
 ```sh
